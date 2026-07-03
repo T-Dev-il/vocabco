@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocab Collector</title>
+<!-- your real app's stylesheet (copy app.css into this folder) -->
+<link rel="stylesheet" href="app.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  /* only styles the sign-in gate; everything after sign-in is your app.css */
+  #auth{position:fixed;inset:0;display:grid;place-items:center;background:#FBFAF6;font-family:Inter,system-ui,sans-serif;z-index:9999}
+  #auth .card{width:340px;background:#fff;border:1px solid #e8e4da;border-radius:12px;padding:28px 26px;box-shadow:0 6px 28px rgba(40,44,36,.08)}
+  #auth h1{font-size:20px;margin:0 0 18px}
+  #auth label{display:block;font-size:12px;color:#585e53;margin:0 0 4px}
+  #auth input{width:100%;padding:9px 11px;border:1px solid #dcd7ca;border-radius:7px;font-size:14px;margin-bottom:11px;box-sizing:border-box}
+  #auth button.go{width:100%;padding:10px;border:1px solid #4f7a37;background:#6f9b54;color:#fff;border-radius:7px;font-size:14px;cursor:pointer}
+  #auth button.go:hover{background:#4f7a37}
+  #auth .link{background:none;border:none;color:#585e53;text-decoration:underline;font-size:12.5px;cursor:pointer;margin-top:12px;display:block}
+  #auth .msg{font-size:12.5px;margin-top:11px;padding:8px 10px;border-radius:6px}
+  #auth .msg.err{background:#fbeae6;color:#a23e2a}
+  #signout{position:fixed;right:12px;bottom:12px;z-index:9998;font-family:Inter,system-ui,sans-serif;font-size:12px;background:#fff;border:1px solid #dcd7ca;border-radius:18px;padding:6px 12px;cursor:pointer;opacity:.7}
+  #signout:hover{opacity:1}
+  #boot{position:fixed;inset:0;display:grid;place-items:center;color:#8d9285;font-family:Inter,system-ui,sans-serif;font-size:13px}
+</style>
+</head>
+<body>
+<div id="auth">
+  <div class="card">
+    <h1>Vocab Collector</h1>
+    <label>Email</label><input id="email" type="email" autocomplete="username">
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <button class="go" id="go">Sign in</button>
+    <button class="link" id="toggle">New here? Create an account</button>
+    <div id="msg" class="msg" style="display:none"></div>
+  </div>
+</div>
+<div id="root"></div>
+
+<script src="store-supabase.js"></script>
+<script>
+const SUPABASE_URL  = "https://vinebdanjgggbcfxrvqd.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpbmViZGFuamdnZ2JjZnhydnFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NjAxNDcsImV4cCI6MjA5ODEzNjE0N30.Pca73qGNWBu3euKFnQiIXzOIbGCj_18_yzbP-Fh8d3Q";
+const DEEP_HASH = location.hash;  // stash before Supabase can strip it
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
+const $ = id => document.getElementById(id);
+let signup = false, started = false;
+
+$('toggle').onclick = () => {
+  signup = !signup;
+  $('go').textContent = signup ? 'Create account' : 'Sign in';
+  $('toggle').textContent = signup ? 'Have an account? Sign in' : 'New here? Create an account';
+};
+function err(m){ const e=$('msg'); e.className='msg err'; e.textContent=m; e.style.display='block'; }
+$('go').onclick = async () => {
+  const email=$('email').value.trim(), password=$('pw').value;
+  if(!email||!password){ err('Enter an email and password.'); return; }
+  $('go').disabled=true; $('go').textContent='…';
+  try{
+    if(signup){
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if(error) throw error;
+      if(!data.session){ err('Account created — if email confirmation is on, confirm then sign in.'); $('go').disabled=false; $('go').textContent='Create account'; return; }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if(error) throw error;
+    }
+  }catch(e){ err(e.message||'Sign-in failed'); $('go').disabled=false; $('go').textContent=signup?'Create account':'Sign in'; }
+};
+$('pw').addEventListener('keydown', e=>{ if(e.key==='Enter') $('go').click(); });
+
+function loadScript(src){
+  return new Promise((res, rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('failed to load '+src)); document.body.appendChild(s); });
+}
+function flash(msg){
+  const d=document.createElement('div');
+  d.textContent=msg;
+  d.style.cssText='position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#23241f;color:#fff;font:13px Inter,system-ui,sans-serif;padding:10px 14px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.3);z-index:99999;max-width:90%;text-align:center';
+  document.body.appendChild(d); setTimeout(()=>d.remove(), 9000);
+}
+// Open the reader for #text=<id> by driving app.js directly once its state is ready.
+async function openDeepLink(){
+  const m = (DEEP_HASH||'').match(/text=([^&]+)/);
+  if(!m) return;
+  const id = decodeURIComponent(m[1]);
+  for(let i=0;i<250;i++){                       // wait until the library actually loads
+    try{
+      if(typeof S!=='undefined' && S && S.texts && Object.keys(S.texts).length){
+        if(S.texts[id] && typeof ui!=='undefined' && typeof render==='function'){
+          ui.view='reader'; ui.readerTextId=id; ui.readerEditing=false; render();
+        } else {
+          flash('Link points to a text not in your library ('+Object.keys(S.texts).length+' loaded).');
+        }
+        return;
+      }
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,200));
+  }
+  flash('Library didn’t finish loading in time — the load is very slow.');
+}
+// Mirror the open text into the address bar so links can be copied / shared / reopened.
+function syncUrlToReader(){
+  let last = null;
+  setInterval(()=>{
+    try{
+      const want = (typeof ui!=='undefined' && ui && ui.view==='reader' && ui.readerTextId)
+        ? '#text=' + encodeURIComponent(ui.readerTextId) : '';
+      if(want !== last){ last = want; history.replaceState(null, '', location.pathname + want); }
+    }catch(e){}
+  }, 500);
+}
+async function start(user){
+  if(started) return; started = true;
+  const auth = $('auth'); if(auth) auth.remove();
+  const boot = document.createElement('div'); boot.id='boot'; boot.textContent='Loading your library…'; document.body.appendChild(boot);
+  try{
+    await VocabStore.init(sb, user.id);
+    await loadScript('icons.js').catch(()=>{});   // optional; only if your app.js uses it
+    await loadScript('app.js');     // boots itself, renders into #root
+  }catch(e){
+    boot.textContent = 'Failed to start: ' + (e.message||e);
+    return;
+  }
+  boot.remove();
+  openDeepLink();
+  syncUrlToReader();
+  const out = document.createElement('button'); out.id='signout'; out.textContent='Sign out';
+  out.onclick = async ()=>{ await sb.auth.signOut(); location.reload(); };
+  document.body.appendChild(out);
+}
+
+sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
+(async()=>{ const { data:{ session } } = await sb.auth.getSession(); if(session) start(session.user); })();
+</script>
+</body>
+</html>
