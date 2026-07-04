@@ -254,7 +254,7 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .mode-voice { display: inline-flex; align-items: center; gap: 6px; }
 .mode-hint { margin-left: auto; font-size: 11px; color: var(--text3, #9b9e96); }
 /* Theme hover-expand: show only the active swatch; fan out on hover */
-.theme-fan { display: inline-flex; align-items: center; gap: 4px; }
+.theme-fan { display: inline-flex; align-items: center; gap: 0; }
 .theme-fan .rc-btn { transition: max-width .2s ease, opacity .16s ease, padding .2s ease, margin .2s ease, border-width .2s ease; overflow: hidden; white-space: nowrap; max-width: 90px; }
 .theme-fan:not(:hover) .rc-btn:not(.on) { max-width: 0; opacity: 0; padding-left: 0; padding-right: 0; margin: 0; border-width: 0; pointer-events: none; }
 .theme-fan:hover .rc-btn { opacity: 1; }
