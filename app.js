@@ -363,7 +363,7 @@ function confirmRemoveSelectedSidebar(ids) {
 // ════════════════════════════════════════════════════════════════════
 function renderFull() {
   const isTab = (v) => ui.view === v;
-  const hideChrome = ui.view === 'reader' && (ui.readerFull || ui.readerBarCollapsed);
+  const hideChrome = ui.view === 'reader' && ui.readerFull;
   $root.innerHTML = `
     <div class="app">
       ${hideChrome ? '' : `<div class="hdr">
@@ -2106,10 +2106,6 @@ function renderReader(body) {
         <button class="rc-btn ${st.theme==='dark'?'on':''}" data-th="dark">Dark</button>
       </div>
       <div class="rc-sep"></div>
-      <span class="rc-lbl">Voice</span>
-      <select class="lang-sel" id="r-voice" style="max-width:140px">${voiceOptionsHtml()}</select>
-      <label class="rc-check" title="Highlight words while reading"><input type="checkbox" id="r-hlchk" ${st.readHighlight!==false?'checked':''}> follow</label>
-      <div class="rc-sep"></div>
       <span class="rc-lbl">Mark</span>
       <div class="hl-toolbar-ctl" id="hl-ctl" title="Highlight selection (D) — scroll to change color">
         <div class="hl-apply-group">
@@ -2120,29 +2116,25 @@ function renderReader(body) {
           ${HL_COLORS.map(c => `<button class="hl-line hl-ln-${c} ${(ui.hlHidden&&ui.hlHidden[c])?'off':''}" data-vis="${c}" title="Show/hide ${c}"></button>`).join('')}
         </div>
       </div>
-      <div class="rc-sep"></div>
-      <button class="ib-label" id="r-speak">${icon(speaking&&!paused?'pause':'play')} ${speaking&&!paused?'Pause':'Read aloud'}</button>
       <div style="flex:1"></div>
       <input id="r-name" value="${esc(text.name)}" class="r-name-input" placeholder="Untitled">
       ${ui.readerEditing ? `<button class="btn green r-saveread" id="r-saveread">${icon('play')} Save &amp; Read</button>` : `<button class="bar-btn" id="r-edit">${icon('edit')} Edit</button>`}
       <div class="bar-sep"></div>
       <button class="bar-btn" id="r-prompts" title="Prompt templates (press 1–9 on a selection)">${icon('listPlus')} Prompts</button>
       <div class="bar-sep"></div>
-      ${text.videoId ? `<button class="bar-btn ${ui.readerVideoFollow!==false?'on':''}" id="r-vfollow" title="Follow along with the video">${icon('play')} Follow</button><div class="bar-sep"></div>` : ''}
       <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
       <div class="bar-sep"></div>
-      <button class="ib-label" id="r-barcollapse" title="Collapse top (hide header + toolbar)">${icon('chevU')} Collapse</button>
       <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
     </div>`;
 
   body.innerHTML = `
     ${full ? '' : renderLeftNav()}
-    <div class="reader-wrap theme-${st.theme} ${full?'is-full':''} ${ui.readerBarCollapsed?'bar-collapsed':''}" id="reader-wrap">
+    <div class="reader-wrap theme-${st.theme} ${full?'is-full':''}" id="reader-wrap">
       ${full
         ? `<button class="reader-restore-tab" id="r-exitfull" title="Show controls (Esc)">${icon('chevD')}</button>
            ${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}`
         : toolbar}
-      ${!full ? `<button class="bar-restore" id="r-barrestore" title="Show toolbar">${icon('chevD')}</button>` : ''}
+      ${!full ? `<div id="mode-panel"></div>` : ''}
       <div class="reader-scroll">
         <div class="reader-page" style="font-size:${fontPx}px; max-width:${widthPct}%">
           ${ui.readerEditing
@@ -2169,12 +2161,6 @@ function renderReader(body) {
     ws.oninput = () => { const pg=document.querySelector('.reader-page'); if(pg) pg.style.maxWidth = ws.value+'%'; };
     ws.onchange = () => { S.settings.reader.width = parseInt(ws.value,10); VocabStore.set({settings:S.settings}); };
     $root.querySelectorAll('[data-th]').forEach(b=>b.onclick=()=>{ S.settings.reader.theme=b.dataset.th; VocabStore.set({settings:S.settings}); applyReaderTheme(); });
-    const bc = document.getElementById('r-barcollapse');
-    if (bc) bc.onclick = () => { ui.readerBarCollapsed = true; render(); };
-    const br = document.getElementById('r-barrestore');
-    if (br) br.onclick = () => { ui.readerBarCollapsed = false; render(); };
-    document.getElementById('r-voice').onchange = (e) => { st.voiceURI = e.target.value; VocabStore.set({settings:S.settings}); };
-    document.getElementById('r-hlchk').onchange = (e) => { st.readHighlight = e.target.checked; VocabStore.set({settings:S.settings}); };
     // highlight apply button: apply current color to current selection
     const hlApply = document.getElementById('hl-apply');
     if (hlApply) hlApply.onclick = () => {
@@ -2202,16 +2188,9 @@ function renderReader(body) {
       ui.hlHidden[c] = !ui.hlHidden[c];
       render();
     });
-    document.getElementById('r-speak').onclick = toggleSpeak;
     document.getElementById('r-collapse').onclick = () => { ui.readerFull=true; render(); };
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
-    const vf = document.getElementById('r-vfollow');
-    if (vf) vf.onclick = () => {
-      ui.readerVideoFollow = ui.readerVideoFollow === false ? true : false;
-      vf.classList.toggle('on', ui.readerVideoFollow !== false);
-      if (ui.readerVideoFollow === false && typeof clearFollow === 'function') clearFollow();
-    };
     const editBtn = document.getElementById('r-edit');
     if (editBtn) editBtn.onclick = () => { stopSpeak(); ui.readerEditing=true; render(); };
     const saveReadBtn = document.getElementById('r-saveread');
@@ -2230,6 +2209,7 @@ function renderReader(body) {
     wireReaderContent(text);
     if (text.videoId) showVideoLayer(text); else destroyVideoLayer();
   }
+  if (!ui.readerFull) renderModePanel();
   trackEngagement();
 }
 
@@ -2251,6 +2231,76 @@ function applyReaderTheme() {
   const wrap = document.getElementById('reader-wrap');
   if (wrap) { wrap.classList.remove('theme-white','theme-paper','theme-sepia','theme-slate','theme-dark'); wrap.classList.add('theme-' + st.theme); }
   document.querySelectorAll('[data-th]').forEach(b => b.classList.toggle('on', b.dataset.th === st.theme));
+}
+
+// ── reader modes: YouTube vs Read-aloud ──────────────────────────────
+// Follow/Play are shared controls whose STATE is per-mode. Tabs show only for
+// video texts; video texts default to YouTube mode.
+function readerModeFor(text) {
+  if (!text || !text.videoId) return 'readaloud';
+  return ui.readerMode === 'readaloud' ? 'readaloud' : 'youtube';
+}
+function ytIsPlaying() { try { return !!(ytPlayer && ytPlayer.getPlayerState && ytPlayer.getPlayerState() === 1); } catch { return false; } }
+function setReaderMode(mode) {
+  ui.readerMode = mode;
+  if (mode === 'readaloud') { try { if (ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch {} }
+  else { stopSpeak(); }
+  renderModePanel();
+}
+function modeTogglePlay() {
+  const text = S.texts[ui.readerTextId];
+  if (readerModeFor(text) === 'youtube') {
+    if (!ytPlayer || !ytPlayer.getPlayerState) return;
+    if (ytIsPlaying()) { try { ytPlayer.pauseVideo(); } catch {} } else { try { ytPlayer.playVideo(); } catch {} }
+    setTimeout(renderModePanel, 150);
+  } else {
+    toggleSpeak();
+    setTimeout(renderModePanel, 60);
+  }
+}
+function modePlayFrom(charIdx) {
+  const text = S.texts[ui.readerTextId];
+  if (readerModeFor(text) === 'youtube') {
+    const seg = segmentAtChar(text, charIdx);
+    if (seg && ytPlayer && ytPlayer.seekTo) { ytPlayer.seekTo(seg.start, true); ytPlayer.playVideo(); setTimeout(renderModePanel, 150); }
+  } else {
+    startSpeakFrom(charIdx);
+  }
+}
+function modeFollowOn(mode) {
+  const st = S.settings.reader;
+  return mode === 'youtube' ? (ui.readerVideoFollow !== false) : (st.readHighlight !== false);
+}
+function renderModePanel() {
+  const host = document.getElementById('mode-panel');
+  if (!host) return;
+  const text = S.texts[ui.readerTextId];
+  const hasVid = !!(text && text.videoId);
+  const mode = readerModeFor(text);
+  const followOn = modeFollowOn(mode);
+  const playing = mode === 'youtube' ? ytIsPlaying() : (speaking && !paused);
+  const playLabel = mode === 'youtube' ? (playing ? 'Pause' : 'Play video') : (playing ? 'Pause' : 'Read aloud');
+  host.className = 'mode-panel ' + (hasVid ? mode : 'readaloud') + (hasVid ? '' : ' no-tabs');
+  host.innerHTML = `
+    ${hasVid ? `<div class="mode-tabs">
+      <button class="mode-tab yt ${mode==='youtube'?'on':''}" data-mode="youtube">${icon('play')} YouTube</button>
+      <button class="mode-tab ra ${mode==='readaloud'?'on':''}" data-mode="readaloud">${icon('play')} Read aloud</button>
+    </div>` : ''}
+    <div class="mode-body">
+      <button class="mode-play" id="mode-play">${icon(playing?'pause':'play')} ${playLabel}</button>
+      <button class="mode-follow ${followOn?'on':''}" id="mode-follow" title="Text follows along">${icon('play')} Follow ${followOn?'on':'off'}</button>
+      ${mode==='readaloud' ? `<span class="mode-voice"><span class="rc-lbl">Voice</span><select class="lang-sel" id="mode-voice" style="max-width:160px">${voiceOptionsHtml()}</select></span>` : ''}
+      <span class="mode-hint">${mode==='youtube' ? 'Right-click a line → Play from here · Space plays/pauses' : 'Right-click a line → Read from here · Space plays/pauses'}</span>
+    </div>`;
+  host.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setReaderMode(b.dataset.mode));
+  const mp = document.getElementById('mode-play'); if (mp) mp.onclick = modeTogglePlay;
+  const mf = document.getElementById('mode-follow');
+  if (mf) mf.onclick = () => {
+    if (mode === 'youtube') { ui.readerVideoFollow = (ui.readerVideoFollow === false); if (ui.readerVideoFollow === false && typeof clearFollow==='function') clearFollow(); }
+    else { S.settings.reader.readHighlight = (S.settings.reader.readHighlight === false); VocabStore.set({settings:S.settings}); }
+    renderModePanel();
+  };
+  const mv = document.getElementById('mode-voice'); if (mv) mv.onchange = (e) => { S.settings.reader.voiceURI = e.target.value; VocabStore.set({settings:S.settings}); };
 }
 
 function saveReaderBody() {
@@ -2895,11 +2945,13 @@ function openWordMenu(e, charIdx) {
   closeCtxMenu();
   ctxMenu = document.createElement('div');
   ctxMenu.className = 'ctx-menu';
-  ctxMenu.innerHTML = `<button class="ctx-item" data-k="readhere">${icon('play')} Read from here</button>`;
+  const _m = readerModeFor(S.texts[ui.readerTextId]);
+  const _lbl = _m === 'youtube' ? 'Play from here' : 'Read from here';
+  ctxMenu.innerHTML = `<button class="ctx-item" data-k="readhere">${icon('play')} ${_lbl}</button>`;
   document.body.appendChild(ctxMenu);
   ctxMenu.style.left = Math.min(e.clientX, window.innerWidth-180) + 'px';
   ctxMenu.style.top = Math.min(e.clientY, window.innerHeight-60) + 'px';
-  ctxMenu.querySelector('[data-k=readhere]').onclick = () => { closeCtxMenu(); startSpeakFrom(charIdx); };
+  ctxMenu.querySelector('[data-k=readhere]').onclick = () => { closeCtxMenu(); modePlayFrom(charIdx); };
 }
 document.addEventListener('mousedown', e => {
   if (ttEl && !ttEl.contains(e.target)) hideTT();
@@ -3116,12 +3168,12 @@ function loadVoices() {
 }
 loadVoices();
 if (typeof speechSynthesis !== 'undefined') {
-  speechSynthesis.onvoiceschanged = () => { loadVoices(); const sel=document.getElementById('r-voice'); if(sel){ sel.innerHTML=voiceOptionsHtml(); } };
+  speechSynthesis.onvoiceschanged = () => { loadVoices(); const sel=document.getElementById('r-voice')||document.getElementById('mode-voice'); if(sel){ sel.innerHTML=voiceOptionsHtml(); } };
   // Chrome sometimes needs a few polls before voices populate
   let tries = 0;
   const poll = setInterval(() => {
     loadVoices(); tries++;
-    if (voicesCache.length) { const sel=document.getElementById('r-voice'); if(sel) sel.innerHTML=voiceOptionsHtml(); }
+    if (voicesCache.length) { const sel=document.getElementById('r-voice')||document.getElementById('mode-voice'); if(sel) sel.innerHTML=voiceOptionsHtml(); }
     if (voicesCache.length || tries > 20) clearInterval(poll);
   }, 250);
 }
@@ -3216,6 +3268,7 @@ function updateSpeakButton() {
   if (btn) btn.innerHTML = `${icon(speaking&&!paused?'pause':'play')} ${speaking&&!paused?'Pause':'Read aloud'}`;
   const pf = document.getElementById('r-playfloat');
   if (pf) pf.innerHTML = `${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}`;
+  if (typeof renderModePanel === 'function') renderModePanel();
 }
 
 // Chrome occasionally drops onend; keep our state in sync with the engine.
@@ -3262,8 +3315,8 @@ document.addEventListener('keydown', (e) => {
   // helper: act on the current text selection within the reader render
   const selText = () => { const s = window.getSelection(); return (s && !s.isCollapsed) ? s.toString().trim() : ''; };
 
-  if (e.key === ' ') { // space: play/pause
-    e.preventDefault(); toggleSpeak();
+  if (e.key === ' ') { // space: play/pause (active mode)
+    e.preventDefault(); modeTogglePlay();
   } else if (e.key.toLowerCase() === 'f') { // f: full screen toggle
     e.preventDefault(); ui.readerFull = !ui.readerFull; render();
   } else if (e.key === 'Escape') {
