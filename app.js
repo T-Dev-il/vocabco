@@ -2098,7 +2098,7 @@ function renderReader(body) {
       <datalist id="width-snaps"><option value="40"></option><option value="60"></option><option value="80"></option><option value="100"></option></datalist>
       <div class="rc-sep"></div>
       <span class="rc-lbl">Theme</span>
-      <div class="rc-grp">
+      <div class="rc-grp theme-fan">
         <button class="rc-btn ${st.theme==='white'?'on':''}" data-th="white">White</button>
         <button class="rc-btn ${st.theme==='paper'?'on':''}" data-th="paper">Paper</button>
         <button class="rc-btn ${st.theme==='sepia'?'on':''}" data-th="sepia">Sepia</button>

@@ -253,6 +253,11 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .mode-follow.on { background: var(--g-check, #cdeeb0); color: var(--g-text, #4a7a35); border-color: var(--g-line, #a8cf8e); }
 .mode-voice { display: inline-flex; align-items: center; gap: 6px; }
 .mode-hint { margin-left: auto; font-size: 11px; color: var(--text3, #9b9e96); }
+/* Theme hover-expand: show only the active swatch; fan out on hover */
+.theme-fan { display: inline-flex; align-items: center; gap: 4px; }
+.theme-fan .rc-btn { transition: max-width .2s ease, opacity .16s ease, padding .2s ease, margin .2s ease, border-width .2s ease; overflow: hidden; white-space: nowrap; max-width: 90px; }
+.theme-fan:not(:hover) .rc-btn:not(.on) { max-width: 0; opacity: 0; padding-left: 0; padding-right: 0; margin: 0; border-width: 0; pointer-events: none; }
+.theme-fan:hover .rc-btn { opacity: 1; }
 
 /* reader collapse / fullscreen */
 .reader-collapse-tab { position: absolute; left: 50%; transform: translateX(-50%); top: 0; width: 46px; height: 17px; border-radius: 0 0 9px 9px; background: var(--white); border: 0.5px solid var(--border2); border-top: none; display: flex; align-items: center; justify-content: center; color: var(--text3); z-index: 8; opacity: .5; }
