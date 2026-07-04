@@ -2086,45 +2086,50 @@ function renderReader(body) {
   // toolbar (hidden in full screen, but a restore tab remains)
   const toolbar = `
     <div class="rc" id="rc">
-      <span class="rc-lbl">Size</span>
-      <div class="rc-grp">
-        <button class="rc-btn" id="sz-down">A−</button>
-        <button class="rc-btn sz-lbl on">${SIZE_LABELS[st.size]||'M'}</button>
-        <button class="rc-btn" id="sz-up">A+</button>
-      </div>
-      <div class="rc-sep"></div>
-      <span class="rc-lbl">Width</span>
-      <input type="range" class="width-slider" id="r-width" min="40" max="100" step="10" value="${widthPct}" list="width-snaps">
-      <datalist id="width-snaps"><option value="40"></option><option value="60"></option><option value="80"></option><option value="100"></option></datalist>
-      <div class="rc-sep"></div>
-      <span class="rc-lbl">Theme</span>
-      <div class="rc-grp theme-fan">
-        <button class="rc-btn ${st.theme==='white'?'on':''}" data-th="white">White</button>
-        <button class="rc-btn ${st.theme==='paper'?'on':''}" data-th="paper">Paper</button>
-        <button class="rc-btn ${st.theme==='sepia'?'on':''}" data-th="sepia">Sepia</button>
-        <button class="rc-btn ${st.theme==='slate'?'on':''}" data-th="slate">Slate</button>
-        <button class="rc-btn ${st.theme==='dark'?'on':''}" data-th="dark">Dark</button>
-      </div>
-      <div class="rc-sep"></div>
-      <span class="rc-lbl">Mark</span>
-      <div class="hl-toolbar-ctl" id="hl-ctl" title="Highlight selection (D) — scroll to change color">
-        <div class="hl-apply-group">
-          <button class="hl-apply" id="hl-apply" title="Highlight selection (D)"><span class="hl-pen hl-pen-${st.lastColor||'yellow'}" id="hl-cur">${icon('highlight')}</span></button>
-          <button class="hl-arrow" id="hl-arrow" title="Choose color">${icon('chevD')}</button>
+      <div class="rc-left">
+        <span class="rc-lbl">Size</span>
+        <div class="rc-grp">
+          <button class="rc-btn" id="sz-down">A−</button>
+          <button class="rc-btn sz-lbl on">${SIZE_LABELS[st.size]||'M'}</button>
+          <button class="rc-btn" id="sz-up">A+</button>
         </div>
-        <div class="hl-vis">
-          ${HL_COLORS.map(c => `<button class="hl-line hl-ln-${c} ${(ui.hlHidden&&ui.hlHidden[c])?'off':''}" data-vis="${c}" title="Show/hide ${c}"></button>`).join('')}
+        <div class="rc-sep"></div>
+        <span class="rc-lbl">Width</span>
+        <input type="range" class="width-slider" id="r-width" min="40" max="100" step="10" value="${widthPct}" list="width-snaps">
+        <datalist id="width-snaps"><option value="40"></option><option value="60"></option><option value="80"></option><option value="100"></option></datalist>
+        <div class="rc-sep"></div>
+        <span class="rc-lbl">Theme</span>
+        <div class="rc-grp theme-fan">
+          <button class="rc-btn ${st.theme==='white'?'on':''}" data-th="white">White</button>
+          <button class="rc-btn ${st.theme==='paper'?'on':''}" data-th="paper">Paper</button>
+          <button class="rc-btn ${st.theme==='sepia'?'on':''}" data-th="sepia">Sepia</button>
+          <button class="rc-btn ${st.theme==='slate'?'on':''}" data-th="slate">Slate</button>
+          <button class="rc-btn ${st.theme==='dark'?'on':''}" data-th="dark">Dark</button>
         </div>
+        <div class="rc-sep"></div>
+        <span class="rc-lbl">Mark</span>
+        <div class="hl-toolbar-ctl" id="hl-ctl" title="Highlight selection (D) — scroll to change color">
+          <div class="hl-apply-group">
+            <button class="hl-apply" id="hl-apply" title="Highlight selection (D)"><span class="hl-pen hl-pen-${st.lastColor||'yellow'}" id="hl-cur">${icon('highlight')}</span></button>
+            <button class="hl-arrow" id="hl-arrow" title="Choose color">${icon('chevD')}</button>
+          </div>
+          <div class="hl-vis">
+            ${HL_COLORS.map(c => `<button class="hl-line hl-ln-${c} ${(ui.hlHidden&&ui.hlHidden[c])?'off':''}" data-vis="${c}" title="Show/hide ${c}"></button>`).join('')}
+          </div>
+        </div>
+        <div class="rc-sep"></div>
+        <div id="mode-panel"></div>
       </div>
-      <div style="flex:1"></div>
-      <input id="r-name" value="${esc(text.name)}" class="r-name-input" placeholder="Untitled">
-      ${ui.readerEditing ? `<button class="btn green r-saveread" id="r-saveread">${icon('play')} Save &amp; Read</button>` : `<button class="bar-btn" id="r-edit">${icon('edit')} Edit</button>`}
-      <div class="bar-sep"></div>
-      <button class="bar-btn" id="r-prompts" title="Prompt templates (press 1–9 on a selection)">${icon('listPlus')} Prompts</button>
-      <div class="bar-sep"></div>
-      <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
-      <div class="bar-sep"></div>
-      <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
+      <div class="rc-right">
+        <input id="r-name" value="${esc(text.name)}" class="r-name-input" placeholder="Untitled">
+        ${ui.readerEditing ? `<button class="btn green r-saveread" id="r-saveread">${icon('play')} Save &amp; Read</button>` : `<button class="bar-btn" id="r-edit">${icon('edit')} Edit</button>`}
+        <div class="bar-sep"></div>
+        <button class="bar-btn" id="r-prompts" title="Prompt templates (press 1–9 on a selection)">${icon('listPlus')} Prompts</button>
+        <div class="bar-sep"></div>
+        <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
+        <div class="bar-sep"></div>
+        <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
+      </div>
     </div>`;
 
   body.innerHTML = `
@@ -2134,7 +2139,6 @@ function renderReader(body) {
         ? `<button class="reader-restore-tab" id="r-exitfull" title="Show controls (Esc)">${icon('chevD')}</button>
            ${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}`
         : toolbar}
-      ${!full ? `<div id="mode-panel"></div>` : ''}
       <div class="reader-scroll">
         <div class="reader-page" style="font-size:${fontPx}px; max-width:${widthPct}%">
           ${ui.readerEditing
@@ -2289,8 +2293,7 @@ function renderModePanel() {
     <div class="mode-body">
       <button class="mode-play" id="mode-play">${icon(playing?'pause':'play')} ${playLabel}</button>
       <button class="mode-follow ${followOn?'on':''}" id="mode-follow" title="Text follows along">${icon('play')} Follow ${followOn?'on':'off'}</button>
-      ${mode==='readaloud' ? `<span class="mode-voice"><span class="rc-lbl">Voice</span><select class="lang-sel" id="mode-voice" style="max-width:160px">${voiceOptionsHtml()}</select></span>` : ''}
-      <span class="mode-hint">${mode==='youtube' ? 'Right-click a line → Play from here · Space plays/pauses' : 'Right-click a line → Read from here · Space plays/pauses'}</span>
+      ${mode==='readaloud' ? `<span class="mode-voice"><span class="rc-lbl">Voice</span><select class="lang-sel" id="mode-voice" style="max-width:150px">${voiceOptionsHtml()}</select></span>` : ''}
     </div>`;
   host.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setReaderMode(b.dataset.mode));
   const mp = document.getElementById('mode-play'); if (mp) mp.onclick = modeTogglePlay;
