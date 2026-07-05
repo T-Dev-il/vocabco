@@ -2600,7 +2600,11 @@ function bindYtDocListeners() {
       positionVideoDock();
     }
   });
-  document.addEventListener('mouseup', () => { _ytDrag = null; _ytRez = null; });
+  document.addEventListener('mouseup', () => {
+    const p = (_ytDrag && _ytDrag.panel) || (_ytRez && _ytRez.panel);
+    if (p) { p.classList.remove('yt-drag-active'); p.classList.remove('yt-resize-active'); }
+    _ytDrag = null; _ytRez = null;
+  });
 }
 function applyYtState(panel) { positionVideoDock(); }
 function setupVideoChrome(panel) {
@@ -2625,11 +2629,13 @@ function setupVideoChrome(panel) {
     const r = panel.getBoundingClientRect();
     if (st.mode !== 'floating') { st.mode = 'floating'; st.fw = r.width; positionVideoDock(); }
     _ytDrag = { panel, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
+    panel.classList.add('yt-drag-active');
     e.preventDefault();
   });
   const rez = document.getElementById('yt-resize');
   if (rez) rez.addEventListener('mousedown', (e) => {
     _ytRez = { panel, sy: e.clientY, sw: panel.getBoundingClientRect().width };
+    panel.classList.add('yt-resize-active');
     e.preventDefault(); e.stopPropagation();
   });
 }
