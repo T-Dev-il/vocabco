@@ -2131,16 +2131,17 @@ function renderReader(body) {
         <div class="bar-sep"></div>
         <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
       </div>
-      <button class="bar-collapse-chev" id="bar-collapse" title="Collapse toolbar">${icon('chevU')}</button>
+      ${text.videoId
+        ? `<button class="bar-collapse-chev flank-l" data-collapse title="Collapse toolbar">${icon('chevU')}</button><button class="bar-collapse-chev flank-r" data-collapse title="Collapse toolbar">${icon('chevU')}</button>`
+        : `<button class="bar-collapse-chev center" data-collapse title="Collapse toolbar">${icon('chevU')}</button>`}
     </div>`;
 
   body.innerHTML = `
     ${renderLeftNav()}
     <div class="reader-wrap theme-${st.theme} ${barHidden?'bar-collapsed':''}" id="reader-wrap">
-      ${barHidden
-        ? `<button class="bar-restore-tr" id="bar-restore" title="Show toolbar (Esc)">${icon('chevD')}</button>
-           ${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}`
-        : toolbar}
+      ${barHidden ? `<div class="rc-hotzone" id="rc-hotzone"></div><button class="bar-peek-chev" id="bar-peek" title="Settings — hover to peek, click to restore">${icon('chevD')}</button>` : ''}
+      ${toolbar}
+      ${barHidden ? `<button class="bar-restore-tr" id="bar-restore" title="Show toolbar (Esc)">${icon('chevD')}</button>${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}` : ''}
       <div class="reader-scroll">
         <div class="reader-page" style="font-size:${fontPx}px; max-width:${widthPct}%">
           ${ui.readerEditing
@@ -2152,11 +2153,12 @@ function renderReader(body) {
     ${ui.navCollapsed ? `<button class="lnav-reopen" id="reopen">${icon('chevR')}</button>` : ''}`;
 
   wireLeftNav();
-  { const bcol = document.getElementById('bar-collapse'); if (bcol) bcol.onclick = () => { ui.readerBarCollapsed = true; render(); }; }
+  document.querySelectorAll('[data-collapse]').forEach(b => b.onclick = () => { ui.readerBarCollapsed = true; render(); });
   { const brst = document.getElementById('bar-restore'); if (brst) brst.onclick = () => { ui.readerBarCollapsed = false; render(); }; }
+  { const bpk = document.getElementById('bar-peek'); if (bpk) bpk.onclick = () => { ui.readerBarCollapsed = false; render(); }; }
   { const pflt = document.getElementById('r-playfloat'); if (pflt) pflt.onclick = toggleSpeak; }
 
-  if (!barHidden) {
+  {
     document.getElementById('sz-down').onclick = () => { const r=S.settings.reader; r.size=Math.max(0,r.size-1); VocabStore.set({settings:S.settings}); applyReaderSize(); };
     document.getElementById('sz-up').onclick = () => { const r=S.settings.reader; r.size=Math.min(SIZES.length-1,r.size+1); VocabStore.set({settings:S.settings}); applyReaderSize(); };
     const ws = document.getElementById('r-width');
@@ -2211,7 +2213,7 @@ function renderReader(body) {
     wireReaderContent(text);
     if (text.videoId) showVideoLayer(text); else destroyVideoLayer();
   }
-  if (!ui.readerBarCollapsed) renderModePanel();
+  renderModePanel();
   trackEngagement();
 }
 

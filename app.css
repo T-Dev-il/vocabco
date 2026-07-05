@@ -253,14 +253,37 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .reader-wrap { position: relative; }
 .rc { position: relative; }
 .bar-collapse-chev {
-  position: absolute; bottom: -11px; right: 26px; z-index: 25;
+  position: absolute; bottom: -11px; z-index: 25;
   display: inline-flex; align-items: center; justify-content: center;
   width: 40px; height: 17px; border: 0.5px solid var(--border, #ececec); border-top: none;
   border-radius: 0 0 9px 9px;
-  background: var(--white, #fff); color: var(--text3, #9b9e96); opacity: .5; cursor: pointer; transition: opacity .15s;
+  background: var(--white, #fff); color: var(--text2, #62655f); opacity: .62; cursor: pointer; transition: opacity .15s;
 }
 .bar-collapse-chev:hover { opacity: 1; }
 .bar-collapse-chev svg { width: 13px; height: 13px; }
+.bar-collapse-chev.flank-l { left: 30%; }
+.bar-collapse-chev.flank-r { right: 30%; }
+.bar-collapse-chev.center { left: 50%; transform: translateX(-50%); }
+/* collapsed: toolbar slides up; hover the hot-zone / peek chevron to peek the LEFT section */
+.reader-wrap.bar-collapsed .rc {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 30;
+  transform: translateY(-102%); transition: transform .22s ease;
+  box-shadow: 0 8px 20px rgba(30,40,20,.12);
+}
+.reader-wrap.bar-collapsed .rc-hotzone:hover ~ .rc,
+.reader-wrap.bar-collapsed .bar-peek-chev:hover ~ .rc,
+.reader-wrap.bar-collapsed .rc:hover { transform: translateY(0); }
+.reader-wrap.bar-collapsed .rc .rc-right { visibility: hidden; }
+.reader-wrap.bar-collapsed .bar-collapse-chev { display: none; }
+.rc-hotzone { position: absolute; top: 0; left: 0; width: 46%; height: 78px; z-index: 20; }
+.bar-peek-chev {
+  position: absolute; top: 7px; left: 22px; z-index: 22;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 20px; border: none; border-radius: 8px;
+  background: transparent; color: var(--text3, #9b9e96); opacity: .4; cursor: pointer; transition: opacity .15s;
+}
+.bar-peek-chev:hover { opacity: .9; }
+.bar-peek-chev svg { width: 14px; height: 14px; }
 .bar-restore-tr {
   position: absolute; top: 10px; right: 16px; z-index: 40;
   display: inline-flex; align-items: center; justify-content: center;
