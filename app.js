@@ -2131,6 +2131,7 @@ function renderReader(body) {
         <div class="bar-sep"></div>
         <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
       </div>
+      <button class="bar-collapse-chev" id="bar-collapse" title="Collapse toolbar">${icon('chevU')}</button>
     </div>`;
 
   body.innerHTML = `
@@ -2141,7 +2142,6 @@ function renderReader(body) {
            ${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}`
         : toolbar}
       <div class="reader-scroll">
-        ${!barHidden ? `<button class="bar-collapse-chev" id="bar-collapse" title="Collapse toolbar">${icon('chevU')}</button>` : ''}
         <div class="reader-page" style="font-size:${fontPx}px; max-width:${widthPct}%">
           ${ui.readerEditing
             ? `<textarea class="reader-textarea" id="r-textarea" placeholder="Paste or type text here to read…">${esc(text.body)}</textarea>`

@@ -251,13 +251,15 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .rc-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
 /* top-bar collapse / restore (B1) */
 .reader-wrap { position: relative; }
+.rc { position: relative; }
 .bar-collapse-chev {
-  position: absolute; top: 3px; right: 26px; z-index: 15;
+  position: absolute; bottom: -11px; right: 26px; z-index: 25;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 15px; border: none; border-radius: 0 0 8px 8px;
-  background: transparent; color: var(--text3, #9b9e96); opacity: .4; cursor: pointer; transition: opacity .15s;
+  width: 40px; height: 17px; border: 0.5px solid var(--border, #ececec); border-top: none;
+  border-radius: 0 0 9px 9px;
+  background: var(--white, #fff); color: var(--text3, #9b9e96); opacity: .5; cursor: pointer; transition: opacity .15s;
 }
-.bar-collapse-chev:hover { opacity: .9; }
+.bar-collapse-chev:hover { opacity: 1; }
 .bar-collapse-chev svg { width: 13px; height: 13px; }
 .bar-restore-tr {
   position: absolute; top: 10px; right: 16px; z-index: 40;
