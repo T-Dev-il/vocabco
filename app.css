@@ -249,6 +249,25 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 /* toolbar two-section layout */
 .rc-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
 .rc-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
+/* top-bar collapse / restore (B1) */
+.reader-wrap { position: relative; }
+.bar-collapse-chev {
+  position: absolute; top: 3px; right: 26px; z-index: 15;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 15px; border: none; border-radius: 0 0 8px 8px;
+  background: transparent; color: var(--text3, #9b9e96); opacity: .4; cursor: pointer; transition: opacity .15s;
+}
+.bar-collapse-chev:hover { opacity: .9; }
+.bar-collapse-chev svg { width: 13px; height: 13px; }
+.bar-restore-tr {
+  position: absolute; top: 10px; right: 16px; z-index: 40;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 24px; border: 1px solid var(--border, #ececec); border-radius: 8px;
+  background: var(--white, #fff); color: var(--text2, #62655f); cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,.10);
+}
+.bar-restore-tr:hover { background: var(--bg2, #f7f8f6); }
+.bar-restore-tr svg { width: 14px; height: 14px; }
 /* Theme hover-expand: show only the active swatch; fan out on hover */
 .theme-fan { display: inline-flex; align-items: center; gap: 0; }
 .theme-fan .rc-btn { transition: max-width .2s ease, opacity .16s ease, padding .2s ease, margin .2s ease, border-width .2s ease; overflow: hidden; white-space: nowrap; max-width: 90px; }

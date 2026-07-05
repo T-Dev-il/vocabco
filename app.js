@@ -25,6 +25,7 @@ let ui = {
   readerTextId: null,
   readerEditing: true,
   readerFull: false,
+  readerBarCollapsed: false,
   readerSel: new Set(),
   hlHidden: {},        // { yellow:true } = that color hidden in reader text
   itemMode: 'terms',   // 'terms' | 'highlights' — toggle in session/all views
@@ -363,7 +364,7 @@ function confirmRemoveSelectedSidebar(ids) {
 // ════════════════════════════════════════════════════════════════════
 function renderFull() {
   const isTab = (v) => ui.view === v;
-  const hideChrome = ui.view === 'reader' && ui.readerFull;
+  const hideChrome = ui.view === 'reader' && ui.readerBarCollapsed;
   $root.innerHTML = `
     <div class="app">
       ${hideChrome ? '' : `<div class="hdr">
@@ -2081,7 +2082,7 @@ function renderReader(body) {
   const st = S.settings.reader;
   const fontPx = SIZES[st.size] || 18;
   const widthPct = st.width || 60;   // % of available pane width (40–100)
-  const full = ui.readerFull;
+  const barHidden = ui.readerBarCollapsed;
 
   // toolbar (hidden in full screen, but a restore tab remains)
   const toolbar = `
@@ -2133,32 +2134,29 @@ function renderReader(body) {
     </div>`;
 
   body.innerHTML = `
-    ${full ? '' : renderLeftNav()}
-    <div class="reader-wrap theme-${st.theme} ${full?'is-full':''}" id="reader-wrap">
-      ${full
-        ? `<button class="reader-restore-tab" id="r-exitfull" title="Show controls (Esc)">${icon('chevD')}</button>
+    ${renderLeftNav()}
+    <div class="reader-wrap theme-${st.theme} ${barHidden?'bar-collapsed':''}" id="reader-wrap">
+      ${barHidden
+        ? `<button class="bar-restore-tr" id="bar-restore" title="Show toolbar (Esc)">${icon('chevD')}</button>
            ${speaking ? `<button class="play-float" id="r-playfloat">${icon(paused?'play':'pause')} ${paused?'Resume':'Pause'}</button>` : ''}`
         : toolbar}
       <div class="reader-scroll">
+        ${!barHidden ? `<button class="bar-collapse-chev" id="bar-collapse" title="Collapse toolbar">${icon('chevU')}</button>` : ''}
         <div class="reader-page" style="font-size:${fontPx}px; max-width:${widthPct}%">
           ${ui.readerEditing
             ? `<textarea class="reader-textarea" id="r-textarea" placeholder="Paste or type text here to read…">${esc(text.body)}</textarea>`
             : `<div class="reader-render" id="r-render">${readerRenderHtml(text)}</div>`}
         </div>
       </div>
-      ${full && ui.navCollapsed!==false ? `<button class="lnav-reopen reader-open-nav" id="reader-reopen" title="Show lists">${icon('chevR')}</button>` : ''}
     </div>
-    ${(!full && ui.navCollapsed) ? `<button class="lnav-reopen" id="reopen">${icon('chevR')}</button>` : ''}`;
+    ${ui.navCollapsed ? `<button class="lnav-reopen" id="reopen">${icon('chevR')}</button>` : ''}`;
 
-  if (!full) wireLeftNav();
+  wireLeftNav();
+  { const bcol = document.getElementById('bar-collapse'); if (bcol) bcol.onclick = () => { ui.readerBarCollapsed = true; render(); }; }
+  { const brst = document.getElementById('bar-restore'); if (brst) brst.onclick = () => { ui.readerBarCollapsed = false; render(); }; }
+  { const pflt = document.getElementById('r-playfloat'); if (pflt) pflt.onclick = toggleSpeak; }
 
-  // full-screen specific wiring
-  if (full) {
-    const ef = document.getElementById('r-exitfull'); if (ef) ef.onclick = () => { ui.readerFull=false; render(); };
-    const pf = document.getElementById('r-playfloat'); if (pf) pf.onclick = toggleSpeak;
-    // a small reopen tab in full screen pulls the left nav back (exits full so lists are draggable)
-    const ro = document.getElementById('reader-reopen'); if (ro) ro.onclick = () => { ui.readerFull=false; ui.navCollapsed=false; render(); };
-  } else {
+  if (!barHidden) {
     document.getElementById('sz-down').onclick = () => { const r=S.settings.reader; r.size=Math.max(0,r.size-1); VocabStore.set({settings:S.settings}); applyReaderSize(); };
     document.getElementById('sz-up').onclick = () => { const r=S.settings.reader; r.size=Math.min(SIZES.length-1,r.size+1); VocabStore.set({settings:S.settings}); applyReaderSize(); };
     const ws = document.getElementById('r-width');
@@ -2192,7 +2190,7 @@ function renderReader(body) {
       ui.hlHidden[c] = !ui.hlHidden[c];
       render();
     });
-    document.getElementById('r-collapse').onclick = () => { ui.readerFull=true; render(); };
+    document.getElementById('r-collapse').onclick = () => { ui.readerBarCollapsed=true; ui.navCollapsed=true; render(); };
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
     const editBtn = document.getElementById('r-edit');
@@ -2204,7 +2202,7 @@ function renderReader(body) {
     nameInp.onkeydown = (e) => { if (e.key==='Enter') nameInp.blur(); };
   }
 
-  if (ui.readerEditing && !full) {
+  if (ui.readerEditing && !barHidden) {
     const ta = document.getElementById('r-textarea');
     ta.oninput = () => { text.body = ta.value; };
     ta.onblur = saveReaderBody;
@@ -2213,7 +2211,7 @@ function renderReader(body) {
     wireReaderContent(text);
     if (text.videoId) showVideoLayer(text); else destroyVideoLayer();
   }
-  if (!ui.readerFull) renderModePanel();
+  if (!ui.readerBarCollapsed) renderModePanel();
   trackEngagement();
 }
 
@@ -3320,10 +3318,10 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === ' ') { // space: play/pause (active mode)
     e.preventDefault(); modeTogglePlay();
-  } else if (e.key.toLowerCase() === 'f') { // f: full screen toggle
-    e.preventDefault(); ui.readerFull = !ui.readerFull; render();
+  } else if (e.key.toLowerCase() === 'f') { // f: full screen toggle (both bars)
+    e.preventDefault(); const c = !(ui.readerBarCollapsed && ui.navCollapsed); ui.readerBarCollapsed = c; ui.navCollapsed = c; render();
   } else if (e.key === 'Escape') {
-    if (ui.readerFull) { ui.readerFull=false; render(); }
+    if (ui.readerBarCollapsed || ui.navCollapsed) { ui.readerBarCollapsed=false; ui.navCollapsed=false; render(); }
   } else if (e.key.toLowerCase() === 't') { // t: translate selection
     const term = selText();
     if (term) { e.preventDefault(); const rect = window.getSelection().getRangeAt(0).getBoundingClientRect(); showInlineTranslation(term, rect); }
