@@ -2272,8 +2272,10 @@ function modePlayFrom(charIdx) {
   }
 }
 function modeFollowOn(mode) {
-  const st = S.settings.reader;
-  return mode === 'youtube' ? (ui.readerVideoFollow !== false) : (st.readHighlight !== false);
+  return mode === 'youtube' ? (ui.readerVideoFollow !== false) : (S.settings.reader.readFollow !== false);
+}
+function modeHighlightOn(mode) {
+  return mode === 'youtube' ? (ui.readerVideoHighlight !== false) : (S.settings.reader.readHighlight !== false);
 }
 function renderModePanel() {
   const host = document.getElementById('mode-panel');
@@ -2282,6 +2284,7 @@ function renderModePanel() {
   const hasVid = !!(text && text.videoId);
   const mode = readerModeFor(text);
   const followOn = modeFollowOn(mode);
+  const hlOn = modeHighlightOn(mode);
   const playing = mode === 'youtube' ? ytIsPlaying() : (speaking && !paused);
   const playLabel = mode === 'youtube' ? (playing ? 'Pause' : 'Play video') : (playing ? 'Pause' : 'Read aloud');
   host.className = 'mode-panel ' + (hasVid ? mode : 'readaloud') + (hasVid ? '' : ' no-tabs');
@@ -2292,15 +2295,24 @@ function renderModePanel() {
     </div>` : ''}
     <div class="mode-body">
       <button class="mode-play" id="mode-play">${icon(playing?'pause':'play')} ${playLabel}</button>
-      <button class="mode-follow ${followOn?'on':''}" id="mode-follow" title="Text follows along">${icon('play')} Follow ${followOn?'on':'off'}</button>
+      <button class="mode-follow ${followOn?'on':''}" id="mode-follow" title="Text scrolls to follow along">${icon('play')} Follow</button>
+      <button class="mode-follow ${hlOn?'on':''}" id="mode-hl" title="Highlight words while ${mode==='youtube'?'playing':'reading'}">${icon('highlight')} Highlight</button>
       ${mode==='readaloud' ? `<span class="mode-voice"><span class="rc-lbl">Voice</span><select class="lang-sel" id="mode-voice" style="max-width:150px">${voiceOptionsHtml()}</select></span>` : ''}
     </div>`;
   host.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => setReaderMode(b.dataset.mode));
   const mp = document.getElementById('mode-play'); if (mp) mp.onclick = modeTogglePlay;
   const mf = document.getElementById('mode-follow');
   if (mf) mf.onclick = () => {
-    if (mode === 'youtube') { ui.readerVideoFollow = (ui.readerVideoFollow === false); if (ui.readerVideoFollow === false && typeof clearFollow==='function') clearFollow(); }
-    else { S.settings.reader.readHighlight = (S.settings.reader.readHighlight === false); VocabStore.set({settings:S.settings}); }
+    if (mode === 'youtube') ui.readerVideoFollow = (ui.readerVideoFollow === false);
+    else { S.settings.reader.readFollow = (S.settings.reader.readFollow === false); VocabStore.set({settings:S.settings}); }
+    renderModePanel();
+  };
+  const mh = document.getElementById('mode-hl');
+  if (mh) mh.onclick = () => {
+    let nowOff;
+    if (mode === 'youtube') { ui.readerVideoHighlight = (ui.readerVideoHighlight === false); nowOff = ui.readerVideoHighlight === false; }
+    else { S.settings.reader.readHighlight = (S.settings.reader.readHighlight === false); nowOff = S.settings.reader.readHighlight === false; VocabStore.set({settings:S.settings}); }
+    if (nowOff && typeof clearFollow === 'function') clearFollow();
     renderModePanel();
   };
   const mv = document.getElementById('mode-voice'); if (mv) mv.onchange = (e) => { S.settings.reader.voiceURI = e.target.value; VocabStore.set({settings:S.settings}); };
@@ -2565,7 +2577,9 @@ function startYtSync(text) {
   const segs = text.segments || [];
   ytSyncTimer = setInterval(() => {
     if (!ytPlayer || !ytPlayer.getCurrentTime) return;
-    if (!ui.readerVideoFollow) { if (_vfWasOn) { clearFollow(); _vfWasOn = false; } return; }
+    const doHl = ui.readerVideoHighlight !== false;
+    const doFollow = ui.readerVideoFollow !== false;
+    if (!doHl && !doFollow) { if (_vfWasOn) { clearFollow(); _vfWasOn = false; } return; }
     _vfWasOn = true;
     if (!segs.length) return;
     let t; try { t = ytPlayer.getCurrentTime(); } catch { return; }
@@ -2576,7 +2590,7 @@ function startYtSync(text) {
     const span = next ? Math.max(0.001, next.start - s.start) : 2.5;
     const p = Math.max(0, Math.min(1, (t - s.start) / span));
     const absChar = s.offset + Math.floor(p * (s.len || 0));
-    highlightFollow(absChar);
+    highlightFollow(absChar, doHl, doFollow);
   }, 220);
 }
 function stopYtSync() { if (ytSyncTimer) { clearInterval(ytSyncTimer); ytSyncTimer = null; } }
@@ -3260,7 +3274,9 @@ function startSpeakFrom(charIdx) {
   u.onstart = () => { speaking = true; paused = false; updateSpeakButton(); };
   u.onboundary = (ev) => {
     if (ev.charIndex == null) return;
-    if (S.settings.reader.readHighlight !== false) highlightFollow(speakCharOffset + ev.charIndex);
+    const doHl = S.settings.reader.readHighlight !== false;
+    const doFollow = S.settings.reader.readFollow !== false;
+    if (doHl || doFollow) highlightFollow(speakCharOffset + ev.charIndex, doHl, doFollow);
   };
   u.onend = () => { speaking=false; paused=false; clearFollow(); updateSpeakButton(); };
   u.onerror = (e) => { console.warn('TTS error', e && e.error); speaking=false; paused=false; clearFollow(); updateSpeakButton(); };
@@ -3355,7 +3371,7 @@ document.addEventListener('keydown', (e) => {
 
 // ── smooth 3-word follow highlight with fade on each side ──
 let followWords = [];
-function highlightFollow(absChar) {
+function highlightFollow(absChar, doHighlight = true, doScroll = true) {
   const container = document.getElementById('r-render');
   if (!container) return;
   if (!followWords.length || followWords._dirty) {
@@ -3365,17 +3381,19 @@ function highlightFollow(absChar) {
   let idx = 0;
   for (let i=0;i<followWords.length;i++){ if (followWords[i].c <= absChar) idx=i; else break; }
   clearFollow();
-  // center word idx, with falloff ±2
-  const falloff = [ ['far',2], ['near',1], ['center',0], ['near',1], ['far',2] ];
-  for (let d=-2; d<=2; d++) {
-    const w = followWords[idx+d];
-    if (!w) continue;
-    const cls = d===0 ? 'rd-center' : (Math.abs(d)===1 ? 'rd-near' : 'rd-far');
-    w.el.classList.add('rd', cls);
+  if (doHighlight) {
+    // center word idx, with falloff ±2
+    for (let d=-2; d<=2; d++) {
+      const w = followWords[idx+d];
+      if (!w) continue;
+      const cls = d===0 ? 'rd-center' : (Math.abs(d)===1 ? 'rd-near' : 'rd-far');
+      w.el.classList.add('rd', cls);
+    }
   }
-  // scroll into view gently
-  const c = followWords[idx]; if (c && c.el.scrollIntoViewIfNeeded) { /* webkit */ }
-  if (c) { const r = c.el.getBoundingClientRect(); const sc = document.querySelector('.reader-scroll'); if (sc) { const scR = sc.getBoundingClientRect(); if (r.top < scR.top+60 || r.bottom > scR.bottom-60) c.el.scrollIntoView({block:'center', behavior:'smooth'}); } }
+  if (doScroll) {
+    const c = followWords[idx];
+    if (c) { const r = c.el.getBoundingClientRect(); const sc = document.querySelector('.reader-scroll'); if (sc) { const scR = sc.getBoundingClientRect(); if (r.top < scR.top+60 || r.bottom > scR.bottom-60) c.el.scrollIntoView({block:'center', behavior:'smooth'}); } }
+  }
 }
 function clearFollow() {
   document.querySelectorAll('.w.rd').forEach(el => el.classList.remove('rd','rd-center','rd-near','rd-far'));
