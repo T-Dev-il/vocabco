@@ -393,7 +393,7 @@ function renderFull() {
 
   // Reader = its own layout (may hide chrome when full)
   if (ui.view === 'reader') { renderReader(body); return; }
-  removeFsOverlay(); stopSpeak(); closeAllReaderNotes(); destroyVideoLayer();
+  removeFsOverlay(); stopSpeak(); closeAllReaderNotes(); destroyVideoLayer(); removeFollowBtn();
   // discard empty untitled scratch texts left behind by the reader
   let removedEmpty = false;
   for (const t of Object.values(S.texts)) {
@@ -2214,6 +2214,8 @@ function renderReader(body) {
     if (text.videoId) showVideoLayer(text); else destroyVideoLayer();
   }
   renderModePanel();
+  { const sc = document.querySelector('.reader-scroll');
+    if (sc) { const onUserScroll = () => breakFollow(); sc.addEventListener('wheel', onUserScroll, { passive: true }); sc.addEventListener('touchmove', onUserScroll, { passive: true }); } }
   trackEngagement();
 }
 
@@ -2303,8 +2305,10 @@ function renderModePanel() {
   const mp = document.getElementById('mode-play'); if (mp) mp.onclick = modeTogglePlay;
   const mf = document.getElementById('mode-follow');
   if (mf) mf.onclick = () => {
-    if (mode === 'youtube') ui.readerVideoFollow = (ui.readerVideoFollow === false);
-    else { S.settings.reader.readFollow = (S.settings.reader.readFollow === false); VocabStore.set({settings:S.settings}); }
+    let nowOn;
+    if (mode === 'youtube') { ui.readerVideoFollow = (ui.readerVideoFollow === false); nowOn = ui.readerVideoFollow !== false; }
+    else { S.settings.reader.readFollow = (S.settings.reader.readFollow === false); nowOn = S.settings.reader.readFollow !== false; VocabStore.set({settings:S.settings}); }
+    if (nowOn && typeof hideFollowBtn === 'function') hideFollowBtn();
     renderModePanel();
   };
   const mh = document.getElementById('mode-hl');
@@ -2316,6 +2320,65 @@ function renderModePanel() {
     renderModePanel();
   };
   const mv = document.getElementById('mode-voice'); if (mv) mv.onchange = (e) => { S.settings.reader.voiceURI = e.target.value; VocabStore.set({settings:S.settings}); };
+}
+
+// ── follow: break on manual scroll; recenter via a floating corner button ──
+function followGlyph() {
+  return `<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><line x1="2.5" y1="10" x2="12" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M9 6 L13 10 L9 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="15.5" y1="4.5" x2="15.5" y2="15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+}
+function ensureFollowBtn() {
+  let b = document.getElementById('follow-recenter');
+  if (b) return b;
+  b = document.createElement('button');
+  b.id = 'follow-recenter';
+  b.className = 'follow-recenter';
+  b.title = 'Resume follow';
+  b.innerHTML = `<span class="fr-ico">${followGlyph()}</span><span class="fr-label">Follow</span>`;
+  b.onclick = reactivateFollow;
+  document.body.appendChild(b);
+  return b;
+}
+function showFollowBtn() { ensureFollowBtn().classList.add('show'); }
+function hideFollowBtn() {
+  const b = document.getElementById('follow-recenter');
+  if (!b) return;
+  b.classList.add('dissolve');
+  setTimeout(() => { if (b) b.classList.remove('show', 'dissolve'); }, 320);
+}
+function removeFollowBtn() { const b = document.getElementById('follow-recenter'); if (b) b.remove(); }
+function flyToCorner() {
+  const ghost = document.createElement('div');
+  ghost.className = 'follow-fly';
+  ghost.innerHTML = followGlyph();
+  ghost.style.left = (window.innerWidth / 2 - 12) + 'px';
+  ghost.style.top = (window.innerHeight / 2 - 12) + 'px';
+  document.body.appendChild(ghost);
+  requestAnimationFrame(() => {
+    const tx = (window.innerWidth - 46) - (window.innerWidth / 2);
+    const ty = (window.innerHeight - 46) - (window.innerHeight / 2);
+    ghost.style.transform = `translate(${tx}px, ${ty}px) scale(.45)`;
+    ghost.style.opacity = '0';
+  });
+  setTimeout(() => ghost.remove(), 560);
+}
+function breakFollow() {
+  const text = S.texts[ui.readerTextId];
+  if (!text) return;
+  const mode = readerModeFor(text);
+  if (!modeFollowOn(mode)) return; // follow already off
+  if (mode === 'youtube') ui.readerVideoFollow = false;
+  else { S.settings.reader.readFollow = false; VocabStore.set({ settings: S.settings }); }
+  renderModePanel();
+  flyToCorner();
+  showFollowBtn();
+}
+function reactivateFollow() {
+  const text = S.texts[ui.readerTextId];
+  const mode = readerModeFor(text);
+  if (mode === 'youtube') ui.readerVideoFollow = true;
+  else { S.settings.reader.readFollow = true; VocabStore.set({ settings: S.settings }); }
+  renderModePanel();
+  hideFollowBtn();
 }
 
 function saveReaderBody() {

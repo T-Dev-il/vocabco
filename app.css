@@ -246,6 +246,28 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .mode-follow svg { width: 11px; height: 11px; }
 .mode-follow.on { background: var(--g-check, #cdeeb0); color: var(--g-text, #4a7a35); border-color: var(--g-line, #a8cf8e); }
 .mode-voice { display: inline-flex; align-items: center; gap: 5px; }
+/* floating follow-recenter button (appears when scrolling breaks follow) */
+.follow-recenter {
+  position: fixed; right: 22px; bottom: 22px; z-index: 200;
+  display: inline-flex; align-items: center; overflow: hidden;
+  height: 42px; width: 42px; padding: 0; border: none; border-radius: 999px;
+  background: var(--g-text, #4a7a35); color: #fff; cursor: pointer;
+  box-shadow: 0 4px 16px rgba(30,50,20,.30);
+  opacity: 0; transform: translateY(10px) scale(.9); pointer-events: none;
+  transition: opacity .28s ease, transform .28s cubic-bezier(.34,1.4,.5,1), width .2s ease, padding .2s ease;
+}
+.follow-recenter.show { opacity: .82; transform: translateY(0) scale(1); pointer-events: auto; }
+.follow-recenter.show:hover { opacity: 1; width: auto; padding-right: 16px; }
+.follow-recenter .fr-ico { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; flex: none; }
+.follow-recenter .fr-label { font: 600 13px 'Inter', sans-serif; white-space: nowrap; max-width: 0; opacity: 0; transition: max-width .2s ease, opacity .2s ease; }
+.follow-recenter.show:hover .fr-label { max-width: 60px; opacity: 1; }
+.follow-recenter.dissolve { opacity: 0 !important; transform: scale(.55) !important; transition: opacity .3s ease, transform .3s ease; }
+.follow-fly {
+  position: fixed; z-index: 199; width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--g-text, #4a7a35); pointer-events: none; opacity: .95;
+  transition: transform .52s cubic-bezier(.4,0,.2,1), opacity .52s ease;
+}
 /* toolbar two-section layout */
 .rc-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
 .rc-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
