@@ -2127,6 +2127,8 @@ function renderReader(body) {
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-prompts" title="Prompt templates (press 1–9 on a selection)">${icon('listPlus')} Prompts</button>
         <div class="bar-sep"></div>
+        <button class="bar-btn" id="r-keys" title="Keyboard shortcuts">⌨ Keys</button>
+        <div class="bar-sep"></div>
         <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
         <div class="bar-sep"></div>
         <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
@@ -2194,6 +2196,7 @@ function renderReader(body) {
     });
     document.getElementById('r-collapse').onclick = () => { ui.readerBarCollapsed=true; ui.navCollapsed=true; render(); };
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
+    const kbtn = document.getElementById('r-keys'); if (kbtn) kbtn.onclick = openHotkeysModal;
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
     const editBtn = document.getElementById('r-edit');
     if (editBtn) editBtn.onclick = () => { stopSpeak(); ui.readerEditing=true; render(); };
@@ -3372,6 +3375,81 @@ function stopSpeak() {
 }
 
 // ── reader hotkeys (full tab only; safe to use normal key listeners here) ──
+// ── remappable reader hotkeys ──
+const HOTKEY_ACTIONS = [
+  { id:'play',       label:'Play / pause',             def:' ' },
+  { id:'skipPrev',   label:'Previous snippet (video)', def:',' },
+  { id:'skipNext',   label:'Next snippet (video)',     def:'.' },
+  { id:'saveTerm',   label:'Save selection',           def:'s' },
+  { id:'highlight',  label:'Highlight selection',      def:'d' },
+  { id:'translate',  label:'Translate selection',      def:'t' },
+  { id:'sizeUp',     label:'Bigger text',              def:'+' },
+  { id:'sizeDown',   label:'Smaller text',             def:'-' },
+  { id:'fullscreen', label:'Full screen',              def:'f' },
+];
+function hotkey(id) { const o = (S.settings && S.settings.hotkeys) || {}; const a = HOTKEY_ACTIONS.find(x=>x.id===id); return o[id] != null ? o[id] : (a ? a.def : ''); }
+function hotkeyMap() { const m = {}; for (const a of HOTKEY_ACTIONS) { const k = hotkey(a.id); if (k) m[(''+k).toLowerCase()] = a.id; } return m; }
+function keyDisplay(k) { if (k === ' ') return 'Space'; if (!k) return '—'; return (''+k).length === 1 ? (''+k).toUpperCase() : k; }
+
+// jump the video between transcript snippets
+function skipSegment(dir) {
+  const text = S.texts[ui.readerTextId];
+  if (!text || !text.videoId || !ytPlayer || !ytPlayer.getCurrentTime) return;
+  const segs = text.segments || []; if (!segs.length) return;
+  let t; try { t = ytPlayer.getCurrentTime(); } catch { return; }
+  let i = 0;
+  for (let k = 0; k < segs.length; k++) { if (segs[k].start <= t + 0.25) i = k; else break; }
+  let target = dir < 0 ? ((t - segs[i].start > 0.8) ? i : i - 1) : i + 1;
+  target = Math.max(0, Math.min(segs.length - 1, target));
+  try { ytPlayer.seekTo(segs[target].start, true); ytPlayer.playVideo(); } catch {}
+  setTimeout(renderModePanel, 120);
+}
+
+function runHotkey(action, selText) {
+  switch (action) {
+    case 'play': modeTogglePlay(); break;
+    case 'fullscreen': { const c = !(ui.readerBarCollapsed && ui.navCollapsed); ui.readerBarCollapsed = c; ui.navCollapsed = c; render(); } break;
+    case 'skipPrev': skipSegment(-1); break;
+    case 'skipNext': skipSegment(1); break;
+    case 'translate': { const term = selText(); if (term) { const rect = window.getSelection().getRangeAt(0).getBoundingClientRect(); showInlineTranslation(term, rect); } } break;
+    case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved'); hideTT(); } } break;
+    case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow'); hideTT(); } } break;
+    case 'sizeUp': S.settings.reader.size = Math.min(SIZES.length - 1, S.settings.reader.size + 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
+    case 'sizeDown': S.settings.reader.size = Math.max(0, S.settings.reader.size - 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
+  }
+}
+
+function renderHotkeysList() {
+  const list = document.getElementById('hk-list'); if (!list) return;
+  list.innerHTML = HOTKEY_ACTIONS.map(a => `<div class="hk-row"><span class="hk-label">${a.label}</span><button class="hk-key" data-hk="${a.id}">${keyDisplay(hotkey(a.id))}</button></div>`).join('');
+  list.querySelectorAll('[data-hk]').forEach(btn => btn.onclick = () => {
+    list.querySelectorAll('.hk-key').forEach(b => b.classList.remove('listening'));
+    btn.textContent = 'press…'; btn.classList.add('listening');
+    const onKey = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      document.removeEventListener('keydown', onKey, true);
+      if (e.key === 'Escape' || (e.key >= '1' && e.key <= '9')) { renderHotkeysList(); return; } // cancel / reserved
+      const k = e.key === ' ' ? ' ' : e.key.toLowerCase();
+      const id = btn.dataset.hk;
+      S.settings.hotkeys = S.settings.hotkeys || {};
+      for (const a of HOTKEY_ACTIONS) { if (a.id !== id && hotkey(a.id) === k) S.settings.hotkeys[a.id] = ''; } // free conflict
+      S.settings.hotkeys[id] = k;
+      VocabStore.set({ settings: S.settings });
+      renderHotkeysList();
+    };
+    document.addEventListener('keydown', onKey, true);
+  });
+}
+function openHotkeysModal() {
+  showModal(`<div class="modal-title">Keyboard shortcuts</div>
+    <div class="hk-list" id="hk-list"></div>
+    <div class="hk-note">Click a key, then press the new one. <b>Esc</b> and <b>1–9</b> (prompts) are reserved. Assigning a key that's already used frees it from its old action.</div>
+    <div class="modal-actions"><button class="btn" id="hk-reset">Reset defaults</button><button class="btn green" id="hk-done">Done</button></div>`);
+  renderHotkeysList();
+  document.getElementById('hk-reset').onclick = () => { S.settings.hotkeys = {}; VocabStore.set({ settings: S.settings }); renderHotkeysList(); };
+  document.getElementById('hk-done').onclick = closeModal;
+}
+
 document.addEventListener('keydown', (e) => {
   if (IS_SIDEBAR) return;
 
@@ -3403,33 +3481,21 @@ document.addEventListener('keydown', (e) => {
   // helper: act on the current text selection within the reader render
   const selText = () => { const s = window.getSelection(); return (s && !s.isCollapsed) ? s.toString().trim() : ''; };
 
-  if (e.key === ' ') { // space: play/pause (active mode)
-    e.preventDefault(); modeTogglePlay();
-  } else if (e.key.toLowerCase() === 'f') { // f: full screen toggle (both bars)
-    e.preventDefault(); const c = !(ui.readerBarCollapsed && ui.navCollapsed); ui.readerBarCollapsed = c; ui.navCollapsed = c; render();
-  } else if (e.key === 'Escape') {
+  if (e.key === 'Escape') {
     if (ui.readerBarCollapsed || ui.navCollapsed) { ui.readerBarCollapsed=false; ui.navCollapsed=false; render(); }
-  } else if (e.key.toLowerCase() === 't') { // t: translate selection
-    const term = selText();
-    if (term) { e.preventDefault(); const rect = window.getSelection().getRangeAt(0).getBoundingClientRect(); showInlineTranslation(term, rect); }
-  } else if (e.key.toLowerCase() === 's') { // s: add selection as term
-    const term = selText();
-    if (term) { e.preventDefault(); addReaderTerm(term, 'saved'); hideTT(); }
-  } else if (e.key.toLowerCase() === 'd') { // d: highlight selection with current color
-    const term = selText();
-    if (term) { e.preventDefault(); addReaderHighlight(term, S.settings.reader.lastColor||'yellow'); hideTT(); }
-  } else if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    // number keys: trigger prompt template on current selection
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().trim()) {
-      e.preventDefault();
-      triggerPrompt(parseInt(e.key,10) - 1);
-    }
-  } else if (e.key === '+' || e.key === '=') {
-    e.preventDefault(); S.settings.reader.size=Math.min(4,S.settings.reader.size+1); VocabStore.set({settings:S.settings}); render();
-  } else if (e.key === '-') {
-    e.preventDefault(); S.settings.reader.size=Math.max(0,S.settings.reader.size-1); VocabStore.set({settings:S.settings}); render();
+    return;
   }
+  if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    // number keys: trigger prompt template on current selection (reserved)
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) { e.preventDefault(); triggerPrompt(parseInt(e.key,10) - 1); }
+    return;
+  }
+  const map = hotkeyMap();
+  let key = e.key === ' ' ? ' ' : e.key.toLowerCase();
+  if (e.key === '=' && !map['='] && map['+']) key = '+'; // '=' doubles for '+'
+  const action = map[key];
+  if (action) { e.preventDefault(); runHotkey(action, selText); }
 });
 
 // ── smooth 3-word follow highlight with fade on each side ──
