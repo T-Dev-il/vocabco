@@ -3191,8 +3191,10 @@ function triggerPrompt(index) {
   if (!term) { toastInApp('Select text first'); return; }
   const text = S.texts[ui.readerTextId];
   const body = (text && text.body) || '';
-  const idx = body.indexOf(term);
-  const ctx = idx >= 0 ? makeContext(body, idx, term.length, 200) : term;
+  const sr = findSelectionRange(body, term);
+  const idx = sr ? sr.start : body.indexOf(term);
+  const len = sr ? (sr.end - sr.start) : term.length;
+  const ctx = idx >= 0 ? makeContext(body, idx, len, 200) : term;
   const msg = buildPromptMessage(p.body, term, ctx);
   copyText(msg).then(ok => toastInApp(ok ? `Copied “${p.label}” prompt — paste into your chat` : 'Copy failed'));
 }
