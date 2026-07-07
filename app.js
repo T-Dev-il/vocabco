@@ -3084,26 +3084,33 @@ async function showInlineTranslation(term, anchorRect) {
 
 async function addReaderTerm(term, type) {
   const text = S.texts[ui.readerTextId];
+  const tid = ui.readerTextId;
   const body = text.body || '';
   const sr = findSelectionRange(body, term);
   const idx = sr ? sr.start : -1;
   const end = sr ? sr.end : -1;
   const ctx = idx>=0 ? makeContext(body, idx, end-idx, 75) : '';
-  const res = await VocabStore.addTerm({ term, context: ctx, sourceUrl:'', sourceTitle: text.name });
-  const termId = res.id || null;
   if (idx >= 0) {
     text.marks = text.marks || [];
-    text.marks.push({ type:'saved', start: idx, end, termId });
+    text.marks.push({ type:'saved', start: idx, end, termId: null });
     text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
-    await VocabStore.set({ texts: S.texts });
+    render();                                   // instant visual feedback
+    await VocabStore.set({ texts: S.texts });   // persist mark first (survives the term refresh)
   }
-  S = await VocabStore.getAll();
-  render();
+  try {
+    const res = await VocabStore.addTerm({ term, context: ctx, sourceUrl:'', sourceTitle: text.name });
+    if (idx >= 0 && res && res.id) {
+      const t2 = S.texts[tid];
+      const m = t2 && (t2.marks||[]).find(x => x.type==='saved' && x.start===idx && x.end===end && !x.termId);
+      if (m) { m.termId = res.id; await VocabStore.set({ texts: S.texts }); }
+    }
+  } catch (e) { console.warn('[vocab] save term failed', e); }
 }
 
 async function addReaderHighlight(term, color) {
   color = color || 'yellow';
   const text = S.texts[ui.readerTextId];
+  const tid = ui.readerTextId;
   const body = text.body || '';
   const sr = findSelectionRange(body, term);
   if (!sr) return;
@@ -3111,36 +3118,36 @@ async function addReaderHighlight(term, color) {
   const end = sr.end;
   text.marks = text.marks || [];
 
-  // if an existing highlight mark overlaps this exact span, override its color
+  // existing exact-span highlight → just recolor (instant, then persist)
   const existing = text.marks.find(m => m.type==='hl' && m.start===idx && m.end===end);
   if (existing) {
     existing.color = color;
-    if (existing.highlightId && S.highlights[existing.highlightId]) {
-      await VocabStore.updateHighlight(existing.highlightId, { color });
-    }
     text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
-    await VocabStore.set({ texts: S.texts });
-    S = await VocabStore.getAll();
     render();
+    try {
+      if (existing.highlightId && S.highlights[existing.highlightId]) await VocabStore.updateHighlight(existing.highlightId, { color });
+      await VocabStore.set({ texts: S.texts });
+    } catch (e) { console.warn('[vocab] highlight recolor failed', e); }
     return;
   }
 
-  // also handle the case where the new span overlaps a different-range highlight:
-  // remove any hl marks that intersect, then add the new one (clean override)
+  // clear overlapping highlights + add the new one — optimistically
   const overlapping = text.marks.filter(m => m.type==='hl' && m.start < end && m.end > idx);
-  if (overlapping.length) {
-    const removeIds = overlapping.map(m => m.highlightId).filter(Boolean);
-    text.marks = text.marks.filter(m => !(m.type==='hl' && m.start < end && m.end > idx));
-    if (removeIds.length) await VocabStore.removeHighlights(removeIds);
-  }
-
-  const res = await VocabStore.addHighlight({ text: term, color, note:'', sourceUrl:'', sourceTitle: text.name });
-  const highlightId = res.id || null;
-  text.marks.push({ type:'hl', start: idx, end, color, highlightId });
+  const removeIds = overlapping.map(m => m.highlightId).filter(Boolean);
+  text.marks = text.marks.filter(m => !(m.type==='hl' && m.start < end && m.end > idx));
+  text.marks.push({ type:'hl', start: idx, end, color, highlightId: null });
   text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
-  await VocabStore.set({ texts: S.texts });
-  S = await VocabStore.getAll();
-  render();
+  render();                                     // instant visual
+  try {
+    if (removeIds.length) await VocabStore.removeHighlights(removeIds);
+    await VocabStore.set({ texts: S.texts });   // persist mark first (survives the highlight refresh)
+    const res = await VocabStore.addHighlight({ text: term, color, note:'', sourceUrl:'', sourceTitle: text.name });
+    if (res && res.id) {
+      const t2 = S.texts[tid];
+      const m = t2 && (t2.marks||[]).find(x => x.type==='hl' && x.start===idx && x.end===end && !x.highlightId);
+      if (m) { m.highlightId = res.id; await VocabStore.set({ texts: S.texts }); }
+    }
+  } catch (e) { console.warn('[vocab] highlight failed', e); }
 }
 
 // Return the precise {start,end} of the current selection in the body, using the
