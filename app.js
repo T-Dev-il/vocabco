@@ -3063,14 +3063,16 @@ document.addEventListener('mousedown', e => {
 // ── inline translation panel (no popup window) ──
 // The sentence containing the selection — but only if the selection stays within
 // ONE sentence (from the previous . ! ? to the next). Returns null otherwise.
-function sentenceFor(body, start, end) {
+function sentenceRangeFor(body, start, end) {
   if (!body || start == null || end == null) return null;
   const inner = body.slice(start, Math.max(start, end - 1));
   if (/[.!?]/.test(inner)) return null; // selection spans more than one sentence
   let s = 0; for (let i = start - 1; i >= 0; i--) { if ('.!?'.includes(body[i])) { s = i + 1; break; } }
   let e = body.length; for (let i = end; i < body.length; i++) { if ('.!?'.includes(body[i])) { e = i + 1; break; } }
-  return body.slice(s, e).replace(/\s+/g, ' ').trim();
+  while (s < e && /\s/.test(body[s])) s++;
+  return { start: s, end: e, text: body.slice(s, e).replace(/\s+/g, ' ').trim() };
 }
+function sentenceFor(body, start, end) { const r = sentenceRangeFor(body, start, end); return r ? r.text : null; }
 
 async function translateInto(targetId, q, withDict) {
   const el = document.getElementById(targetId); if (!el) return;
@@ -3094,13 +3096,30 @@ async function translateInto(targetId, q, withDict) {
 async function addSentenceTranslation() {
   const panel = document.getElementById('xlate-panel'); if (!panel || panel.dataset.sentenceShown) return;
   const text = S.texts[ui.readerTextId]; const body = (text && text.body) || '';
-  const start = parseInt(panel.dataset.selStart, 10), end = parseInt(panel.dataset.selEnd, 10);
-  const sent = (!isNaN(start) && !isNaN(end)) ? sentenceFor(body, start, end) : null;
-  if (!sent) return;
+  const ss = parseInt(panel.dataset.sentStart, 10), se = parseInt(panel.dataset.sentEnd, 10);
+  if (isNaN(ss) || isNaN(se)) return;
+  const sentText = body.slice(ss, se).replace(/\s+/g, ' ').trim();
+  if (!sentText) return;
   panel.dataset.sentenceShown = '1';
   const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.remove();
   const host = document.getElementById('xlate-sentence');
-  if (host) { host.innerHTML = `<div class="xlate-sent-label">Sentence</div><div class="xlate-sent-src">${esc(sent)}</div><div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`; positionXlatePanel(panel); await translateInto('xlate-sent-tr', sent, false); positionXlatePanel(panel); }
+  if (!host) return;
+  host.innerHTML = `
+    <div class="xlate-head">
+      <div class="xlate-sent-label">Sentence</div>
+      <div class="xlate-acts">
+        <button class="xlate-act" data-sact="add-sent" title="Save sentence">${icon('plus')}</button>
+        <button class="xlate-act" data-sact="hl-sent" title="Highlight sentence">${icon('highlight')}</button>
+      </div>
+    </div>
+    <div class="xlate-sent-src">${esc(sentText)}</div>
+    <div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`;
+  const sentRange = { start: ss, end: se };
+  host.querySelector('[data-sact=add-sent]').onclick = () => { addReaderTerm(sentText, 'saved', sentRange); toastInApp('Saved sentence'); };
+  host.querySelector('[data-sact=hl-sent]').onclick = (e) => openXlateColors(e.currentTarget, (color) => addReaderHighlight(sentText, color, sentRange));
+  positionXlatePanel(panel);
+  await translateInto('xlate-sent-tr', sentText, false);
+  positionXlatePanel(panel);
 }
 
 // Place the panel below the selection if there's room, else above; clamp on-screen.
@@ -3126,19 +3145,27 @@ async function showInlineTranslation(term, anchorRect) {
   const existing = document.getElementById('xlate-panel'); if (existing) existing.remove();
   const text = S.texts[ui.readerTextId]; const body = (text && text.body) || '';
   const sr = findSelectionRange(body, term);
-  const sentText = sr ? sentenceFor(body, sr.start, sr.end) : null;
+  const sentRange = sr ? sentenceRangeFor(body, sr.start, sr.end) : null;
   const norm = s => (s||'').replace(/\s+/g,' ').trim();
-  const canSentence = !!(sentText && norm(sentText) !== norm(term));
+  const canSentence = !!(sentRange && norm(sentRange.text) !== norm(term));
   const panel = document.createElement('div');
   panel.id = 'xlate-panel';
   panel.className = 'xlate-panel';
   panel.dataset.term = term;
   if (sr) { panel.dataset.selStart = sr.start; panel.dataset.selEnd = sr.end; }
-  panel.innerHTML = `<div class="xlate-term">${esc(term)}</div>
+  if (sentRange) { panel.dataset.sentStart = sentRange.start; panel.dataset.sentEnd = sentRange.end; }
+  panel.innerHTML = `
+    <div class="xlate-head">
+      <div class="xlate-term">${esc(term)}</div>
+      <div class="xlate-acts">
+        <button class="xlate-act" data-act="add-word" title="Save word">${icon('plus')}</button>
+        <button class="xlate-act" data-act="hl-word" title="Highlight word">${icon('highlight')}</button>
+      </div>
+    </div>
     <div class="xlate-body" id="xlate-body">Translating…</div>
     <div class="xlate-sentence" id="xlate-sentence"></div>
     <div class="xlate-foot">
-      <button class="xlate-add" id="xlate-add">${icon('plus')} Save term</button>
+      <button class="xlate-ai" id="xlate-ai">✨ Ask AI</button>
       ${canSentence ? `<button class="xlate-sent-btn" id="xlate-sent-btn" title="Translate the whole sentence (press t again)">Full sentence (t)</button>` : ''}
     </div>`;
   const SZ = [ { w: 300, f: 13 }, { w: 360, f: 15 }, { w: 440, f: 17 } ];
@@ -3148,18 +3175,69 @@ async function showInlineTranslation(term, anchorRect) {
   panel._anchorRect = anchorRect;
   document.body.appendChild(panel);
   positionXlatePanel(panel);
-  document.getElementById('xlate-add').onclick = () => { addReaderTerm(term,'saved'); panel.remove(); };
+  const wordRange = sr ? { start: sr.start, end: sr.end } : null;
+  panel.querySelector('[data-act=add-word]').onclick = () => { addReaderTerm(term, 'saved', wordRange); toastInApp('Saved'); };
+  panel.querySelector('[data-act=hl-word]').onclick = (e) => openXlateColors(e.currentTarget, (color) => addReaderHighlight(term, color, wordRange));
+  document.getElementById('xlate-ai').onclick = () => openAskAI(term, panel);
   const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.onclick = () => addSentenceTranslation();
   await translateInto('xlate-body', term, true);
   positionXlatePanel(panel);
   if (canSentence && S.settings.reader.transSentence) addSentenceTranslation();
 }
 
-async function addReaderTerm(term, type) {
+// small 3-colour popover (click to open, click a colour to apply)
+function openXlateColors(anchorBtn, onPick) {
+  const old = document.getElementById('xlate-colors'); if (old) old.remove();
+  const pop = document.createElement('div');
+  pop.id = 'xlate-colors'; pop.className = 'xlate-colors';
+  pop.innerHTML = HL_COLORS.map(c => `<button class="xc-swatch hl-ln-${c}" data-c="${c}" title="${c}"></button>`).join('');
+  document.body.appendChild(pop);
+  const r = anchorBtn.getBoundingClientRect();
+  pop.style.left = Math.max(6, Math.min(r.left - 4, window.innerWidth - pop.offsetWidth - 6)) + 'px';
+  pop.style.top = (r.bottom + 5) + 'px';
+  pop.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { onPick(b.dataset.c); pop.remove(); });
+  setTimeout(() => {
+    const close = (e) => { if (!pop.contains(e.target) && e.target !== anchorBtn) { pop.remove(); document.removeEventListener('mousedown', close, true); } };
+    document.addEventListener('mousedown', close, true);
+  }, 0);
+}
+
+// Ask AI: the user's prompts + a neutral "Copy with context"
+function openAskAI(term, panel) {
+  const old = document.getElementById('xlate-ai-menu'); if (old) old.remove();
+  const body = (S.texts[ui.readerTextId] || {}).body || '';
+  const ss = parseInt(panel.dataset.selStart, 10), se = parseInt(panel.dataset.selEnd, 10);
+  const idx = !isNaN(ss) ? ss : body.indexOf(term);
+  const len = (!isNaN(se) && !isNaN(ss)) ? (se - ss) : term.length;
+  const ctx = idx >= 0 ? makeContext(body, idx, len, 200) : term;
+  const prompts = (S.prompts || []).slice(0, 3);
+  const menu = document.createElement('div');
+  menu.id = 'xlate-ai-menu'; menu.className = 'xlate-ai-menu';
+  menu.innerHTML = `${prompts.map((p,i) => `<button class="ai-opt" data-p="${i}">${icon('listPlus')} ${esc(p.label)}</button>`).join('')}
+    <button class="ai-opt" data-copy="1">${icon('plus')} Copy with context</button>`;
+  document.body.appendChild(menu);
+  const btn = document.getElementById('xlate-ai');
+  const r = btn.getBoundingClientRect();
+  menu.style.left = Math.max(6, Math.min(r.left, window.innerWidth - menu.offsetWidth - 6)) + 'px';
+  menu.style.top = Math.max(6, r.top - menu.offsetHeight - 6) + 'px';
+  menu.querySelectorAll('[data-p]').forEach(b => b.onclick = () => {
+    const p = prompts[parseInt(b.dataset.p, 10)];
+    copyText(buildPromptMessage(p.body, term, ctx)).then(ok => toastInApp(ok ? `Copied “${p.label}” prompt` : 'Copy failed'));
+    menu.remove();
+  });
+  const cp = menu.querySelector('[data-copy]');
+  if (cp) cp.onclick = () => { copyText(`${term}\n\nContext: ${ctx}`).then(ok => toastInApp(ok ? 'Copied with context' : 'Copy failed')); menu.remove(); };
+  setTimeout(() => {
+    const close = (e) => { if (!menu.contains(e.target) && e.target !== btn) { menu.remove(); document.removeEventListener('mousedown', close, true); } };
+    document.addEventListener('mousedown', close, true);
+  }, 0);
+}
+
+async function addReaderTerm(term, type, range) {
   const text = S.texts[ui.readerTextId];
   const tid = ui.readerTextId;
   const body = text.body || '';
-  const sr = findSelectionRange(body, term);
+  const sr = range || findSelectionRange(body, term);
   const idx = sr ? sr.start : -1;
   const end = sr ? sr.end : -1;
   const ctx = idx>=0 ? makeContext(body, idx, end-idx, 75) : '';
@@ -3180,12 +3258,12 @@ async function addReaderTerm(term, type) {
   } catch (e) { console.warn('[vocab] save term failed', e); }
 }
 
-async function addReaderHighlight(term, color) {
+async function addReaderHighlight(term, color, range) {
   color = color || 'yellow';
   const text = S.texts[ui.readerTextId];
   const tid = ui.readerTextId;
   const body = text.body || '';
-  const sr = findSelectionRange(body, term);
+  const sr = range || findSelectionRange(body, term);
   if (!sr) return;
   const idx = sr.start;
   const end = sr.end;
