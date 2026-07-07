@@ -2129,6 +2129,8 @@ function renderReader(body) {
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-keys" title="Keyboard shortcuts">⌨ Keys</button>
         <div class="bar-sep"></div>
+        <button class="bar-btn" id="r-trans" title="Translation language">🌐 Translate</button>
+        <div class="bar-sep"></div>
         <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
         <div class="bar-sep"></div>
         <button class="ib-label" id="r-collapse" title="Full screen reading">${icon('chevU')} Full screen</button>
@@ -2197,6 +2199,7 @@ function renderReader(body) {
     document.getElementById('r-collapse').onclick = () => { ui.readerBarCollapsed=true; ui.navCollapsed=true; render(); };
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
     const kbtn = document.getElementById('r-keys'); if (kbtn) kbtn.onclick = openHotkeysModal;
+    const trbtn = document.getElementById('r-trans'); if (trbtn) trbtn.onclick = openTransModal;
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
     const editBtn = document.getElementById('r-edit');
     if (editBtn) editBtn.onclick = () => { stopSpeak(); ui.readerEditing=true; render(); };
@@ -3069,16 +3072,25 @@ async function showInlineTranslation(term, anchorRect) {
   panel.style.top = Math.min(top, window.innerHeight-160) + 'px';
   document.getElementById('xlate-add').onclick = () => { addReaderTerm(term,'saved'); panel.remove(); };
 
-  const lang = S.settings.reader.lang && S.settings.reader.lang!=='auto' ? S.settings.reader.lang : 'auto';
+  const target = S.settings.reader.transTarget || 'en';
+  const source = (S.settings.reader.lang && S.settings.reader.lang !== 'auto') ? S.settings.reader.lang : 'auto';
   try {
-    const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${lang}&tl=en&dt=t&q=${encodeURIComponent(term)}`);
+    const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&dt=t&dt=bd&q=${encodeURIComponent(term)}`);
     const data = await r.json();
     const translated = (data[0]||[]).map(seg => seg[0]).join('');
+    let alts = '';
+    if (Array.isArray(data[1])) {
+      alts = data[1].map(entry => {
+        const pos = entry[0] || '';
+        const words = (entry[1]||[]).slice(0,5).join(', ');
+        return words ? `<div class="xlate-alt">${pos?`<span class="xlate-pos">${esc(pos)}</span>`:''}<span>${esc(words)}</span></div>` : '';
+      }).join('');
+    }
     const bodyEl = document.getElementById('xlate-body');
-    if (bodyEl) bodyEl.textContent = translated || '(no translation)';
+    if (bodyEl) bodyEl.innerHTML = `<div class="xlate-main">${esc(translated || '(no translation)')}</div>${alts}`;
   } catch (err) {
     const bodyEl = document.getElementById('xlate-body');
-    if (bodyEl) bodyEl.innerHTML = `Couldn't translate inline. <a href="https://translate.google.com/?sl=${lang}&tl=en&text=${encodeURIComponent(term)}&op=translate" target="_blank" style="color:var(--g-text)">Open Google Translate ↗</a>`;
+    if (bodyEl) bodyEl.innerHTML = `Couldn't translate inline. <a href="https://translate.google.com/?sl=${source}&tl=${target}&text=${encodeURIComponent(term)}&op=translate" target="_blank" style="color:var(--g-text)">Open Google Translate ↗</a>`;
   }
 }
 
@@ -3472,6 +3484,27 @@ function renderHotkeysList() {
     document.addEventListener('keydown', onKey, true);
   });
 }
+// ── translation settings ──
+const TRANS_LANGS = [
+  ['en','English'],['de','German'],['es','Spanish'],['fr','French'],['it','Italian'],
+  ['pt','Portuguese'],['nl','Dutch'],['ru','Russian'],['zh-CN','Chinese'],['ja','Japanese'],
+  ['ko','Korean'],['ar','Arabic'],['he','Hebrew'],['tr','Turkish'],['pl','Polish'],['sv','Swedish'],['uk','Ukrainian']
+];
+function openTransModal() {
+  const st = S.settings.reader;
+  const target = st.transTarget || 'en';
+  const source = st.lang || 'auto';
+  const opt = (code, name, sel) => `<option value="${code}" ${sel===code?'selected':''}>${name}</option>`;
+  showModal(`<div class="modal-title">Translation</div>
+    <div class="trs-row"><span>Translate into</span><select id="trs-target">${TRANS_LANGS.map(l=>opt(l[0],l[1],target)).join('')}</select></div>
+    <div class="trs-row"><span>Source language</span><select id="trs-source"><option value="auto" ${source==='auto'?'selected':''}>Auto-detect</option>${TRANS_LANGS.map(l=>opt(l[0],l[1],source)).join('')}</select></div>
+    <div class="hk-note">Powered by Google Translate. Single words now also show dictionary alternatives (parts of speech &amp; other meanings).</div>
+    <div class="modal-actions"><button class="btn green" id="trs-done">Done</button></div>`);
+  document.getElementById('trs-target').onchange = (e) => { S.settings.reader.transTarget = e.target.value; VocabStore.set({ settings: S.settings }); };
+  document.getElementById('trs-source').onchange = (e) => { S.settings.reader.lang = e.target.value; VocabStore.set({ settings: S.settings }); };
+  document.getElementById('trs-done').onclick = closeModal;
+}
+
 function openHotkeysModal() {
   showModal(`<div class="modal-title">Keyboard shortcuts</div>
     <div class="hk-list" id="hk-list"></div>

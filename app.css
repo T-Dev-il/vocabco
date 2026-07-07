@@ -276,6 +276,12 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .hk-key:hover { background: var(--white); }
 .hk-key.listening { background: var(--g-check); color: var(--g-text); border-color: var(--g-line); }
 .hk-note { font-size: 11px; color: var(--text3); margin: 4px 0 14px; line-height: 1.55; }
+/* translation settings + richer inline result */
+.trs-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 4px; border-bottom: 0.5px solid var(--border); font-size: 13px; color: var(--text); }
+.trs-row select { min-width: 170px; padding: 5px 8px; border: 1px solid var(--border2); border-radius: 7px; background: var(--bg2); font-size: 13px; }
+.xlate-main { font-size: 15px; color: var(--text); font-weight: 600; }
+.xlate-alt { font-size: 12px; color: var(--text2); margin-top: 5px; line-height: 1.4; }
+.xlate-pos { display: inline-block; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin-right: 6px; vertical-align: 1px; }
 /* toolbar two-section layout */
 .rc-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
 .rc-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin-left: auto; }
