@@ -2622,10 +2622,11 @@ function wireReaderSeek(text) {
   if (render_ && !render_._ytSeekWired) {
     render_._ytSeekWired = true;
     render_.addEventListener('dblclick', (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return; // plain double-click = normal word selection
       const w = e.target.closest('.w'); if (!w) return;
       const charIdx = parseInt(w.dataset.c, 10); if (isNaN(charIdx)) return;
-      const seg = segmentAtChar(text, charIdx);
-      if (seg && ytPlayer && ytPlayer.seekTo) { ytPlayer.seekTo(seg.start, true); ytPlayer.playVideo(); }
+      e.preventDefault();
+      modePlayFrom(charIdx);
     });
   }
 }
@@ -3038,8 +3039,13 @@ function openWordMenu(e, charIdx) {
   const _lbl = _m === 'youtube' ? 'Play from here' : 'Read from here';
   ctxMenu.innerHTML = `<button class="ctx-item" data-k="readhere">${icon('play')} ${_lbl}</button>`;
   document.body.appendChild(ctxMenu);
-  ctxMenu.style.left = Math.min(e.clientX, window.innerWidth-180) + 'px';
-  ctxMenu.style.top = Math.min(e.clientY, window.innerHeight-60) + 'px';
+  const _r = ctxMenu.getBoundingClientRect();
+  let _left = e.clientX - _r.width / 2;
+  let _top = e.clientY - _r.height / 2;
+  _left = Math.max(6, Math.min(_left, window.innerWidth - _r.width - 6));
+  _top = Math.max(6, Math.min(_top, window.innerHeight - _r.height - 6));
+  ctxMenu.style.left = _left + 'px';
+  ctxMenu.style.top = _top + 'px';
   ctxMenu.querySelector('[data-k=readhere]').onclick = () => { closeCtxMenu(); modePlayFrom(charIdx); };
 }
 document.addEventListener('mousedown', e => {
@@ -3377,10 +3383,12 @@ function stopSpeak() {
 // ── reader hotkeys (full tab only; safe to use normal key listeners here) ──
 // ── remappable reader hotkeys ──
 const HOTKEY_ACTIONS = [
-  { id:'play',       label:'Play / pause',             def:' ' },
-  { id:'skipPrev',   label:'Previous snippet (video)', def:',' },
-  { id:'skipNext',   label:'Next snippet (video)',     def:'.' },
-  { id:'saveTerm',   label:'Save selection',           def:'s' },
+  { id:'play',        label:'Play / pause',              def:' ' },
+  { id:'skipPrev',    label:'Previous snippet (video)',  def:',' },
+  { id:'skipNext',    label:'Next snippet (video)',      def:'.' },
+  { id:'playFromSel', label:'Play from selection (video)', def:'' },
+  { id:'followToggle',label:'Toggle follow',             def:'g' },
+  { id:'saveTerm',    label:'Save selection',            def:'s' },
   { id:'highlight',  label:'Highlight selection',      def:'d' },
   { id:'translate',  label:'Translate selection',      def:'t' },
   { id:'sizeUp',     label:'Bigger text',              def:'+' },
@@ -3411,6 +3419,21 @@ function runHotkey(action, selText) {
     case 'fullscreen': { const c = !(ui.readerBarCollapsed && ui.navCollapsed); ui.readerBarCollapsed = c; ui.navCollapsed = c; render(); } break;
     case 'skipPrev': skipSegment(-1); break;
     case 'skipNext': skipSegment(1); break;
+    case 'followToggle': {
+      const text = S.texts[ui.readerTextId]; const mode = readerModeFor(text);
+      if (mode === 'youtube') ui.readerVideoFollow = (ui.readerVideoFollow === false);
+      else { S.settings.reader.readFollow = (S.settings.reader.readFollow === false); VocabStore.set({ settings: S.settings }); }
+      if (modeFollowOn(mode) && typeof hideFollowBtn === 'function') hideFollowBtn();
+      renderModePanel();
+    } break;
+    case 'playFromSel': {
+      const sel = window.getSelection();
+      if (sel && sel.anchorNode) {
+        const el = sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement;
+        const w = el && el.closest ? el.closest('.w') : null;
+        if (w) { const c = parseInt(w.dataset.c, 10); if (!isNaN(c)) modePlayFrom(c); }
+      }
+    } break;
     case 'translate': { const term = selText(); if (term) { const rect = window.getSelection().getRangeAt(0).getBoundingClientRect(); showInlineTranslation(term, rect); } } break;
     case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved'); hideTT(); } } break;
     case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow'); hideTT(); } } break;
