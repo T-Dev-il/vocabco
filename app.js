@@ -2130,7 +2130,6 @@ function renderReader(body) {
         <button class="bar-btn" id="r-keys" title="Keyboard shortcuts">⌨ Keys</button>
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-trans" title="Translation language">🌐 Translate</button>
-        <button class="bar-btn ${S.settings.reader.transSentence?'on':''}" id="r-sentence" title="Also translate the full sentence by default">＋Sentence</button>
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
         <div class="bar-sep"></div>
@@ -2201,7 +2200,6 @@ function renderReader(body) {
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
     const kbtn = document.getElementById('r-keys'); if (kbtn) kbtn.onclick = openHotkeysModal;
     const trbtn = document.getElementById('r-trans'); if (trbtn) trbtn.onclick = openTransModal;
-    const stbtn = document.getElementById('r-sentence'); if (stbtn) stbtn.onclick = () => { S.settings.reader.transSentence = !S.settings.reader.transSentence; stbtn.classList.toggle('on', !!S.settings.reader.transSentence); VocabStore.set({ settings: S.settings }); };
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
     const editBtn = document.getElementById('r-edit');
     if (editBtn) editBtn.onclick = () => { stopSpeak(); ui.readerEditing=true; render(); };
@@ -3100,6 +3098,16 @@ async function addSentenceTranslation() {
   if (isNaN(ss) || isNaN(se)) return;
   const sentText = body.slice(ss, se).replace(/\s+/g, ' ').trim();
   if (!sentText) return;
+  // build sentence HTML with the selected word in bold
+  const ws = parseInt(panel.dataset.selStart, 10), we = parseInt(panel.dataset.selEnd, 10);
+  const rawSent = body.slice(ss, se);
+  let sentHtml;
+  if (!isNaN(ws) && !isNaN(we) && ws >= ss && we <= se && we > ws) {
+    const rs = ws - ss, re = we - ss;
+    sentHtml = esc(rawSent.slice(0, rs)) + '<b>' + esc(rawSent.slice(rs, re)) + '</b>' + esc(rawSent.slice(re));
+  } else {
+    sentHtml = esc(sentText);
+  }
   panel.dataset.sentenceShown = '1';
   const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.remove();
   const host = document.getElementById('xlate-sentence');
@@ -3112,7 +3120,7 @@ async function addSentenceTranslation() {
         <button class="xlate-act" data-sact="hl-sent" title="Highlight sentence">${icon('highlight')}</button>
       </div>
     </div>
-    <div class="xlate-sent-src">${esc(sentText)}</div>
+    <div class="xlate-sent-src">${sentHtml}</div>
     <div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`;
   const sentRange = { start: ss, end: se };
   host.querySelector('[data-sact=add-sent]').onclick = () => { addReaderTerm(sentText, 'saved', sentRange); toastInApp('Saved sentence'); };
@@ -3122,6 +3130,8 @@ async function addSentenceTranslation() {
   positionXlatePanel(panel);
 }
 
+const XLATE_SIZES = [ {w:300,f:13}, {w:340,f:15}, {w:380,f:18}, {w:430,f:22}, {w:480,f:28}, {w:540,f:34} ];
+const XLATE_SIZE_LABELS = ['S','M','L','XL','2XL','3XL'];
 // Place the panel below the selection if there's room, else above; clamp on-screen.
 // A max-height + scroll is the safety net so it can never leak off the viewport.
 function positionXlatePanel(panel) {
@@ -3168,8 +3178,7 @@ async function showInlineTranslation(term, anchorRect) {
       <button class="xlate-ai" id="xlate-ai">✨ Ask AI</button>
       ${canSentence ? `<button class="xlate-sent-btn" id="xlate-sent-btn" title="Translate the whole sentence (press t again)">Full sentence (t)</button>` : ''}
     </div>`;
-  const SZ = [ { w: 300, f: 13 }, { w: 360, f: 15 }, { w: 440, f: 17 } ];
-  const sz = SZ[Math.max(0, Math.min(2, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize))];
+  const sz = XLATE_SIZES[Math.max(0, Math.min(XLATE_SIZES.length - 1, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize))];
   panel.style.width = sz.w + 'px';
   panel.style.fontSize = sz.f + 'px';
   panel._anchorRect = anchorRect;
@@ -3647,21 +3656,24 @@ function openTransModal() {
   showModal(`<div class="modal-title">Translation</div>
     <div class="trs-row"><span>Translate into</span><select id="trs-target">${TRANS_LANGS.map(l=>opt(l[0],l[1],target)).join('')}</select></div>
     <div class="trs-row"><span>Source language</span><select id="trs-source"><option value="auto" ${source==='auto'?'selected':''}>Auto-detect</option>${TRANS_LANGS.map(l=>opt(l[0],l[1],source)).join('')}</select></div>
-    <div class="trs-row"><span>Text size</span><span class="trs-size"><button class="rc-btn" id="trs-sz-down">A−</button><span id="trs-sz-lbl">${['S','M','L'][st.transSize==null?1:st.transSize]}</span><button class="rc-btn" id="trs-sz-up">A+</button></span></div>
+    <div class="trs-row"><span>Text size</span><span class="trs-size"><button class="rc-btn" id="trs-sz-down">A−</button><span id="trs-sz-lbl">${XLATE_SIZE_LABELS[st.transSize==null?1:st.transSize]}</span><button class="rc-btn" id="trs-sz-up">A+</button></span></div>
+    <div class="trs-row"><span>Also translate the full sentence</span><button class="rc-btn ${st.transSentence?'on':''}" id="trs-sent">${st.transSentence?'On':'Off'}</button></div>
     <div class="hk-note">Powered by Google Translate. Single words also show dictionary alternatives (parts of speech &amp; other meanings).</div>
     <div class="modal-actions"><button class="btn green" id="trs-done">Done</button></div>`);
   document.getElementById('trs-target').onchange = (e) => { S.settings.reader.transTarget = e.target.value; VocabStore.set({ settings: S.settings }); };
   document.getElementById('trs-source').onchange = (e) => { S.settings.reader.lang = e.target.value; VocabStore.set({ settings: S.settings }); };
   const applyTransSize = () => {
-    const s = Math.max(0, Math.min(2, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize));
+    const s = Math.max(0, Math.min(XLATE_SIZES.length - 1, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize));
     S.settings.reader.transSize = s;
-    const lbl = document.getElementById('trs-sz-lbl'); if (lbl) lbl.textContent = ['S','M','L'][s];
+    const lbl = document.getElementById('trs-sz-lbl'); if (lbl) lbl.textContent = XLATE_SIZE_LABELS[s];
     VocabStore.set({ settings: S.settings });
     const p = document.getElementById('xlate-panel');
-    if (p) { const arr = [{w:300,f:13},{w:360,f:15},{w:440,f:17}]; p.style.width = arr[s].w+'px'; p.style.fontSize = arr[s].f+'px'; positionXlatePanel(p); }
+    if (p) { p.style.width = XLATE_SIZES[s].w+'px'; p.style.fontSize = XLATE_SIZES[s].f+'px'; positionXlatePanel(p); }
   };
   document.getElementById('trs-sz-down').onclick = () => { S.settings.reader.transSize = Math.max(0, (S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize) - 1); applyTransSize(); };
-  document.getElementById('trs-sz-up').onclick = () => { S.settings.reader.transSize = Math.min(2, (S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize) + 1); applyTransSize(); };
+  document.getElementById('trs-sz-up').onclick = () => { S.settings.reader.transSize = Math.min(XLATE_SIZES.length - 1, (S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize) + 1); applyTransSize(); };
+  const stog = document.getElementById('trs-sent');
+  if (stog) stog.onclick = () => { S.settings.reader.transSentence = !S.settings.reader.transSentence; stog.classList.toggle('on', !!S.settings.reader.transSentence); stog.textContent = S.settings.reader.transSentence ? 'On' : 'Off'; VocabStore.set({ settings: S.settings }); };
   document.getElementById('trs-done').onclick = closeModal;
 }
 
