@@ -3100,7 +3100,26 @@ async function addSentenceTranslation() {
   panel.dataset.sentenceShown = '1';
   const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.remove();
   const host = document.getElementById('xlate-sentence');
-  if (host) { host.innerHTML = `<div class="xlate-sent-label">Sentence</div><div class="xlate-sent-src">${esc(sent)}</div><div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`; await translateInto('xlate-sent-tr', sent, false); }
+  if (host) { host.innerHTML = `<div class="xlate-sent-label">Sentence</div><div class="xlate-sent-src">${esc(sent)}</div><div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`; positionXlatePanel(panel); await translateInto('xlate-sent-tr', sent, false); positionXlatePanel(panel); }
+}
+
+// Place the panel below the selection if there's room, else above; clamp on-screen.
+// A max-height + scroll is the safety net so it can never leak off the viewport.
+function positionXlatePanel(panel) {
+  const a = panel._anchorRect || { left: 100, top: 100, bottom: 120 };
+  const M = 10, GAP = 8;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  panel.style.maxHeight = (vh - 2 * M) + 'px';
+  const pw = panel.offsetWidth, ph = panel.offsetHeight;
+  const belowSpace = vh - a.bottom - M - GAP;
+  const aboveSpace = a.top - M - GAP;
+  let top;
+  if (ph <= belowSpace || belowSpace >= aboveSpace) top = a.bottom + GAP; // prefer below
+  else top = a.top - ph - GAP;                                            // flip above
+  top = Math.max(M, Math.min(top, vh - ph - M));
+  const left = Math.max(M, Math.min(a.left, vw - pw - M));
+  panel.style.left = left + 'px';
+  panel.style.top = top + 'px';
 }
 
 async function showInlineTranslation(term, anchorRect) {
@@ -3122,13 +3141,17 @@ async function showInlineTranslation(term, anchorRect) {
       <button class="xlate-add" id="xlate-add">${icon('plus')} Save term</button>
       ${canSentence ? `<button class="xlate-sent-btn" id="xlate-sent-btn" title="Translate the whole sentence (press t again)">Full sentence (t)</button>` : ''}
     </div>`;
+  const SZ = [ { w: 300, f: 13 }, { w: 360, f: 15 }, { w: 440, f: 17 } ];
+  const sz = SZ[Math.max(0, Math.min(2, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize))];
+  panel.style.width = sz.w + 'px';
+  panel.style.fontSize = sz.f + 'px';
+  panel._anchorRect = anchorRect;
   document.body.appendChild(panel);
-  const top = (anchorRect.bottom||100) + 8;
-  panel.style.left = Math.max(8, Math.min((anchorRect.left||100), window.innerWidth-320)) + 'px';
-  panel.style.top = Math.min(top, window.innerHeight-220) + 'px';
+  positionXlatePanel(panel);
   document.getElementById('xlate-add').onclick = () => { addReaderTerm(term,'saved'); panel.remove(); };
   const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.onclick = () => addSentenceTranslation();
   await translateInto('xlate-body', term, true);
+  positionXlatePanel(panel);
   if (canSentence && S.settings.reader.transSentence) addSentenceTranslation();
 }
 
@@ -3546,10 +3569,21 @@ function openTransModal() {
   showModal(`<div class="modal-title">Translation</div>
     <div class="trs-row"><span>Translate into</span><select id="trs-target">${TRANS_LANGS.map(l=>opt(l[0],l[1],target)).join('')}</select></div>
     <div class="trs-row"><span>Source language</span><select id="trs-source"><option value="auto" ${source==='auto'?'selected':''}>Auto-detect</option>${TRANS_LANGS.map(l=>opt(l[0],l[1],source)).join('')}</select></div>
-    <div class="hk-note">Powered by Google Translate. Single words now also show dictionary alternatives (parts of speech &amp; other meanings).</div>
+    <div class="trs-row"><span>Text size</span><span class="trs-size"><button class="rc-btn" id="trs-sz-down">A−</button><span id="trs-sz-lbl">${['S','M','L'][st.transSize==null?1:st.transSize]}</span><button class="rc-btn" id="trs-sz-up">A+</button></span></div>
+    <div class="hk-note">Powered by Google Translate. Single words also show dictionary alternatives (parts of speech &amp; other meanings).</div>
     <div class="modal-actions"><button class="btn green" id="trs-done">Done</button></div>`);
   document.getElementById('trs-target').onchange = (e) => { S.settings.reader.transTarget = e.target.value; VocabStore.set({ settings: S.settings }); };
   document.getElementById('trs-source').onchange = (e) => { S.settings.reader.lang = e.target.value; VocabStore.set({ settings: S.settings }); };
+  const applyTransSize = () => {
+    const s = Math.max(0, Math.min(2, S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize));
+    S.settings.reader.transSize = s;
+    const lbl = document.getElementById('trs-sz-lbl'); if (lbl) lbl.textContent = ['S','M','L'][s];
+    VocabStore.set({ settings: S.settings });
+    const p = document.getElementById('xlate-panel');
+    if (p) { const arr = [{w:300,f:13},{w:360,f:15},{w:440,f:17}]; p.style.width = arr[s].w+'px'; p.style.fontSize = arr[s].f+'px'; positionXlatePanel(p); }
+  };
+  document.getElementById('trs-sz-down').onclick = () => { S.settings.reader.transSize = Math.max(0, (S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize) - 1); applyTransSize(); };
+  document.getElementById('trs-sz-up').onclick = () => { S.settings.reader.transSize = Math.min(2, (S.settings.reader.transSize == null ? 1 : S.settings.reader.transSize) + 1); applyTransSize(); };
   document.getElementById('trs-done').onclick = closeModal;
 }
 
