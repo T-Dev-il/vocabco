@@ -2130,6 +2130,7 @@ function renderReader(body) {
         <button class="bar-btn" id="r-keys" title="Keyboard shortcuts">⌨ Keys</button>
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-trans" title="Translation language">🌐 Translate</button>
+        <button class="bar-btn ${S.settings.reader.transSentence?'on':''}" id="r-sentence" title="Also translate the full sentence by default">＋Sentence</button>
         <div class="bar-sep"></div>
         <button class="bar-btn" id="r-newtext" title="Start a new text">${icon('plus')} New text</button>
         <div class="bar-sep"></div>
@@ -2200,6 +2201,7 @@ function renderReader(body) {
     const pbtn = document.getElementById('r-prompts'); if (pbtn) pbtn.onclick = openPromptsModal;
     const kbtn = document.getElementById('r-keys'); if (kbtn) kbtn.onclick = openHotkeysModal;
     const trbtn = document.getElementById('r-trans'); if (trbtn) trbtn.onclick = openTransModal;
+    const stbtn = document.getElementById('r-sentence'); if (stbtn) stbtn.onclick = () => { S.settings.reader.transSentence = !S.settings.reader.transSentence; stbtn.classList.toggle('on', !!S.settings.reader.transSentence); VocabStore.set({ settings: S.settings }); };
     const ntb = document.getElementById('r-newtext'); if (ntb) ntb.onclick = () => createNewText();
     const editBtn = document.getElementById('r-edit');
     if (editBtn) editBtn.onclick = () => { stopSpeak(); ui.readerEditing=true; render(); };
@@ -3059,39 +3061,75 @@ document.addEventListener('mousedown', e => {
 });
 
 // ── inline translation panel (no popup window) ──
-async function showInlineTranslation(term, anchorRect) {
-  const existing = document.getElementById('xlate-panel'); if (existing) existing.remove();
-  const panel = document.createElement('div');
-  panel.id = 'xlate-panel';
-  panel.className = 'xlate-panel';
-  panel.innerHTML = `<div class="xlate-term">${esc(term)}</div><div class="xlate-body" id="xlate-body">Translating…</div>
-    <div class="xlate-foot"><button class="xlate-add" id="xlate-add">${icon('plus')} Save term</button></div>`;
-  document.body.appendChild(panel);
-  const top = (anchorRect.bottom||100) + 8;
-  panel.style.left = Math.max(8, Math.min((anchorRect.left||100), window.innerWidth-300)) + 'px';
-  panel.style.top = Math.min(top, window.innerHeight-160) + 'px';
-  document.getElementById('xlate-add').onclick = () => { addReaderTerm(term,'saved'); panel.remove(); };
+// The sentence containing the selection — but only if the selection stays within
+// ONE sentence (from the previous . ! ? to the next). Returns null otherwise.
+function sentenceFor(body, start, end) {
+  if (!body || start == null || end == null) return null;
+  const inner = body.slice(start, Math.max(start, end - 1));
+  if (/[.!?]/.test(inner)) return null; // selection spans more than one sentence
+  let s = 0; for (let i = start - 1; i >= 0; i--) { if ('.!?'.includes(body[i])) { s = i + 1; break; } }
+  let e = body.length; for (let i = end; i < body.length; i++) { if ('.!?'.includes(body[i])) { e = i + 1; break; } }
+  return body.slice(s, e).replace(/\s+/g, ' ').trim();
+}
 
+async function translateInto(targetId, q, withDict) {
+  const el = document.getElementById(targetId); if (!el) return;
   const target = S.settings.reader.transTarget || 'en';
   const source = (S.settings.reader.lang && S.settings.reader.lang !== 'auto') ? S.settings.reader.lang : 'auto';
   try {
-    const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&dt=t&dt=bd&q=${encodeURIComponent(term)}`);
+    const dt = withDict ? 'dt=t&dt=bd' : 'dt=t';
+    const r = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${source}&tl=${target}&${dt}&q=${encodeURIComponent(q)}`);
     const data = await r.json();
     const translated = (data[0]||[]).map(seg => seg[0]).join('');
     let alts = '';
-    if (Array.isArray(data[1])) {
-      alts = data[1].map(entry => {
-        const pos = entry[0] || '';
-        const words = (entry[1]||[]).slice(0,5).join(', ');
-        return words ? `<div class="xlate-alt">${pos?`<span class="xlate-pos">${esc(pos)}</span>`:''}<span>${esc(words)}</span></div>` : '';
-      }).join('');
+    if (withDict && Array.isArray(data[1])) {
+      alts = data[1].map(entry => { const pos = entry[0]||''; const words = (entry[1]||[]).slice(0,5).join(', '); return words ? `<div class="xlate-alt">${pos?`<span class="xlate-pos">${esc(pos)}</span>`:''}<span>${esc(words)}</span></div>` : ''; }).join('');
     }
-    const bodyEl = document.getElementById('xlate-body');
-    if (bodyEl) bodyEl.innerHTML = `<div class="xlate-main">${esc(translated || '(no translation)')}</div>${alts}`;
+    el.innerHTML = withDict ? `<div class="xlate-main">${esc(translated || '(no translation)')}</div>${alts}` : esc(translated || '(no translation)');
   } catch (err) {
-    const bodyEl = document.getElementById('xlate-body');
-    if (bodyEl) bodyEl.innerHTML = `Couldn't translate inline. <a href="https://translate.google.com/?sl=${source}&tl=${target}&text=${encodeURIComponent(term)}&op=translate" target="_blank" style="color:var(--g-text)">Open Google Translate ↗</a>`;
+    el.innerHTML = `<span style="color:var(--text3)">Translation failed</span>`;
   }
+}
+
+async function addSentenceTranslation() {
+  const panel = document.getElementById('xlate-panel'); if (!panel || panel.dataset.sentenceShown) return;
+  const text = S.texts[ui.readerTextId]; const body = (text && text.body) || '';
+  const start = parseInt(panel.dataset.selStart, 10), end = parseInt(panel.dataset.selEnd, 10);
+  const sent = (!isNaN(start) && !isNaN(end)) ? sentenceFor(body, start, end) : null;
+  if (!sent) return;
+  panel.dataset.sentenceShown = '1';
+  const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.remove();
+  const host = document.getElementById('xlate-sentence');
+  if (host) { host.innerHTML = `<div class="xlate-sent-label">Sentence</div><div class="xlate-sent-src">${esc(sent)}</div><div class="xlate-sent-tr" id="xlate-sent-tr">Translating…</div>`; await translateInto('xlate-sent-tr', sent, false); }
+}
+
+async function showInlineTranslation(term, anchorRect) {
+  const existing = document.getElementById('xlate-panel'); if (existing) existing.remove();
+  const text = S.texts[ui.readerTextId]; const body = (text && text.body) || '';
+  const sr = findSelectionRange(body, term);
+  const sentText = sr ? sentenceFor(body, sr.start, sr.end) : null;
+  const norm = s => (s||'').replace(/\s+/g,' ').trim();
+  const canSentence = !!(sentText && norm(sentText) !== norm(term));
+  const panel = document.createElement('div');
+  panel.id = 'xlate-panel';
+  panel.className = 'xlate-panel';
+  panel.dataset.term = term;
+  if (sr) { panel.dataset.selStart = sr.start; panel.dataset.selEnd = sr.end; }
+  panel.innerHTML = `<div class="xlate-term">${esc(term)}</div>
+    <div class="xlate-body" id="xlate-body">Translating…</div>
+    <div class="xlate-sentence" id="xlate-sentence"></div>
+    <div class="xlate-foot">
+      <button class="xlate-add" id="xlate-add">${icon('plus')} Save term</button>
+      ${canSentence ? `<button class="xlate-sent-btn" id="xlate-sent-btn" title="Translate the whole sentence (press t again)">Full sentence (t)</button>` : ''}
+    </div>`;
+  document.body.appendChild(panel);
+  const top = (anchorRect.bottom||100) + 8;
+  panel.style.left = Math.max(8, Math.min((anchorRect.left||100), window.innerWidth-320)) + 'px';
+  panel.style.top = Math.min(top, window.innerHeight-220) + 'px';
+  document.getElementById('xlate-add').onclick = () => { addReaderTerm(term,'saved'); panel.remove(); };
+  const sbtn = document.getElementById('xlate-sent-btn'); if (sbtn) sbtn.onclick = () => addSentenceTranslation();
+  await translateInto('xlate-body', term, true);
+  if (canSentence && S.settings.reader.transSentence) addSentenceTranslation();
 }
 
 async function addReaderTerm(term, type) {
@@ -3455,7 +3493,17 @@ function runHotkey(action, selText) {
         if (w) { const c = parseInt(w.dataset.c, 10); if (!isNaN(c)) modePlayFrom(c); }
       }
     } break;
-    case 'translate': { const term = selText(); if (term) { const rect = window.getSelection().getRangeAt(0).getBoundingClientRect(); showInlineTranslation(term, rect); } } break;
+    case 'translate': {
+      const term = selText();
+      if (!term) break;
+      const panel = document.getElementById('xlate-panel');
+      if (panel && panel.dataset.term === term) {
+        if (!panel.dataset.sentenceShown) addSentenceTranslation(); // 2nd t → full sentence
+      } else {
+        const rect = window.getSelection().getRangeAt(0).getBoundingClientRect();
+        showInlineTranslation(term, rect);
+      }
+    } break;
     case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved'); hideTT(); } } break;
     case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow'); hideTT(); } } break;
     case 'sizeUp': S.settings.reader.size = Math.min(SIZES.length - 1, S.settings.reader.size + 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
