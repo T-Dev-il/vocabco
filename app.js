@@ -156,6 +156,148 @@ function refreshRowSelectionDOM() {
   });
   document.querySelectorAll('.sel-only').forEach(el => el.classList.toggle('hidden', !hasSel));
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  Row multi-select — one controller for both the items and highlights
+//  tables. Gestures:
+//    plain click         → select only that row
+//    ctrl / cmd click    → toggle that row, keep the rest
+//    shift click         → range from the anchor to this row
+//    shift + drag        → marquee box (replaces the selection)
+//    ctrl + shift + drag → marquee box (adds to the selection)
+//    plain drag on a row → drag-to-list (handled by the row's dragstart)
+//  A plain click or Escape that would wipe a selection of 7+ asks first.
+//  Selection never mutates on dragstart — that was the old intermittent bug.
+// ══════════════════════════════════════════════════════════════════════
+let _selGesture = null;   // the in-progress mouse gesture
+let _marqueeEl = null;    // the visible rubber-band box
+let _selGlobalsWired = false;
+
+const DESELECT_GUARD = 7; // ask before clearing a selection this size or larger
+
+function ensureSelGlobals() {
+  if (_selGlobalsWired) return;
+  _selGlobalsWired = true;
+
+  window.addEventListener('mousemove', (e) => {
+    const g = _selGesture; if (!g) return;
+    if (!g.moved) {
+      if (Math.abs(e.clientX - g.x0) < 5 && Math.abs(e.clientY - g.y0) < 5) return;
+      g.moved = true;
+      if (g.shift) {                       // a shift-drag becomes a marquee
+        document.body.classList.add('marquee-active');
+        _marqueeEl = document.createElement('div');
+        _marqueeEl.className = 'marquee';
+        document.body.appendChild(_marqueeEl);
+      }
+    }
+    if (g.shift && _marqueeEl) {
+      const x = Math.min(e.clientX, g.x0), y = Math.min(e.clientY, g.y0);
+      const w = Math.abs(e.clientX - g.x0), h = Math.abs(e.clientY - g.y0);
+      _marqueeEl.style.cssText = `position:fixed;left:${x}px;top:${y}px;width:${w}px;height:${h}px;`;
+      const box = { left: x, top: y, right: x + w, bottom: y + h };
+      const sel = g.opt.sel;
+      sel.clear();
+      if (g.snapshot) for (const id of g.snapshot) sel.add(id);   // ctrl+shift keeps prior picks
+      for (const row of g.container.querySelectorAll(g.rowSel)) {
+        const r = row.getBoundingClientRect();
+        const hit = !(r.right < box.left || r.left > box.right || r.bottom < box.top || r.top > box.bottom);
+        if (hit) sel.add(row.dataset[g.opt.idAttr]);
+      }
+      refreshRowSelectionDOM();
+    }
+  });
+
+  const endGesture = (e) => {
+    const g = _selGesture; if (!g) return;
+    _selGesture = null;
+    if (_marqueeEl) { _marqueeEl.remove(); _marqueeEl = null; document.body.classList.remove('marquee-active'); }
+    if (g.shift) {
+      if (!g.moved && g.id) g.rangeTo(g.id, g.ctrl);   // shift-click (no drag) = range
+      return;
+    }
+    if (!g.moved && g.id) { g.ctrl ? g.toggleOne(g.id) : g.selectOnly(g.id, e); }
+  };
+  window.addEventListener('mouseup', endGesture);
+  window.addEventListener('dragend', () => {
+    _selGesture = null;
+    if (_marqueeEl) { _marqueeEl.remove(); _marqueeEl = null; document.body.classList.remove('marquee-active'); }
+  });
+
+  // click outside the confirm popup dismisses it (keeps the selection)
+  window.addEventListener('mousedown', (e) => {
+    if (confirmPop && !e.target.closest('.confirm-pop')) closeConfirm();
+  }, true);
+}
+
+function wireMultiSelect(container, opt) {
+  // opt: { idAttr, sel, getAnchor, setAnchor, isInteractive }
+  ensureSelGlobals();
+  const rowSel = '[data-' + opt.idAttr + ']';
+  const idOf = el => el && el.dataset[opt.idAttr];
+  const order = () => [...container.querySelectorAll(rowSel)].map(idOf);
+
+  const selectOnly = (id, ev) => {
+    const sel = opt.sel;
+    if (sel.size >= DESELECT_GUARD && !(sel.size === 1 && sel.has(id))) {
+      showListDeselectConfirm(ev, sel.size, () => { sel.clear(); sel.add(id); opt.setAnchor(id); refreshRowSelectionDOM(); });
+      return;
+    }
+    sel.clear(); sel.add(id); opt.setAnchor(id); refreshRowSelectionDOM();
+  };
+  const toggleOne = (id) => {
+    const sel = opt.sel;
+    sel.has(id) ? sel.delete(id) : sel.add(id);
+    opt.setAnchor(id); refreshRowSelectionDOM();
+  };
+  const rangeTo = (id, additive) => {
+    const sel = opt.sel, ord = order();
+    const anchor = opt.getAnchor();
+    const b = ord.indexOf(id);
+    if (b < 0) return;
+    const a = anchor && ord.indexOf(anchor) >= 0 ? ord.indexOf(anchor) : b;
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    if (!additive) sel.clear();
+    for (let i = lo; i <= hi; i++) sel.add(ord[i]);
+    refreshRowSelectionDOM();
+  };
+
+  container.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (opt.isInteractive && opt.isInteractive(e.target)) return;   // let sub-controls run
+    const rowEl = e.target.closest(rowSel);
+    const shift = e.shiftKey, ctrl = e.ctrlKey || e.metaKey;
+    _selGesture = {
+      opt, container, rowSel, id: idOf(rowEl), shift, ctrl,
+      x0: e.clientX, y0: e.clientY, moved: false,
+      snapshot: (shift && ctrl) ? new Set(opt.sel) : null,
+      selectOnly, toggleOne, rangeTo
+    };
+    if (shift) e.preventDefault();   // stop native text-selection; marquee/range take over
+  });
+}
+
+// Deselect confirmation for the list views (mirrors the reader's popup).
+function showListDeselectConfirm(e, count, onProceed) {
+  closeConfirm();
+  const pop = document.createElement('div');
+  pop.className = 'confirm-pop';
+  const cx = (e && typeof e.clientX === 'number' && e.clientX) ? e.clientX : (window.innerWidth / 2 - 100);
+  const cy = (e && typeof e.clientY === 'number' && e.clientY) ? e.clientY : 90;
+  pop.style.left = Math.max(8, Math.min(cx, window.innerWidth - 210)) + 'px';
+  pop.style.top = (cy + 8) + 'px';
+  pop.innerHTML = `
+    <div class="confirm-txt">Deselect ${count} items?</div>
+    <div class="confirm-btns">
+      <button class="cf-btn" id="cf-desel">Deselect</button>
+      <button class="cf-btn green" id="cf-keep">Keep selection</button>
+    </div>`;
+  document.body.appendChild(pop);
+  document.getElementById('cf-desel').onclick = () => { closeConfirm(); onProceed(); };
+  document.getElementById('cf-keep').onclick = () => closeConfirm();
+  confirmPop = pop;
+}
+
 function listPath(listId) {
   const l = S.lists[listId]; if (!l) return '';
   if (l.folderId && S.folders[l.folderId]) return S.folders[l.folderId].name + ' / ' + l.name;
@@ -635,30 +777,14 @@ function renderTermView(cpane) {
   $root.querySelectorAll('[data-sort]').forEach(b => b.onclick = () => { ui.sort = b.dataset.sort; render(); });
   $root.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { ui.itemMode = b.dataset.mode; ui.selected.clear(); render(); });
 
-  $root.querySelectorAll('[data-term]').forEach(tr => {
-    tr.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); });
-    tr.onclick = (e) => {
-      const id = tr.dataset.term;
-      const order = [...$root.querySelectorAll('[data-term]')].map(x => x.dataset.term);
-      if (e.shiftKey && ui.lastClickedTerm && order.includes(ui.lastClickedTerm)) {
-        // range select between anchor and this row (inclusive)
-        const a = order.indexOf(ui.lastClickedTerm), b = order.indexOf(id);
-        const [lo, hi] = a < b ? [a, b] : [b, a];
-        if (!(e.ctrlKey || e.metaKey)) ui.selected.clear();
-        for (let i = lo; i <= hi; i++) ui.selected.add(order[i]);
-      } else if (e.ctrlKey || e.metaKey) {
-        // toggle just this one, keep the rest
-        if (ui.selected.has(id)) ui.selected.delete(id); else ui.selected.add(id);
-        ui.lastClickedTerm = id;
-      } else {
-        // plain click: toggle this one (keeps prior behavior)
-        if (ui.selected.has(id)) ui.selected.delete(id); else ui.selected.add(id);
-        ui.lastClickedTerm = id;
-      }
-      refreshRowSelectionDOM();
-    };
-    setupTermDrag(tr);
+  const _termWrap = $root.querySelector('.tbl-wrap');
+  if (_termWrap) wireMultiSelect(_termWrap, {
+    idAttr: 'term', sel: ui.selected,
+    getAnchor: () => ui.lastClickedTerm,
+    setAnchor: (v) => { ui.lastClickedTerm = v; },
+    isInteractive: () => false
   });
+  $root.querySelectorAll('[data-term]').forEach(tr => setupTermDrag(tr));
 
   const byId = id => document.getElementById(id);
   if (byId('act-export')) byId('act-export').onclick = () => {
@@ -767,26 +893,19 @@ function renderHighlightView(cpane, { isSession, isAll, hlListId } = {}) {
   });
   $root.querySelectorAll('[data-sort]').forEach(b => b.onclick = () => { ui.sort = b.dataset.sort; render(); });
 
+  const _hlWrap = $root.querySelector('.tbl-wrap');
+  if (_hlWrap) wireMultiSelect(_hlWrap, {
+    idAttr: 'hl', sel: ui.selected,
+    getAnchor: () => ui.lastClickedHl,
+    setAnchor: (v) => { ui.lastClickedHl = v; },
+    isInteractive: (t) => !!t.closest('[data-noteedit]')   // note cell handles its own click
+  });
   $root.querySelectorAll('[data-hl]').forEach(tr => {
-    tr.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); });
-    tr.onclick = (e) => {
-      if (e.target.closest('[data-noteedit]')) return; // note cell handles its own click
-      const id = tr.dataset.hl;
-      const order = [...$root.querySelectorAll('[data-hl]')].map(x => x.dataset.hl);
-      if (e.shiftKey && ui.lastClickedHl && order.includes(ui.lastClickedHl)) {
-        const a = order.indexOf(ui.lastClickedHl), b = order.indexOf(id);
-        const [lo, hi] = a < b ? [a, b] : [b, a];
-        if (!(e.ctrlKey || e.metaKey)) ui.selected.clear();
-        for (let i = lo; i <= hi; i++) ui.selected.add(order[i]);
-      } else {
-        if (ui.selected.has(id)) ui.selected.delete(id); else ui.selected.add(id);
-        ui.lastClickedHl = id;
-      }
-      refreshRowSelectionDOM();
-    };
     tr.addEventListener('dragstart', (e) => {
-      let ids = ui.selected.has(tr.dataset.hl) ? [...ui.selected] : [tr.dataset.hl];
-      if (!ui.selected.has(tr.dataset.hl)) { ui.selected.clear(); ui.selected.add(tr.dataset.hl); }
+      if (e.shiftKey) { e.preventDefault(); return; }        // shift = marquee, not a list-drag
+      _selGesture = null;                                     // the native drag takes over
+      const id = tr.dataset.hl;
+      const ids = ui.selected.has(id) ? [...ui.selected] : [id];   // never mutate ui.selected
       dragData = { kind:'highlights', ids };
       e.dataTransfer.effectAllowed='copyMove'; e.dataTransfer.setData('text/plain', ids.join(','));
     });
@@ -1940,10 +2059,12 @@ let dragData = null;
 
 function setupTermDrag(tr) {
   tr.addEventListener('dragstart', (e) => {
+    if (e.shiftKey) { e.preventDefault(); return; }   // shift = marquee, not a list-drag
+    _selGesture = null;                                // the native drag takes over
     const id = tr.dataset.term;
-    // if dragging an unselected row, drag just it; else drag whole selection
+    // drag the whole selection if this row is part of it, else just this row —
+    // but NEVER mutate ui.selected here (an accidental micro-drag used to wipe it)
     let ids = ui.selected.has(id) ? [...ui.selected] : [id];
-    if (!ui.selected.has(id)) { ui.selected.clear(); ui.selected.add(id); }
     const fromListId = ui.view.startsWith('list:') ? ui.view.slice(5) : null;
     dragData = { kind:'terms', ids, fromListId };
     e.dataTransfer.effectAllowed = 'copyMove';
@@ -3724,6 +3845,18 @@ document.addEventListener('keydown', (e) => {
     const tag = (e.target.tagName||'').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
     if (ui.libSelected.size) { e.preventDefault(); confirmDeleteLibItems([...ui.libSelected]); }
+    return;
+  }
+
+  // List views: Escape clears the row selection (asks first if 7+ are selected)
+  if (e.key === 'Escape' && ui.selected.size &&
+      (ui.view === 'session' || ui.view === 'allterms' ||
+       ui.view.startsWith('list:') || ui.view.startsWith('hllist:'))) {
+    const tag = (e.target.tagName||'').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+    if (ui.selected.size >= DESELECT_GUARD) {
+      showListDeselectConfirm(null, ui.selected.size, () => { ui.selected.clear(); refreshRowSelectionDOM(); });
+    } else { ui.selected.clear(); refreshRowSelectionDOM(); }
     return;
   }
 

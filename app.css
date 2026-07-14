@@ -147,7 +147,10 @@ button { font-family: inherit; cursor: pointer; }
 .sub-lbl { font-size: 10px; color: var(--text3); }
 
 /* term table */
-.tbl-wrap { flex: 1; overflow-y: auto; }
+.tbl-wrap { flex: 1; overflow-y: auto; position: relative; }
+/* rubber-band marquee selection box */
+.marquee { position: fixed; z-index: 400; pointer-events: none; border: 1px solid var(--g-line, #a8cf8e); background: rgba(122,168,90,.14); border-radius: 2px; }
+body.marquee-active, body.marquee-active * { user-select: none !important; -webkit-user-select: none !important; }
 .vtbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .vtbl tbody tr { user-select: none; -webkit-user-select: none; }
 .vtbl .ctx-cell, .vtbl .chip { user-select: none; -webkit-user-select: none; }
