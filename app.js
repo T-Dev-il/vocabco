@@ -636,6 +636,7 @@ function renderTermView(cpane) {
   $root.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { ui.itemMode = b.dataset.mode; ui.selected.clear(); render(); });
 
   $root.querySelectorAll('[data-term]').forEach(tr => {
+    tr.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); });
     tr.onclick = (e) => {
       const id = tr.dataset.term;
       const order = [...$root.querySelectorAll('[data-term]')].map(x => x.dataset.term);
@@ -767,6 +768,7 @@ function renderHighlightView(cpane, { isSession, isAll, hlListId } = {}) {
   $root.querySelectorAll('[data-sort]').forEach(b => b.onclick = () => { ui.sort = b.dataset.sort; render(); });
 
   $root.querySelectorAll('[data-hl]').forEach(tr => {
+    tr.addEventListener('mousedown', (e) => { if (e.shiftKey) e.preventDefault(); });
     tr.onclick = (e) => {
       if (e.target.closest('[data-noteedit]')) return; // note cell handles its own click
       const id = tr.dataset.hl;
@@ -3065,8 +3067,23 @@ function sentenceRangeFor(body, start, end) {
   if (!body || start == null || end == null) return null;
   const inner = body.slice(start, Math.max(start, end - 1));
   if (/[.!?]/.test(inner)) return null; // selection spans more than one sentence
-  let s = 0; for (let i = start - 1; i >= 0; i--) { if ('.!?'.includes(body[i])) { s = i + 1; break; } }
-  let e = body.length; for (let i = end; i < body.length; i++) { if ('.!?'.includes(body[i])) { e = i + 1; break; } }
+  const CAP = 110; // soft per-side cap (~220 total) for punctuation-free transcripts
+  let s = 0, foundStart = false;
+  for (let i = start - 1; i >= 0 && start - i <= CAP; i--) { if ('.!?'.includes(body[i])) { s = i + 1; foundStart = true; break; } }
+  if (!foundStart) {
+    // no sentence-ending punctuation within the cap — stop there, but back up
+    // to the nearest space so we never cut off in the middle of a word
+    s = Math.max(0, start - CAP);
+    const sp = body.indexOf(' ', s);
+    if (sp !== -1 && sp < start) s = sp + 1;
+  }
+  let e = body.length, foundEnd = false;
+  for (let i = end; i < body.length && i - end <= CAP; i++) { if ('.!?'.includes(body[i])) { e = i + 1; foundEnd = true; break; } }
+  if (!foundEnd) {
+    e = Math.min(body.length, end + CAP);
+    const sp = body.lastIndexOf(' ', e);
+    if (sp !== -1 && sp > end) e = sp;
+  }
   while (s < e && /\s/.test(body[s])) s++;
   return { start: s, end: e, text: body.slice(s, e).replace(/\s+/g, ' ').trim() };
 }

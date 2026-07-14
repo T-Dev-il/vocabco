@@ -150,7 +150,7 @@ button { font-family: inherit; cursor: pointer; }
 .tbl-wrap { flex: 1; overflow-y: auto; }
 .vtbl { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .vtbl tbody tr { user-select: none; -webkit-user-select: none; }
-.vtbl .ctx-cell, .vtbl .chip { user-select: text; -webkit-user-select: text; }
+.vtbl .ctx-cell, .vtbl .chip { user-select: none; -webkit-user-select: none; }
 .vtbl th { font-size: 9px; font-weight: 500; letter-spacing: .07em; text-transform: uppercase; color: var(--text3); padding: 7px 16px; text-align: left; border-bottom: 0.5px solid var(--border); position: sticky; top: 0; background: var(--white); z-index: 2; }
 .vtbl td { padding: 6px 16px; border-bottom: 0.5px solid var(--border); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vtbl tr:hover td { background: var(--bg2); }
