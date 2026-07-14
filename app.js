@@ -80,7 +80,7 @@ chrome.storage.onChanged.addListener(async (changes) => {
   }
   S = await VocabStore.getAll();
   // don't yank the reader's scroll while actively reading
-  if (ui.view === 'reader' && !ui.readerEditing) { softRefreshReader(); return; }
+  if (ui.view === 'reader' && !ui.readerEditing) { refreshLeftNav(); return; }
   render();
 });
 
@@ -98,10 +98,23 @@ function structurallyChangedTexts(before, after) {
   return false;
 }
 
-// Update reader-related counts/state without rebuilding the reading pane (preserves scroll).
-function softRefreshReader() {
-  // only refresh the left nav counts if present; leave the reading pane intact
-  // (a full re-render happens on any real navigation or edit)
+// After a save while reading, rebuild the entire left nav from current state — so every
+// count, list, folder, and rename stays correct with nothing to enumerate — while leaving
+// the reading pane (and its scroll) completely untouched, since the pane is a separate
+// sibling element. This is why the reader can skip the expensive full render() yet never
+// show a stale nav.
+function refreshLeftNav() {
+  const nav = $root.querySelector('nav.lnav');
+  if (!nav) return;
+  const tree = nav.querySelector('#lib-tree');
+  const treeScroll = tree ? tree.scrollTop : null;   // keep the library tree's own scroll
+  const tmp = document.createElement('div');
+  tmp.innerHTML = renderLeftNav();
+  const fresh = tmp.firstElementChild;
+  if (!fresh) return;
+  nav.replaceWith(fresh);
+  wireLeftNav();
+  if (treeScroll != null) { const t = $root.querySelector('#lib-tree'); if (t) t.scrollTop = treeScroll; }
 }
 window.addEventListener('message', (e) => {
   if (e.data && e.data.vocab === 'refresh') boot();
