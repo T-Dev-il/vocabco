@@ -87,6 +87,7 @@ button { font-family: inherit; cursor: pointer; }
 .lnav { width: 200px; border-right: 0.5px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; position: relative; transition: width .2s, margin-left .2s; }
 .lnav.collapsed { width: 0; margin-left: 0; border-right: none; overflow: hidden; }
 .nav-fixed { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 7px; margin: 6px 8px 0; }
+.lnav > .nav-fixed:last-child { margin-bottom: 7px; }
 .nav-fixed:hover { background: var(--bg2); }
 .nav-fixed.on { background: var(--g-soft); }
 .nav-fixed svg { width: 15px; height: 15px; color: var(--text2); }
@@ -215,7 +216,11 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .reader-render { font-family: var(--serif); line-height: 1.9; white-space: pre-wrap; word-break: break-word; }
 .reader-render mark.hl { background: var(--hl); border-radius: 2px; padding: 0 1px; }
 .reader-render mark.saved { display: inline-block; background: #fafafa; color: var(--text); border-radius: 4px; padding: 1px 5px; border: 0.5px solid #d3d3d3; box-shadow: 0 1.5px 0 #d3d3d3; cursor: pointer; }
+/* a saved item nested inside a bigger saved item still stands out on its own */
+.reader-render mark.saved mark.saved { background: #eeeeee; border-color: #b9b9b9; box-shadow: 0 1px 0 #b9b9b9; border-radius: 3px; padding: 0 3px; margin: 0 1px; }
+.reader-render mark.saved mark.saved mark.saved { background: #e3e3e3; border-color: #a6a6a6; }
 .reader-render mark.saved.sel { background: var(--g-soft); color: var(--g-text); border-color: var(--g-line); box-shadow: 0 1.5px 0 var(--g-line); }
+.reader-render mark.saved mark.saved.sel { background: var(--g-soft); border-color: var(--g-line); box-shadow: 0 1px 0 var(--g-line); }
 .reader-render mark.reading { background: #eef3ec; }
 
 /* reader themes */

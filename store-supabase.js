@@ -348,8 +348,10 @@ const VocabStore = (() => {
     const d = await getAll();
     term = (term || "").trim();
     if (!term) return { ok: false, reason: "empty" };
-    const dupe = d.session.termIds.some(id => d.terms[id] && d.terms[id].term === term);
-    if (dupe) return { ok: false, reason: "duplicate" };
+    // Already in the session: don't create a second copy, but hand back the existing
+    // id so callers (e.g. a reader mark) can still link to it rather than dangle.
+    const dupeId = d.session.termIds.find(id => d.terms[id] && d.terms[id].term === term && !d.terms[id].deletedAt);
+    if (dupeId) return { ok: false, reason: "duplicate", id: dupeId };
     const id = uid("t_");
     d.terms[id] = { id, term, context: context || "", sourceUrl: sourceUrl || "", sourceTitle: sourceTitle || "", createdAt: Date.now(), listIds: [] };
     d.session.termIds.unshift(id);

@@ -637,11 +637,11 @@ function renderLeftNav() {
         ${looseHlLists.map(l => treeHlListHtml(l, 0)).join('')}
         ${looseTexts.map(t => treeTextHtml(t, 0)).join('')}
       </div>
-      <div class="nav-fixed ${ui.view==='trash'?'on':''}" data-go="trash">
-        ${icon('trash')}<span class="nf-name">Trash</span><span class="nf-count">${trashedItems().length||''}</span>
-      </div>
       <div class="lnav-foot">
         <button class="add-btn add-btn-main" id="new-menu">${icon('plus')} New…</button>
+      </div>
+      <div class="nav-fixed ${ui.view==='trash'?'on':''}" data-go="trash">
+        ${icon('trash')}<span class="nf-name">Trash</span><span class="nf-count">${trashedItems().length||''}</span>
       </div>
       <button class="collapse-tab" id="collapse">${icon('chevL')}</button>
     </nav>`;
@@ -2230,6 +2230,7 @@ function setupTileDrop(el, type, id) {
 //  READER  (Batch 4)
 // ════════════════════════════════════════════════════════════════════
 let ttEl = null;
+let _ttRect = null, _ttTerm = '';   // anchor + term, so the tooltip can re-open after an action
 let readerEngageTimer = null;
 let confirmPop = null;
 function closeConfirm(){ if(confirmPop){confirmPop.remove();confirmPop=null;} }
@@ -2568,38 +2569,77 @@ function saveReaderBody() {
 }
 
 // ── render the read-only text with marks + per-word spans for TTS highlight ──
+// Marks may nest (a saved word inside a saved sentence) or partially overlap.
+// Build a properly nested forest: a mark that fits inside another becomes its child,
+// and a partial overlap is clipped into pieces so nothing is ever dropped — the old
+// renderer silently skipped any mark overlapping a previous one.
+function nestMarks(marks) {
+  const sorted = marks.slice().sort((a, b) => a.start - b.start || b.end - a.end);
+  const roots = [];
+  const stack = [];   // currently open (containing) nodes, outermost first
+  for (const m of sorted) {
+    let s = m.start;
+    const e = m.end;
+    while (s < e) {
+      while (stack.length && stack[stack.length - 1].end <= s) stack.pop();
+      const top = stack[stack.length - 1];
+      if (!top || e <= top.end) {
+        // fits entirely: a root, or a child of the mark containing it
+        const node = { mark: m, start: s, end: e, children: [], last: true };
+        (top ? top.children : roots).push(node);
+        stack.push(node);
+        s = e;
+      } else {
+        // extends past its container → emit the part that fits, continue after it
+        top.children.push({ mark: m, start: s, end: top.end, children: [], last: false });
+        s = top.end;
+        stack.pop();
+      }
+    }
+  }
+  return roots;
+}
+
+function renderMarkNode(body, node) {
+  const m = node.mark;
+  const inner = renderMarkChildren(body, node.children, node.start, node.end);
+  if (m.type === 'hl') {
+    const color = m.color || 'yellow';
+    const hidden = (ui.hlHidden && ui.hlHidden[color]) ? ' hl-off' : '';
+    const hattr = m.highlightId ? ` data-rhl="${m.highlightId}"` : '';
+    const hl = m.highlightId ? S.highlights[m.highlightId] : null;
+    const hasNote = hl && !noteIsEmpty(hl.note);
+    let out = `<mark class="hl hl-${color}${hidden}"${hattr}>${inner}</mark>`;
+    // the note marker belongs on the final piece only
+    if (m.highlightId && !hidden && node.last) {
+      out += `<span class="note-marker ${hasNote?'has-note':'empty-note'}" data-note="${m.highlightId}" title="${hasNote?'Note':'Add note'}">${icon('note')}</span>`;
+    }
+    return out;
+  }
+  const selCls = (m.termId && ui.readerSel.has(m.termId)) ? ' sel' : '';
+  const tattr = m.termId ? ` data-rterm="${m.termId}"` : '';
+  return `<mark class="saved${selCls}"${tattr}>${inner}</mark>`;
+}
+
+function renderMarkChildren(body, children, from, to) {
+  let html = '', cur = from;
+  for (const c of children) {
+    if (c.start > cur) html += wrapWords(body, cur, c.start);
+    html += renderMarkNode(body, c);
+    cur = c.end;
+  }
+  if (cur < to) html += wrapWords(body, cur, to);
+  return html;
+}
+
 function readerRenderHtml(text) {
   const body = text.body || '';
   if (!body.trim()) return '<span style="color:var(--text3)">(empty — switch to Edit to add text)</span>';
   const marks = (text.marks||[]).filter(m =>
     Number.isFinite(m.start) && Number.isFinite(m.end) &&
     m.start >= 0 && m.end <= body.length && m.end > m.start
-  ).slice().sort((a,b)=>a.start-b.start);
-
-  // Build a segment list combining marks and plain text, wrapping words in spans with char offsets.
-  let html=''; let cur=0;
-  const pushPlain = (s, e) => { html += wrapWords(body, s, e); };
-  for (const m of marks) {
-    if (m.start < cur) continue;
-    pushPlain(cur, m.start);
-    if (m.type === 'hl') {
-      const color = m.color || 'yellow';
-      // respect per-color visibility toggles
-      const hidden = (ui.hlHidden && ui.hlHidden[color]) ? ' hl-off' : '';
-      const hattr = m.highlightId ? ` data-rhl="${m.highlightId}"` : '';
-      const hl = m.highlightId ? S.highlights[m.highlightId] : null;
-      const hasNote = hl && !noteIsEmpty(hl.note);
-      html += `<mark class="hl hl-${color}${hidden}"${hattr}>${wrapWords(body, m.start, m.end)}</mark>`;
-      if (m.highlightId && !hidden) html += `<span class="note-marker ${hasNote?'has-note':'empty-note'}" data-note="${m.highlightId}" title="${hasNote?'Note':'Add note'}">${icon('note')}</span>`;
-    } else {
-      const selCls = (m.termId && ui.readerSel.has(m.termId)) ? ' sel' : '';
-      const tattr = m.termId ? ` data-rterm="${m.termId}"` : '';
-      html += `<mark class="saved${selCls}"${tattr}>${wrapWords(body, m.start, m.end)}</mark>`;
-    }
-    cur = m.end;
-  }
-  pushPlain(cur, body.length);
-  return html;
+  );
+  return renderMarkChildren(body, nestMarks(marks), 0, body.length);
 }
 
 // Wrap each word in a span carrying its character start index (for TTS boundary mapping)
@@ -2905,7 +2945,8 @@ function wireReaderContent(text) {
     setTimeout(() => {
       const sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.toString().trim()) { hideTT(); return; }
-      if (e.target.closest('[data-rterm]')) return; // clicking a chip, not selecting
+      // NOTE: a selection touching a saved item is allowed — you can select around or
+      // across saved words and save/highlight the larger span (they nest).
       const term = sel.toString().trim();
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
@@ -2947,10 +2988,12 @@ function wireReaderContent(text) {
         ui.readerSel.clear(); ui.readerSel.add(tid); render();
       }
     });
-    mk.setAttribute('draggable','true');
+    // Draggable only once selected: otherwise dragging from a chip would start a
+    // drag instead of letting you select text across/around it.
+    mk.setAttribute('draggable', ui.readerSel.has(mk.dataset.rterm) ? 'true' : 'false');
     mk.addEventListener('dragstart', (ev) => {
-      let ids = ui.readerSel.has(mk.dataset.rterm) ? [...ui.readerSel] : [mk.dataset.rterm];
-      if (!ui.readerSel.has(mk.dataset.rterm)) { ui.readerSel.clear(); ui.readerSel.add(mk.dataset.rterm); }
+      if (!ui.readerSel.has(mk.dataset.rterm)) { ev.preventDefault(); return; }
+      const ids = [...ui.readerSel];
       dragData = { kind:'terms', ids, fromListId:null };
       ev.dataTransfer.effectAllowed='copyMove';
       ev.dataTransfer.setData('text/plain', ids.join(','));
@@ -3138,13 +3181,19 @@ function showDeselectConfirm(e, addTid) {
 
 // ── selection tooltip (faded, full on hover) ──
 const HL_COLORS = ['yellow','pink','blue'];
+// The selection tooltip stays open after an action so you can keep working on the
+// same selection: save it, highlight it, translate it, or unsave it again.
 function showTT(rect, term, ev) {
   hideTT();
   const cur = S.settings.reader.lastColor || 'yellow';
+  const savedId = savedTermIdForRange(ui.lastSelRange);
+  _ttRect = rect; _ttTerm = term;
   ttEl = document.createElement('div');
   ttEl.className='sel-tt';
   ttEl.innerHTML = `
-    <button class="tt-add">${icon('plus')} Add</button>
+    ${savedId
+      ? `<button class="tt-unsave" title="Remove this saved item">${icon('trash')} Unsave</button>`
+      : `<button class="tt-add">${icon('plus')} Add</button>`}
     <button class="tt-tr" title="Translate">${icon('translate')}</button>
     <div class="tt-hl-wrap" title="Highlight — scroll to change color">
       <button class="tt-hl" id="tt-hl"><span class="hl-pen" id="tt-pen">${icon('highlight')}</span></button>
@@ -3156,17 +3205,32 @@ function showTT(rect, term, ev) {
   ttEl.style.top = Math.max(8, rect.top - 46)+'px';
   document.body.appendChild(ttEl);
 
-  ttEl.querySelector('.tt-add').onclick = () => { addReaderTerm(term,'saved'); hideTT(); };
+  const addBtn = ttEl.querySelector('.tt-add');
+  if (addBtn) addBtn.onclick = async () => {
+    addBtn.disabled = true;
+    const id = await addReaderTerm(term, 'saved');
+    reopenTT(id);                       // stays open, now offering Unsave
+  };
+  const unBtn = ttEl.querySelector('.tt-unsave');
+  if (unBtn) unBtn.onclick = async () => {
+    unBtn.disabled = true;
+    await unsaveReaderTerm(savedId);
+    reopenTT(null);                     // stays open, back to Add
+  };
   ttEl.querySelector('.tt-tr').onclick = () => { showInlineTranslation(term, ttEl.getBoundingClientRect()); hideTT(); };
 
   // click the highlighter → apply current color immediately
-  ttEl.querySelector('#tt-hl').onclick = () => { addReaderHighlight(term, S.settings.reader.lastColor||'yellow'); hideTT(); };
+  ttEl.querySelector('#tt-hl').onclick = async () => {
+    await addReaderHighlight(term, S.settings.reader.lastColor||'yellow');
+    reopenTT(savedTermIdForRange(ui.lastSelRange));
+  };
   // click a color → set default AND apply in the same action
-  ttEl.querySelectorAll('[data-color]').forEach(b => b.onclick = (e) => {
+  ttEl.querySelectorAll('[data-color]').forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
     const c = b.dataset.color;
     S.settings.reader.lastColor = c; VocabStore.set({settings:S.settings});
-    addReaderHighlight(term, c); hideTT();
+    await addReaderHighlight(term, c);
+    reopenTT(savedTermIdForRange(ui.lastSelRange));
   });
   // vertical scroll over the highlighter cycles color; release applies on click,
   // but to honor "same action", scrolling sets the pen color live and a click highlights.
@@ -3179,6 +3243,14 @@ function showTT(rect, term, ev) {
     S.settings.reader.lastColor = c; VocabStore.set({settings:S.settings});
     ttEl.querySelectorAll('[data-color]').forEach(b => b.classList.toggle('on', b.dataset.color===c));
   }, { passive:false });
+}
+// Re-open the tooltip after an action, re-anchored to the mark if there is one
+// (saving adds padding, which shifts the text slightly).
+function reopenTT(termId) {
+  const el = termId ? document.querySelector(`[data-rterm="${termId}"]`) : null;
+  const r = el ? el.getBoundingClientRect() : _ttRect;
+  if (!r || !_ttTerm) { hideTT(); return; }
+  showTT(r, _ttTerm);
 }
 function hideTT(){ if(ttEl){ttEl.remove();ttEl=null;} }
 
@@ -3447,6 +3519,8 @@ async function addReaderTerm(term, type, range) {
   }
   try {
     const res = await VocabStore.addTerm({ term, context: ctx, sourceUrl:'', sourceTitle: text.name });
+    // res.id is present for a new term AND for a duplicate (the existing one), so the
+    // mark always links to a real term rather than dangling unclickable.
     if (idx >= 0 && res && res.id) {
       const t2 = S.texts[tid];
       const m = t2 && (t2.marks||[]).find(x => x.type==='saved' && x.start===idx && x.end===end && !x.termId);
@@ -3454,8 +3528,34 @@ async function addReaderTerm(term, type, range) {
       // just-saved item unclickable. Re-render as soon as the id lands so its click
       // handler is wired straight away (render() preserves the reading scroll).
       if (m) { m.termId = res.id; render(); await VocabStore.set({ texts: S.texts }); }
+      return res.id;
     }
   } catch (e) { console.warn('[vocab] save term failed', e); }
+  return null;
+}
+
+// Remove a saved item from the reader (the "Unsave" action in the selection tooltip).
+async function unsaveReaderTerm(termId) {
+  const text = S.texts[ui.readerTextId];
+  if (text) {
+    text.marks = (text.marks||[]).filter(m => !(m.type==='saved' && m.termId===termId));
+    text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
+  }
+  ui.readerSel.delete(termId);
+  render();                                    // instant: the chip goes back to plain text
+  try {
+    await VocabStore.set({ texts: S.texts });
+    await VocabStore.removeTerms([termId]);    // to trash, same as removing from a list
+  } catch (e) { console.warn('[vocab] unsave failed', e); }
+}
+
+// The saved term whose mark exactly matches a {start,end} range, if any.
+function savedTermIdForRange(range) {
+  if (!range) return null;
+  const text = S.texts[ui.readerTextId];
+  if (!text) return null;
+  const m = (text.marks||[]).find(x => x.type==='saved' && x.termId && x.start===range.start && x.end===range.end);
+  return m ? m.termId : null;
 }
 
 async function addReaderHighlight(term, color, range) {
@@ -3806,8 +3906,8 @@ function runHotkey(action, selText) {
         showInlineTranslation(term, rect);
       }
     } break;
-    case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved'); hideTT(); } } break;
-    case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow'); hideTT(); } } break;
+    case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved').then(id => reopenTT(id)); } } break;
+    case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow').then(() => reopenTT(savedTermIdForRange(ui.lastSelRange))); } } break;
     case 'sizeUp': S.settings.reader.size = Math.min(SIZES.length - 1, S.settings.reader.size + 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
     case 'sizeDown': S.settings.reader.size = Math.max(0, S.settings.reader.size - 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
   }
