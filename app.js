@@ -42,7 +42,7 @@ async function boot() {
   if (m) {
     const id = decodeURIComponent(m[1]);
     if (S.texts[id]) { ui.view = 'reader'; ui.readerTextId = id; ui.readerEditing = false; }
-    try { history.replaceState(null, '', location.pathname); } catch {}
+    // the URL/history is managed by syncHistory() now — don't blank the state here
   }
   render();
 }
@@ -369,7 +369,44 @@ function matchesSearch(t) {
 // ════════════════════════════════════════════════════════════════════
 //  RENDER ROUTER
 // ════════════════════════════════════════════════════════════════════
+// ── Back button (mouse side-button / browser Back) ───────────────────
+// Each view change records a history entry, so Back steps back through the views
+// you visited instead of leaving the app entirely. The mouse's back button maps to
+// the browser's Back, so handling popstate covers both.
+let _navKey = null;
+let _navRestoring = false;
+function viewKey() { return ui.view === 'reader' ? 'reader:' + (ui.readerTextId || '') : ui.view; }
+function syncHistory() {
+  const k = viewKey();
+  if (k === _navKey) return;              // same view — nothing to record
+  const first = _navKey === null;
+  _navKey = k;
+  if (_navRestoring) return;              // applying a Back — don't push a new entry
+  const hash = (ui.view === 'reader' && ui.readerTextId) ? '#text=' + encodeURIComponent(ui.readerTextId) : '';
+  const url = location.pathname + location.search + hash;
+  try {
+    if (first) history.replaceState({ vk: k }, '', url);
+    else history.pushState({ vk: k }, '', url);
+  } catch {}
+}
+window.addEventListener('popstate', (e) => {
+  const k = e.state && e.state.vk;
+  if (!k) return;                         // not one of ours — let the browser handle it
+  _navRestoring = true;
+  if (k.startsWith('reader:')) {
+    const id = k.slice(7);
+    ui.view = 'reader';
+    if (id) ui.readerTextId = id;
+  } else ui.view = k;
+  ui.selected.clear();
+  _navKey = k;
+  hideTT(); closeCtxMenu(); closeConfirm();
+  render();
+  _navRestoring = false;
+});
+
 function render() {
+  syncHistory();
   if (typeof nameTipEl !== 'undefined' && nameTipEl) { nameTipEl.remove(); nameTipEl = null; }
   if (ui.view !== 'reader' && typeof stopYtSync === 'function') stopYtSync();
   // preserve the reading pane's scroll position across re-renders
@@ -1176,8 +1213,10 @@ function renderLibrary(cpane) {
     <div class="lib-grid" id="lib-grid" style="grid-template-columns:repeat(auto-fill,minmax(${ui.libTileSize}px,1fr))">
       ${tiles.length===0?`<div class="empty" style="grid-column:1/-1"><div class="empty-h">${curFolder?'This folder is empty':'Library is empty'}</div><div class="empty-p">Create a list or folder, drag items here, or save a text from the reader.</div></div>`
       : tiles.map(t => {
-        const meta = t.type==='folder' ? folderMeta(t.id) : (t.type==='list'? listTerms(t.id).length+' terms' : (t.type==='hllist'? highlightListTerms(t.id).length+' highlights' : 'text'));
-        const ic = t.type==='folder'?'folderFill':(t.type==='list'?'list':(t.type==='hllist'?'highlight':'doc'));
+        // videos get the play icon (the grid always used 'doc', unlike the sidebar tree)
+        const isVideo = t.type==='text' && S.texts[t.id] && !!S.texts[t.id].videoId;
+        const meta = t.type==='folder' ? folderMeta(t.id) : (t.type==='list'? listTerms(t.id).length+' terms' : (t.type==='hllist'? highlightListTerms(t.id).length+' highlights' : (isVideo ? 'video' : 'text')));
+        const ic = t.type==='folder'?'folderFill':(t.type==='list'?'list':(t.type==='hllist'?'highlight':(isVideo?'play':'doc')));
         const color = t.type==='list'?'color:#8bbf73':(t.type==='hllist'?'color:#d8a23a':(t.type==='text'?'color:#a7b8c8':''));
         const icSize = Math.round(ui.libTileSize * 0.34);
         return `<div class="tile" data-tile="${t.type}:${t.id}" draggable="true" data-fullname="${esc(t.name)}">

@@ -98,17 +98,9 @@ async function openDeepLink(){
   }
   flash('Library didn’t finish loading in time — the load is very slow.');
 }
-// Mirror the open text into the address bar so links can be copied / shared / reopened.
-function syncUrlToReader(){
-  let last = null;
-  setInterval(()=>{
-    try{
-      const want = (typeof ui!=='undefined' && ui && ui.view==='reader' && ui.readerTextId)
-        ? '#text=' + encodeURIComponent(ui.readerTextId) : '';
-      if(want !== last){ last = want; history.replaceState(null, '', location.pathname + want); }
-    }catch(e){}
-  }, 500);
-}
+// The open text is mirrored into the address bar by app.js (syncHistory), which also
+// records a history entry per view so the Back button works. A replaceState poll here
+// would wipe that state, so it's gone.
 async function start(user){
   if(started) return; started = true;
   const auth = $('auth'); if(auth) auth.remove();
@@ -123,7 +115,6 @@ async function start(user){
   }
   boot.remove();
   openDeepLink();
-  syncUrlToReader();
 }
 
 sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
