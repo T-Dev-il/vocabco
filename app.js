@@ -2230,7 +2230,7 @@ function setupTileDrop(el, type, id) {
 //  READER  (Batch 4)
 // ════════════════════════════════════════════════════════════════════
 let ttEl = null;
-let _ttRect = null, _ttTerm = '';   // anchor + term, so the tooltip can re-open after an action
+let _ttRect = null, _ttTerm = '', _ttSavedId = null;   // anchor + term + saved id, so the tooltip can re-open after an action
 let readerEngageTimer = null;
 let confirmPop = null;
 function closeConfirm(){ if(confirmPop){confirmPop.remove();confirmPop=null;} }
@@ -2942,16 +2942,19 @@ function wireReaderContent(text) {
   if (!render_) return;
 
   render_.addEventListener('mouseup', (e) => {
+    // A click on a chip has no text selection; its own handler opens the tooltip, so
+    // don't let this one close it 10ms later.
+    const onChip = !!(e.target.closest && e.target.closest('[data-rterm]'));
     setTimeout(() => {
       const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) { hideTT(); return; }
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) { if (!onChip) hideTT(); return; }
       // NOTE: a selection touching a saved item is allowed — you can select around or
       // across saved words and save/highlight the larger span (they nest).
       const term = sel.toString().trim();
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       ui.lastSelRange = selectionCharRange(render_, range, term); // {start,end} or null
-      showTT(rect, term, e);
+      showTT(rect, term);   // savedId omitted → derived from the selection's range
     }, 10);
   });
 
@@ -2983,17 +2986,19 @@ function wireReaderContent(text) {
       if (e.ctrlKey || e.metaKey) {
         if (ui.readerSel.has(tid)) ui.readerSel.delete(tid); else ui.readerSel.add(tid);
         render();
-      } else {
-        if (ui.readerSel.size >= 4 && !ui.readerSel.has(tid)) { showDeselectConfirm(e, tid); return; }
-        ui.readerSel.clear(); ui.readerSel.add(tid); render();
+        return;
       }
+      if (ui.readerSel.size >= 4 && !ui.readerSel.has(tid)) { showDeselectConfirm(e, tid); return; }
+      ui.readerSel.clear(); ui.readerSel.add(tid);
+      // Clicking a chip IS selecting it: point the tooltip's actions at this item's
+      // span, then re-render and re-anchor the tooltip to the fresh chip element.
+      selectSavedChip(tid);
     });
-    // Draggable only once selected: otherwise dragging from a chip would start a
-    // drag instead of letting you select text across/around it.
-    mk.setAttribute('draggable', ui.readerSel.has(mk.dataset.rterm) ? 'true' : 'false');
+    mk.setAttribute('draggable','true');
     mk.addEventListener('dragstart', (ev) => {
-      if (!ui.readerSel.has(mk.dataset.rterm)) { ev.preventDefault(); return; }
-      const ids = [...ui.readerSel];
+      const tid = mk.dataset.rterm;
+      // never mutate the selection on dragstart (an accidental nudge used to wipe it)
+      const ids = ui.readerSel.has(tid) ? [...ui.readerSel] : [tid];
       dragData = { kind:'terms', ids, fromListId:null };
       ev.dataTransfer.effectAllowed='copyMove';
       ev.dataTransfer.setData('text/plain', ids.join(','));
@@ -3182,18 +3187,20 @@ function showDeselectConfirm(e, addTid) {
 // ── selection tooltip (faded, full on hover) ──
 const HL_COLORS = ['yellow','pink','blue'];
 // The selection tooltip stays open after an action so you can keep working on the
-// same selection: save it, highlight it, translate it, or unsave it again.
-function showTT(rect, term, ev) {
+// same selection. The Add button is a toggle: once saved it stays lit ("Added") and
+// clicking it again undoes the save. We track the saved item's id explicitly rather
+// than re-deriving it from the selection's character range, which was unreliable.
+function showTT(rect, term, savedId) {
   hideTT();
   const cur = S.settings.reader.lastColor || 'yellow';
-  const savedId = savedTermIdForRange(ui.lastSelRange);
-  _ttRect = rect; _ttTerm = term;
+  if (savedId === undefined) savedId = savedTermIdForRange(ui.lastSelRange);
+  _ttRect = rect; _ttTerm = term; _ttSavedId = savedId || null;
   ttEl = document.createElement('div');
   ttEl.className='sel-tt';
   ttEl.innerHTML = `
-    ${savedId
-      ? `<button class="tt-unsave" title="Remove this saved item">${icon('trash')} Unsave</button>`
-      : `<button class="tt-add">${icon('plus')} Add</button>`}
+    <button class="tt-add ${_ttSavedId ? 'on' : ''}" title="${_ttSavedId ? 'Saved — click to undo' : 'Save this item'}">
+      ${icon(_ttSavedId ? 'save' : 'plus')} ${_ttSavedId ? 'Added' : 'Add'}
+    </button>
     <button class="tt-tr" title="Translate">${icon('translate')}</button>
     <div class="tt-hl-wrap" title="Highlight — scroll to change color">
       <button class="tt-hl" id="tt-hl"><span class="hl-pen" id="tt-pen">${icon('highlight')}</span></button>
@@ -3205,24 +3212,24 @@ function showTT(rect, term, ev) {
   ttEl.style.top = Math.max(8, rect.top - 46)+'px';
   document.body.appendChild(ttEl);
 
+  // Add ⇄ Added toggle
   const addBtn = ttEl.querySelector('.tt-add');
-  if (addBtn) addBtn.onclick = async () => {
+  addBtn.onclick = async () => {
     addBtn.disabled = true;
-    const id = await addReaderTerm(term, 'saved');
-    reopenTT(id);                       // stays open, now offering Unsave
-  };
-  const unBtn = ttEl.querySelector('.tt-unsave');
-  if (unBtn) unBtn.onclick = async () => {
-    unBtn.disabled = true;
-    await unsaveReaderTerm(savedId);
-    reopenTT(null);                     // stays open, back to Add
+    if (_ttSavedId) {
+      await unsaveReaderTerm(_ttSavedId);
+      showTT(_ttRect, _ttTerm, null);          // back to plain "Add"
+    } else {
+      const id = await addReaderTerm(term, 'saved');
+      reopenTT(id);                            // stays open, now lit as "Added"
+    }
   };
   ttEl.querySelector('.tt-tr').onclick = () => { showInlineTranslation(term, ttEl.getBoundingClientRect()); hideTT(); };
 
   // click the highlighter → apply current color immediately
   ttEl.querySelector('#tt-hl').onclick = async () => {
     await addReaderHighlight(term, S.settings.reader.lastColor||'yellow');
-    reopenTT(savedTermIdForRange(ui.lastSelRange));
+    reopenTT(_ttSavedId);
   };
   // click a color → set default AND apply in the same action
   ttEl.querySelectorAll('[data-color]').forEach(b => b.onclick = async (e) => {
@@ -3230,7 +3237,7 @@ function showTT(rect, term, ev) {
     const c = b.dataset.color;
     S.settings.reader.lastColor = c; VocabStore.set({settings:S.settings});
     await addReaderHighlight(term, c);
-    reopenTT(savedTermIdForRange(ui.lastSelRange));
+    reopenTT(_ttSavedId);
   });
   // vertical scroll over the highlighter cycles color; release applies on click,
   // but to honor "same action", scrolling sets the pen color live and a click highlights.
@@ -3250,7 +3257,19 @@ function reopenTT(termId) {
   const el = termId ? document.querySelector(`[data-rterm="${termId}"]`) : null;
   const r = el ? el.getBoundingClientRect() : _ttRect;
   if (!r || !_ttTerm) { hideTT(); return; }
-  showTT(r, _ttTerm);
+  showTT(r, _ttTerm, termId || null);
+}
+// Clicking a saved chip selects it and opens the tooltip on it, with the tooltip's
+// actions (highlight/translate/undo) pointed at exactly that item's span.
+function selectSavedChip(tid) {
+  const text = S.texts[ui.readerTextId];
+  const m = text && (text.marks||[]).find(x => x.type==='saved' && x.termId === tid);
+  if (!m) { render(); return; }
+  ui.lastSelRange = { start: m.start, end: m.end };
+  const term = (text.body || '').slice(m.start, m.end).replace(/\s+/g,' ').trim();
+  render();                                     // re-render so the chip shows as selected
+  const el = document.querySelector(`[data-rterm="${tid}"]`);
+  if (el) showTT(el.getBoundingClientRect(), term, tid);
 }
 function hideTT(){ if(ttEl){ttEl.remove();ttEl=null;} }
 
@@ -3519,16 +3538,22 @@ async function addReaderTerm(term, type, range) {
   }
   try {
     const res = await VocabStore.addTerm({ term, context: ctx, sourceUrl:'', sourceTitle: text.name });
-    // res.id is present for a new term AND for a duplicate (the existing one), so the
-    // mark always links to a real term rather than dangling unclickable.
-    if (idx >= 0 && res && res.id) {
+    // A duplicate (same word already in the session) returns the EXISTING id, so the
+    // mark still links to a real item instead of dangling unclickable. Older store
+    // builds returned no id at all, so look it up ourselves as a fallback.
+    let linkId = res && res.id;
+    if (!linkId && res && res.reason === 'duplicate') {
+      linkId = ((S.session && S.session.termIds) || [])
+        .find(x => S.terms[x] && S.terms[x].term === term && !S.terms[x].deletedAt) || null;
+    }
+    if (idx >= 0 && linkId) {
       const t2 = S.texts[tid];
       const m = t2 && (t2.marks||[]).find(x => x.type==='saved' && x.start===idx && x.end===end && !x.termId);
       // The mark renders without a data-rterm until it has a termId, which left the
       // just-saved item unclickable. Re-render as soon as the id lands so its click
       // handler is wired straight away (render() preserves the reading scroll).
-      if (m) { m.termId = res.id; render(); await VocabStore.set({ texts: S.texts }); }
-      return res.id;
+      if (m) { m.termId = linkId; render(); await VocabStore.set({ texts: S.texts }); }
+      return linkId;
     }
   } catch (e) { console.warn('[vocab] save term failed', e); }
   return null;
