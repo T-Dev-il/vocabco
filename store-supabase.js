@@ -134,9 +134,17 @@ const VocabStore = (() => {
     const texts = {};            // sources stream in via hydrateSources() after first paint
 
     const sdata = (se.data && se.data.data) || {};
+    const savedSession = sdata.session;
     MEM = {
       terms, highlights, lists, highlightLists, folders, texts,
-      session: clone(DEFAULTS.session), activity: [],
+      // restore the session the user left off with; only fall back to a fresh one
+      // if nothing was ever saved
+      session: (savedSession && Array.isArray(savedSession.termIds))
+        ? { startedAt: savedSession.startedAt || Date.now(),
+            termIds: savedSession.termIds,
+            highlightIds: Array.isArray(savedSession.highlightIds) ? savedSession.highlightIds : [] }
+        : clone(DEFAULTS.session),
+      activity: [],
       prompts: Array.isArray(sdata.prompts) ? sdata.prompts : clone(DEFAULTS.prompts),
       settings: {
         reader: { ...DEFAULTS.settings.reader, ...(sdata.reader || {}) },
@@ -291,9 +299,15 @@ const VocabStore = (() => {
         for (const id in was) if (!next[id]) { const { error } = await SB.from('sources').delete().eq('id', await rowId(id)); if (error) throw new Error('src del: ' + error.message); }
       }
     }
-    if ('prompts' in obj || 'settings' in obj) {
+    if ('prompts' in obj || 'settings' in obj || 'session' in obj) {
       const s = obj.settings || MEM.settings || {};
-      const data = { reader: s.reader, web: s.web, prompts: obj.prompts || MEM.prompts };
+      const data = {
+        reader: s.reader, web: s.web,
+        prompts: obj.prompts || MEM.prompts,
+        // the current session is part of the saved state — without this it silently
+        // reset to empty on every page load
+        session: ('session' in obj) ? obj.session : MEM.session
+      };
       const { error } = await SB.from('settings').upsert({ user_id: UID, data });
       if (error) throw new Error('settings: ' + error.message);
     }

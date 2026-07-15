@@ -230,6 +230,7 @@ function ensureSelGlobals() {
       return;
     }
     if (!g.moved && g.id) { g.ctrl ? g.toggleOne(g.id) : g.selectOnly(g.id, e); }
+    else if (!g.moved && !g.id && !g.ctrl) g.clearAll(e);   // click on empty space = deselect
   };
   window.addEventListener('mouseup', endGesture);
   window.addEventListener('dragend', () => {
@@ -252,11 +253,23 @@ function wireMultiSelect(container, opt) {
 
   const selectOnly = (id, ev) => {
     const sel = opt.sel;
-    if (sel.size >= DESELECT_GUARD && !(sel.size === 1 && sel.has(id))) {
+    // clicking the only selected item again deselects it
+    if (sel.size === 1 && sel.has(id)) { sel.clear(); opt.setAnchor(null); refreshRowSelectionDOM(); return; }
+    if (sel.size >= DESELECT_GUARD) {
       showListDeselectConfirm(ev, sel.size, () => { sel.clear(); sel.add(id); opt.setAnchor(id); refreshRowSelectionDOM(); });
       return;
     }
     sel.clear(); sel.add(id); opt.setAnchor(id); refreshRowSelectionDOM();
+  };
+  // click on empty space below the rows clears the selection (asks if 7+)
+  const clearAll = (ev) => {
+    const sel = opt.sel;
+    if (!sel.size) return;
+    if (sel.size >= DESELECT_GUARD) {
+      showListDeselectConfirm(ev, sel.size, () => { sel.clear(); opt.setAnchor(null); refreshRowSelectionDOM(); });
+      return;
+    }
+    sel.clear(); opt.setAnchor(null); refreshRowSelectionDOM();
   };
   const toggleOne = (id) => {
     const sel = opt.sel;
@@ -284,7 +297,7 @@ function wireMultiSelect(container, opt) {
       opt, container, rowSel, id: idOf(rowEl), shift, ctrl,
       x0: e.clientX, y0: e.clientY, moved: false,
       snapshot: (shift && ctrl) ? new Set(opt.sel) : null,
-      selectOnly, toggleOne, rangeTo
+      selectOnly, toggleOne, rangeTo, clearAll
     };
     if (shift) e.preventDefault();   // stop native text-selection; marquee/range take over
   });
@@ -523,6 +536,7 @@ function renderFull() {
   $root.innerHTML = `
     <div class="app">
       ${hideChrome ? '' : `<div class="hdr">
+        <button class="hdr-menu" id="hdr-menu" title="Menu">${icon('menu')}</button>
         <div class="logo" id="home-logo" title="Back to current session">V</div>
         <div class="brand" id="home-brand" title="Back to current session">Vocab Collector</div>
         <div class="tabs">
@@ -536,6 +550,13 @@ function renderFull() {
     </div>`;
 
   if (!hideChrome) {
+    const hm = document.getElementById('hdr-menu');
+    if (hm) hm.onmousedown = (e) => {
+      e.preventDefault(); e.stopPropagation();      // don't let the global handler close it first
+      if (ctxMenu && ctxMenu.dataset.m === 'app') { closeCtxMenu(); return; }   // click again = close
+      const r = hm.getBoundingClientRect();
+      openAppMenu(r.left, r.bottom + 5);
+    };
     const goHome = () => { ui.view = 'session'; ui.selected.clear(); render(); };
     document.getElementById('home-logo').onclick = goHome;
     document.getElementById('home-brand').onclick = goHome;
@@ -603,6 +624,9 @@ function renderLeftNav() {
 
   return `
     <nav class="lnav">
+      <div class="nav-fixed ${ui.view==='allterms'?'on':''}" data-go="allterms">
+        ${icon('stack')}<span class="nf-name">All items</span><span class="nf-count">${allTermsArr().length}</span>
+      </div>
       <div class="nav-fixed ${ui.view==='session'?'on':''}" data-go="session">
         ${icon('session')}<span class="nf-name">Current session</span><span class="nf-count">${sessionTerms().length}</span>
       </div>
@@ -612,9 +636,6 @@ function renderLeftNav() {
         ${looseLists.map(l => treeListHtml(l, 0)).join('')}
         ${looseHlLists.map(l => treeHlListHtml(l, 0)).join('')}
         ${looseTexts.map(t => treeTextHtml(t, 0)).join('')}
-      </div>
-      <div class="nav-fixed ${ui.view==='allterms'?'on':''}" data-go="allterms">
-        ${icon('stack')}<span class="nf-name">All items</span><span class="nf-count">${allTermsArr().length}</span>
       </div>
       <div class="nav-fixed ${ui.view==='trash'?'on':''}" data-go="trash">
         ${icon('trash')}<span class="nf-name">Trash</span><span class="nf-count">${trashedItems().length||''}</span>
@@ -1331,6 +1352,22 @@ function openLibraryCreateMenu(e, folderId) {
   ctxMenu.querySelector('[data-k=text]').onclick = () => { closeCtxMenu(); createNewText(folderId); };
   ctxMenu.querySelector('[data-k=video]').onclick = () => { closeCtxMenu(); openNewVideoModal(folderId); };
   ctxMenu.querySelector('[data-k=folder]').onclick = () => { closeCtxMenu(); openNewFolderModal(folderId); };
+}
+
+// App menu (hamburger, top-left). Sign-out lives here now instead of a floating button.
+function openAppMenu(x, y) {
+  closeCtxMenu();
+  ctxMenu = document.createElement('div');
+  ctxMenu.className = 'ctx-menu';
+  ctxMenu.dataset.m = 'app';
+  ctxMenu.innerHTML = `<button class="ctx-item" data-k="signout">${icon('ext')} Sign out</button>`;
+  document.body.appendChild(ctxMenu);
+  ctxMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - 180)) + 'px';
+  ctxMenu.style.top = y + 'px';
+  ctxMenu.querySelector('[data-k=signout]').onclick = async () => {
+    closeCtxMenu();
+    if (typeof window.appSignOut === 'function') await window.appSignOut();
+  };
 }
 
 function openItemMenu(e, type, id) {
@@ -3413,7 +3450,10 @@ async function addReaderTerm(term, type, range) {
     if (idx >= 0 && res && res.id) {
       const t2 = S.texts[tid];
       const m = t2 && (t2.marks||[]).find(x => x.type==='saved' && x.start===idx && x.end===end && !x.termId);
-      if (m) { m.termId = res.id; await VocabStore.set({ texts: S.texts }); }
+      // The mark renders without a data-rterm until it has a termId, which left the
+      // just-saved item unclickable. Re-render as soon as the id lands so its click
+      // handler is wired straight away (render() preserves the reading scroll).
+      if (m) { m.termId = res.id; render(); await VocabStore.set({ texts: S.texts }); }
     }
   } catch (e) { console.warn('[vocab] save term failed', e); }
 }
@@ -3456,7 +3496,8 @@ async function addReaderHighlight(term, color, range) {
     if (res && res.id) {
       const t2 = S.texts[tid];
       const m = t2 && (t2.marks||[]).find(x => x.type==='hl' && x.start===idx && x.end===end && !x.highlightId);
-      if (m) { m.highlightId = res.id; await VocabStore.set({ texts: S.texts }); }
+      // same as saved terms: no data-rhl until the id exists, so re-render to wire it up
+      if (m) { m.highlightId = res.id; render(); await VocabStore.set({ texts: S.texts }); }
     }
   } catch (e) { console.warn('[vocab] highlight failed', e); }
 }
