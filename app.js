@@ -2230,7 +2230,7 @@ function setupTileDrop(el, type, id) {
 //  READER  (Batch 4)
 // ════════════════════════════════════════════════════════════════════
 let ttEl = null;
-let _ttRect = null, _ttTerm = '', _ttSavedId = null;   // anchor + term + saved id, so the tooltip can re-open after an action
+let _ttRect = null, _ttTerm = '', _ttSavedId = null, _ttHlId = null;   // anchor + term + saved/highlight ids, so the tooltip can re-open after an action
 let readerEngageTimer = null;
 let confirmPop = null;
 function closeConfirm(){ if(confirmPop){confirmPop.remove();confirmPop=null;} }
@@ -2574,7 +2574,10 @@ function saveReaderBody() {
 // and a partial overlap is clipped into pieces so nothing is ever dropped — the old
 // renderer silently skipped any mark overlapping a previous one.
 function nestMarks(marks) {
-  const sorted = marks.slice().sort((a, b) => a.start - b.start || b.end - a.end);
+  // start asc, longer first, and for identical spans the highlight wraps the saved
+  // chip — so highlighting a chip paints the whole chip rather than a band inside it
+  const rank = m => (m.type === 'hl' ? 0 : 1);
+  const sorted = marks.slice().sort((a, b) => a.start - b.start || b.end - a.end || rank(a) - rank(b));
   const roots = [];
   const stack = [];   // currently open (containing) nodes, outermost first
   for (const m of sorted) {
@@ -3187,23 +3190,21 @@ function showDeselectConfirm(e, addTid) {
 // ── selection tooltip (faded, full on hover) ──
 const HL_COLORS = ['yellow','pink','blue'];
 // The selection tooltip stays open after an action so you can keep working on the
-// same selection. The Add button is a toggle: once saved it stays lit ("Added") and
-// clicking it again undoes the save. We track the saved item's id explicitly rather
-// than re-deriving it from the selection's character range, which was unreliable.
-function showTT(rect, term, savedId) {
+// same selection. Buttons don't change their label — they just stay pressed (green)
+// while the selection is saved / highlighted, and clicking again undoes it.
+function showTT(rect, term, savedId, hlId) {
   hideTT();
   const cur = S.settings.reader.lastColor || 'yellow';
   if (savedId === undefined) savedId = savedTermIdForRange(ui.lastSelRange);
-  _ttRect = rect; _ttTerm = term; _ttSavedId = savedId || null;
+  if (hlId === undefined) hlId = highlightIdForRange(ui.lastSelRange);
+  _ttRect = rect; _ttTerm = term; _ttSavedId = savedId || null; _ttHlId = hlId || null;
   ttEl = document.createElement('div');
   ttEl.className='sel-tt';
   ttEl.innerHTML = `
-    <button class="tt-add ${_ttSavedId ? 'on' : ''}" title="${_ttSavedId ? 'Saved — click to undo' : 'Save this item'}">
-      ${icon(_ttSavedId ? 'save' : 'plus')} ${_ttSavedId ? 'Added' : 'Add'}
-    </button>
+    <button class="tt-add ${_ttSavedId ? 'on' : ''}" title="${_ttSavedId ? 'Saved — click to undo' : 'Save this item'}">${icon('plus')} Add</button>
     <button class="tt-tr" title="Translate">${icon('translate')}</button>
     <div class="tt-hl-wrap" title="Highlight — scroll to change color">
-      <button class="tt-hl" id="tt-hl"><span class="hl-pen" id="tt-pen">${icon('highlight')}</span></button>
+      <button class="tt-hl ${_ttHlId ? 'on' : ''}" id="tt-hl" title="${_ttHlId ? 'Highlighted — click to remove' : 'Highlight'}"><span class="hl-pen" id="tt-pen">${icon('highlight')}</span></button>
       <div class="tt-colors" id="tt-colors">
         ${HL_COLORS.map(c => `<button class="hl-line hl-ln-${c} ${c===cur?'on':''}" data-color="${c}" title="${c}"></button>`).join('')}
       </div>
@@ -3212,32 +3213,29 @@ function showTT(rect, term, savedId) {
   ttEl.style.top = Math.max(8, rect.top - 46)+'px';
   document.body.appendChild(ttEl);
 
-  // Add ⇄ Added toggle
+  // Add ⇄ undo
   const addBtn = ttEl.querySelector('.tt-add');
   addBtn.onclick = async () => {
     addBtn.disabled = true;
-    if (_ttSavedId) {
-      await unsaveReaderTerm(_ttSavedId);
-      showTT(_ttRect, _ttTerm, null);          // back to plain "Add"
-    } else {
-      const id = await addReaderTerm(term, 'saved');
-      reopenTT(id);                            // stays open, now lit as "Added"
-    }
+    if (_ttSavedId) { await unsaveReaderTerm(_ttSavedId); reopenTT(null, _ttHlId); }
+    else { const id = await addReaderTerm(term, 'saved'); reopenTT(id, _ttHlId); }
   };
   ttEl.querySelector('.tt-tr').onclick = () => { showInlineTranslation(term, ttEl.getBoundingClientRect()); hideTT(); };
 
-  // click the highlighter → apply current color immediately
-  ttEl.querySelector('#tt-hl').onclick = async () => {
-    await addReaderHighlight(term, S.settings.reader.lastColor||'yellow');
-    reopenTT(_ttSavedId);
+  // highlighter → apply current color, or remove it if already highlighted
+  const hlBtn = ttEl.querySelector('#tt-hl');
+  hlBtn.onclick = async () => {
+    hlBtn.disabled = true;
+    const id = await toggleReaderHighlight(term, S.settings.reader.lastColor||'yellow');
+    reopenTT(_ttSavedId, id);
   };
-  // click a color → set default AND apply in the same action
+  // click a color → set default AND apply in the same action (always applies, never removes)
   ttEl.querySelectorAll('[data-color]').forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
     const c = b.dataset.color;
     S.settings.reader.lastColor = c; VocabStore.set({settings:S.settings});
-    await addReaderHighlight(term, c);
-    reopenTT(_ttSavedId);
+    const id = await addReaderHighlight(term, c);
+    reopenTT(_ttSavedId, id);
   });
   // vertical scroll over the highlighter cycles color; release applies on click,
   // but to honor "same action", scrolling sets the pen color live and a click highlights.
@@ -3253,11 +3251,11 @@ function showTT(rect, term, savedId) {
 }
 // Re-open the tooltip after an action, re-anchored to the mark if there is one
 // (saving adds padding, which shifts the text slightly).
-function reopenTT(termId) {
+function reopenTT(termId, hlId) {
   const el = termId ? document.querySelector(`[data-rterm="${termId}"]`) : null;
   const r = el ? el.getBoundingClientRect() : _ttRect;
   if (!r || !_ttTerm) { hideTT(); return; }
-  showTT(r, _ttTerm, termId || null);
+  showTT(r, _ttTerm, termId || null, hlId === undefined ? undefined : (hlId || null));
 }
 // Clicking a saved chip selects it and opens the tooltip on it, with the tooltip's
 // actions (highlight/translate/undo) pointed at exactly that item's span.
@@ -3473,7 +3471,7 @@ async function showInlineTranslation(term, anchorRect) {
   if (canSentence && S.settings.reader.transSentence) addSentenceTranslation();
 }
 
-// small 3-colour popover (click to open, click a colour to apply)
+// small 3-color popover (click to open, click a color to apply)
 function openXlateColors(anchorBtn, onPick) {
   const old = document.getElementById('xlate-colors'); if (old) old.remove();
   const pop = document.createElement('div');
@@ -3604,7 +3602,7 @@ async function addReaderHighlight(term, color, range) {
       if (existing.highlightId && S.highlights[existing.highlightId]) await VocabStore.updateHighlight(existing.highlightId, { color });
       await VocabStore.set({ texts: S.texts });
     } catch (e) { console.warn('[vocab] highlight recolor failed', e); }
-    return;
+    return existing.highlightId || null;
   }
 
   // clear overlapping highlights + add the new one — optimistically
@@ -3623,24 +3621,67 @@ async function addReaderHighlight(term, color, range) {
       const m = t2 && (t2.marks||[]).find(x => x.type==='hl' && x.start===idx && x.end===end && !x.highlightId);
       // same as saved terms: no data-rhl until the id exists, so re-render to wire it up
       if (m) { m.highlightId = res.id; render(); await VocabStore.set({ texts: S.texts }); }
+      return res.id;
     }
   } catch (e) { console.warn('[vocab] highlight failed', e); }
+  return null;
+}
+
+// The highlight whose mark exactly matches a {start,end} range, if any.
+function highlightIdForRange(range) {
+  if (!range) return null;
+  const text = S.texts[ui.readerTextId];
+  if (!text) return null;
+  const m = (text.marks||[]).find(x => x.type==='hl' && x.highlightId && x.start===range.start && x.end===range.end);
+  return m ? m.highlightId : null;
+}
+
+// Remove a highlight from the reader (the un-highlight half of the toggle).
+async function removeReaderHighlight(hlId) {
+  const text = S.texts[ui.readerTextId];
+  if (text) {
+    text.marks = (text.marks||[]).filter(m => !(m.type==='hl' && m.highlightId===hlId));
+    text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
+  }
+  render();
+  try {
+    await VocabStore.set({ texts: S.texts });
+    await VocabStore.removeHighlights([hlId]);
+  } catch (e) { console.warn('[vocab] un-highlight failed', e); }
+}
+
+// Same key both ways: highlight the selection, or remove the highlight if it's
+// already highlighted with this exact span.
+async function toggleReaderHighlight(term, color) {
+  const hid = highlightIdForRange(ui.lastSelRange);
+  if (hid) { await removeReaderHighlight(hid); return null; }
+  return await addReaderHighlight(term, color);
+}
+
+// Same key both ways: save the selection, or undo the save if it's already saved.
+async function toggleReaderSave(term) {
+  const id = savedTermIdForRange(ui.lastSelRange);
+  if (id) { await unsaveReaderTerm(id); return null; }
+  return await addReaderTerm(term, 'saved');
 }
 
 // Return the precise {start,end} of the current selection in the body, using the
-// captured DOM range. Falls back to first-occurrence only if the range is missing.
+// captured DOM range, which maps word spans to exact body offsets.
 function findSelectionRange(body, term) {
   const r = ui.lastSelRange;
-  if (r && r.start >= 0 && r.end <= body.length && r.end > r.start) {
-    // sanity: the captured slice should match the term ignoring whitespace
-    const slice = body.slice(r.start, r.end).replace(/\s+/g,' ').trim();
-    if (slice === term.replace(/\s+/g,' ').trim()) return { start: r.start, end: r.end };
-    // accept anyway if lengths are close (whitespace drift), trusting the DOM anchor
-    if (Math.abs((r.end - r.start) - term.length) <= 3) return { start: r.start, end: r.end };
-  }
+  // The DOM anchor is authoritative. The old code cross-checked it against the
+  // selection's text and bailed on a mismatch — but a selection crossing a saved chip
+  // comes back with line breaks injected around it (chips are inline-block), so that
+  // check failed and saving/highlighting across a chip silently did nothing.
+  if (r && r.start >= 0 && r.end <= body.length && r.end > r.start) return { start: r.start, end: r.end };
+  const norm = (term || '').replace(/\s+/g, ' ').trim();
+  if (!norm) return null;
   const idx = body.indexOf(term);
-  if (idx < 0) return null;
-  return { start: idx, end: idx + term.length };
+  if (idx >= 0) return { start: idx, end: idx + term.length };
+  // whitespace-tolerant search, so injected line breaks can't defeat the fallback
+  const rx = new RegExp(norm.split(' ').map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
+  const mm = body.match(rx);
+  return mm ? { start: mm.index, end: mm.index + mm[0].length } : null;
 }
 function findSelectionIndex(body, term) {
   const r = findSelectionRange(body, term);
@@ -3931,8 +3972,10 @@ function runHotkey(action, selText) {
         showInlineTranslation(term, rect);
       }
     } break;
-    case 'saveTerm': { const term = selText(); if (term) { addReaderTerm(term, 'saved').then(id => reopenTT(id)); } } break;
-    case 'highlight': { const term = selText(); if (term) { addReaderHighlight(term, S.settings.reader.lastColor || 'yellow').then(() => reopenTT(savedTermIdForRange(ui.lastSelRange))); } } break;
+    // After a save/highlight the reader re-renders, which clears the text selection —
+    // so fall back to whatever the open tooltip is pointed at, letting the same key undo.
+    case 'saveTerm': { const term = selText() || (ttEl ? _ttTerm : ''); if (term) { toggleReaderSave(term).then(id => reopenTT(id, undefined)); } } break;
+    case 'highlight': { const term = selText() || (ttEl ? _ttTerm : ''); if (term) { toggleReaderHighlight(term, S.settings.reader.lastColor || 'yellow').then(id => reopenTT(_ttSavedId, id)); } } break;
     case 'sizeUp': S.settings.reader.size = Math.min(SIZES.length - 1, S.settings.reader.size + 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
     case 'sizeDown': S.settings.reader.size = Math.max(0, S.settings.reader.size - 1); VocabStore.set({ settings: S.settings }); applyReaderSize(); break;
   }
