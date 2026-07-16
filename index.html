@@ -115,6 +115,35 @@ async function start(user){
   }
   boot.remove();
   openDeepLink();
+  watchRemoteChanges(user.id);
+}
+
+// Live updates: anything saved from the extension (or another tab) lands in Supabase,
+// not in this page, so nothing here would know about it. Realtime pushes those changes;
+// re-focusing the tab is the fallback for when Realtime isn't available.
+function watchRemoteChanges(uid){
+  let timer = null, lastReload = 0;
+  const bump = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      // our own save already refreshed the screen — don't re-download the library for it
+      if (VocabStore.sinceLocalWrite && VocabStore.sinceLocalWrite() < 2500) return;
+      if (Date.now() - lastReload < 1500) return;
+      lastReload = Date.now();
+      try { await VocabStore.reload(); } catch(e){ console.warn('[vocab] refresh failed', e); }
+    }, 500);
+  };
+
+  try {
+    const ch = sb.channel('vocab-live');
+    for (const table of ['items','highlights','sources','collections','collection_items','settings']) {
+      ch.on('postgres_changes', { event:'*', schema:'public', table, filter:'user_id=eq.'+uid }, bump);
+    }
+    ch.subscribe(s => console.log('[vocab] realtime:', s));
+  } catch(e){ console.warn('[vocab] realtime unavailable', e); }
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) bump(); });
+  window.addEventListener('focus', bump);
 }
 
 sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
