@@ -699,6 +699,16 @@ tr.sel .chip, .chip.sel { background: var(--g-soft); color: var(--g-text); borde
 .sb-manualadd svg { width: 13px; height: 13px; }
 .sb-onpage { margin-bottom: 0; }
 
+/* plug-in appearance on web pages: bright / dark / glass */
+.sb-theme { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.sb-th { width: 16px; height: 16px; border-radius: 5px; border: 0.5px solid var(--border2); cursor: pointer; padding: 0; }
+.sb-th-light { background: #ffffff; }
+.sb-th-dark  { background: #24261f; }
+.sb-th-glass { background: linear-gradient(135deg, rgba(255,255,255,.95) 40%, rgba(168,207,142,.55)); }
+.sb-th:hover { transform: scale(1.1); }
+/* same selected ring as the highlight color picker */
+.sb-th.on { box-shadow: 0 0 0 1.5px var(--white), 0 0 0 3px var(--g-line); }
+
 /* manual add color picker */
 .ma-colors { display: flex; gap: 8px; padding: 2px 0; }
 .ma-colors .hl-line { width: 34px; height: 9px; }

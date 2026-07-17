@@ -484,7 +484,11 @@ function renderSidebar() {
       </div>
       <div class="sb-foot">
         <div class="sb-foot-row">
-          <label class="sb-onpage" title="Paint your highlights in color on the web page itself"><input type="checkbox" id="sb-onpage" ${(S.settings.web&&S.settings.web.showOnPage===false)?'':'checked'}> Paint highlights on pages</label>
+          <label class="sb-onpage" title="Show your saved chips and highlights on the web page itself"><input type="checkbox" id="sb-onpage" ${(S.settings.web&&S.settings.web.showOnPage===false)?'':'checked'}> Marks on pages</label>
+          <div class="sb-theme" title="How the plug-in looks on web pages">
+            ${[['light','Bright'],['dark','Dark'],['glass','Glass']].map(([k,label]) =>
+              `<button class="sb-th sb-th-${k} ${((S.settings.web&&S.settings.web.theme)||'light')===k?'on':''}" data-th="${k}" title="${label}"></button>`).join('')}
+          </div>
           <button class="sb-manualadd" id="sb-manualadd" title="Add an item or highlight manually">${icon('compose')} Add</button>
         </div>
         <button class="open-full" id="sb-openfull">${icon('ext')} Open full view</button>
@@ -540,6 +544,13 @@ function renderSidebar() {
     S.settings.web.showOnPage = onpage.checked;
     await VocabStore.set({ settings: S.settings });
   };
+  // how the plug-in's tooltip/panel look on web pages: bright, dark, or glass
+  document.querySelectorAll('[data-th]').forEach(b => b.onclick = async () => {
+    S.settings.web = S.settings.web || {};
+    S.settings.web.theme = b.dataset.th;
+    await VocabStore.set({ settings: S.settings });
+    renderSidebar();
+  });
   const tipToggle = document.getElementById('sb-tooltiptoggle');
   if (tipToggle) tipToggle.onclick = async () => {
     S.settings.web = S.settings.web || {};
