@@ -218,6 +218,15 @@ const VocabStore = (() => {
       for (const k of Object.keys(obj)) MEM[k] = clone(obj[k]);
       const changes = {}; for (const k of Object.keys(obj)) changes[k] = { oldValue: prev[k], newValue: clone(obj[k]) };
       fireChange(changes);
+      // Announce our own writes to any extension content script sharing this page (the
+      // website runs one, on <all_urls>). It relays to the service worker, which tells
+      // the sidebar to re-read — so reader saves appear in the sidebar live, without the
+      // sidebar having to be focused. Guarded to data keys; ignored everywhere else.
+      try {
+        if (typeof window !== 'undefined' && window.postMessage) {
+          window.postMessage({ __vocabLocalWrite: true, keys: Object.keys(obj) }, '*');
+        }
+      } catch {}
     })();
   }
 
