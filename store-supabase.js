@@ -14,24 +14,21 @@
 // ── minimal `chrome` stub so app.js's 3 extension calls are harmless ──────────
 // app.js re-renders by reacting to chrome.storage.onChanged; our set() fires it.
 (function () {
-  // The store fires re-renders through window.__vocabFire, which we own here and which
-  // app.js listens to. We must NOT reuse Chrome's real chrome.storage.onChanged: in the
-  // extension sidebar that bus exists but nothing writes to it, so app.js would listen on
-  // a dead channel and no sidebar action would re-render until a tab refresh. So we always
-  // install our own dispatcher, whether or not a real chrome.* is present.
+  // The store owns its own change dispatcher, exposed as window.__vocabOnChange for
+  // subscribers (app.js) and window.__vocabFire for the store to emit. This is
+  // deliberately independent of chrome.storage.onChanged: on a real extension page that
+  // is a read-only host accessor we can't replace, so routing through it would strand
+  // app.js on a bus nothing writes to (the "needs a refresh" bug). Our own hook works
+  // identically on the website and in the sidebar.
   const listeners = [];
-  window.__vocabListeners = listeners;
+  window.__vocabOnChange = (fn) => { if (typeof fn === 'function') listeners.push(fn); };
   window.__vocabFire = (changes) => { for (const fn of listeners) { try { fn(changes); } catch (e) { console.error(e); } } };
 
+  // Keep a minimal chrome stub for the website (no extension APIs there). In the
+  // extension the real chrome already exists; we leave it untouched.
   window.chrome = window.chrome || {};
   window.chrome.storage = window.chrome.storage || {};
-  // Keep any real onChanged reachable, but route addListener to OUR list either way.
-  const realOnChanged = window.chrome.storage.onChanged;
-  window.chrome.storage.onChanged = {
-    _listeners: listeners,
-    _real: realOnChanged,
-    addListener(fn) { listeners.push(fn); }
-  };
+  if (!window.chrome.storage.onChanged) window.chrome.storage.onChanged = { addListener() {} };
   window.chrome.runtime = window.chrome.runtime || { sendMessage() {}, lastError: undefined };
 })();
 

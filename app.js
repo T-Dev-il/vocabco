@@ -66,7 +66,16 @@ let _lastSeenToken = 0;
 // Mark that the app itself is about to write; onChanged will skip re-render for it.
 function markSelfWrite() { _selfWriteToken = Date.now() + Math.random(); window.__vocabWriteToken = _selfWriteToken; }
 
-chrome.storage.onChanged.addListener(async (changes) => {
+// Subscribe to store changes. The store owns __vocabOnChange (set up in
+// store-supabase.js) and calls it on every write. We use it directly rather than
+// chrome.storage.onChanged, because on a real extension page that API is a read-only
+// host accessor the store can't replace — listening there means listening on a dead bus
+// that nothing writes to, which is what forced a manual refresh after every sidebar edit.
+const __vocabSubscribe = (fn) => {
+  if (window.__vocabOnChange) window.__vocabOnChange(fn);
+  else if (window.chrome && chrome.storage && chrome.storage.onChanged) chrome.storage.onChanged.addListener(fn);
+};
+__vocabSubscribe(async (changes) => {
   // If only the engagement counter changed, never re-render (it would reset scroll).
   const keys = Object.keys(changes);
   if (keys.length === 1 && keys[0] === 'texts') {
