@@ -127,6 +127,14 @@ function esc(s) {
 function broadcastRemovePaint(ids) {
   try { chrome.runtime.sendMessage({ action: 'broadcastRemovePaint', ids }, () => void chrome.runtime.lastError); } catch {}
 }
+// Mirror the sidebar's selection onto web pages (chips turn green there too). No-op on
+// the website: window.__vocabInSidebar is set only by sidebar-boot, and the try/catch
+// swallows the missing chrome.runtime. app.js calls this wherever ui.sbSel changes.
+function broadcastSidebarSelection() {
+  if (!window.__vocabInSidebar) return;
+  if (window.__vocabApplyingRemoteSel && window.__vocabApplyingRemoteSel()) return; // don't echo the page's own change back
+  try { chrome.runtime.sendMessage({ action: 'sidebarSelectionChanged', ids: [...ui.sbSel] }, () => void chrome.runtime.lastError); } catch {}
+}
 // Focus only when we're the top document; autofocus is blocked in the sidebar iframe.
 function safeFocus(el) { try { if (!IS_SIDEBAR && el) el.focus(); } catch {} }
 
@@ -501,7 +509,18 @@ function renderSidebar() {
     el.addEventListener('click', (e) => {
       if (e.target.closest('.sb-x')) return;
       const id = el.dataset.id;
-      if (ui.sbSel.has(id)) ui.sbSel.delete(id); else ui.sbSel.add(id);
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (ui.sbSel.has(id)) {
+        // deselecting the last of a large selection: same guard as the reader
+        if (!ctrl && ui.sbSel.size >= DESELECT_GUARD) {
+          showListDeselectConfirm(e, ui.sbSel.size, () => { ui.sbSel.clear(); broadcastSidebarSelection(); renderSidebar(); });
+          return;
+        }
+        ui.sbSel.delete(id);
+      } else {
+        ui.sbSel.add(id);
+      }
+      broadcastSidebarSelection();
       renderSidebar();
     });
   });
@@ -510,7 +529,7 @@ function renderSidebar() {
       e.stopPropagation();
       ui.sbSel.delete(btn.dataset.x);
       if (mode==='highlights') { await VocabStore.removeHighlights([btn.dataset.x]); broadcastRemovePaint([btn.dataset.x]); }
-      else await VocabStore.removeTerms([btn.dataset.x]);
+      else { await VocabStore.removeTerms([btn.dataset.x]); broadcastRemovePaint([btn.dataset.x]); }
     });
   });
 

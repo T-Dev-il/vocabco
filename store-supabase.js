@@ -14,11 +14,24 @@
 // ── minimal `chrome` stub so app.js's 3 extension calls are harmless ──────────
 // app.js re-renders by reacting to chrome.storage.onChanged; our set() fires it.
 (function () {
-  if (window.chrome && window.chrome.storage && window.chrome.storage.onChanged) return;
+  // The store fires re-renders through window.__vocabFire, which we own here and which
+  // app.js listens to. We must NOT reuse Chrome's real chrome.storage.onChanged: in the
+  // extension sidebar that bus exists but nothing writes to it, so app.js would listen on
+  // a dead channel and no sidebar action would re-render until a tab refresh. So we always
+  // install our own dispatcher, whether or not a real chrome.* is present.
   const listeners = [];
+  window.__vocabListeners = listeners;
+  window.__vocabFire = (changes) => { for (const fn of listeners) { try { fn(changes); } catch (e) { console.error(e); } } };
+
   window.chrome = window.chrome || {};
   window.chrome.storage = window.chrome.storage || {};
-  window.chrome.storage.onChanged = { _listeners: listeners, addListener(fn) { listeners.push(fn); } };
+  // Keep any real onChanged reachable, but route addListener to OUR list either way.
+  const realOnChanged = window.chrome.storage.onChanged;
+  window.chrome.storage.onChanged = {
+    _listeners: listeners,
+    _real: realOnChanged,
+    addListener(fn) { listeners.push(fn); }
+  };
   window.chrome.runtime = window.chrome.runtime || { sendMessage() {}, lastError: undefined };
 })();
 
@@ -53,6 +66,9 @@ const VocabStore = (() => {
   async function rowId(extId) { if (!_idCache.has(extId)) _idCache.set(extId, await detUuid(UID + '|' + extId)); return _idCache.get(extId); }
 
   function fireChange(changes) {
+    // Use our own dispatcher (set up in the chrome stub above); it's the same list app.js
+    // registers on, and it works identically on the website and in the extension sidebar.
+    if (window.__vocabFire) { window.__vocabFire(changes); return; }
     const ls = (window.chrome.storage.onChanged._listeners) || [];
     for (const fn of ls) { try { fn(changes); } catch (e) { console.error(e); } }
   }
