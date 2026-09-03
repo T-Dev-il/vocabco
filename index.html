@@ -35,16 +35,36 @@
 </div>
 <div id="root"></div>
 
+<script src="config.js"></script>
 <script src="store-supabase.js"></script>
 <script>
-const SUPABASE_URL  = "https://vinebdanjgggbcfxrvqd.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpbmViZGFuamdnZ2JjZnhydnFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NjAxNDcsImV4cCI6MjA5ODEzNjE0N30.Pca73qGNWBu3euKFnQiIXzOIbGCj_18_yzbP-Fh8d3Q";
+// ── which database ──────────────────────────────────────────────────────
+// Remembered per browser. Live unless deliberately changed: sign out, then
+// click the "Vocab Collector" heading five times. Or put #env in the address
+// bar. See schema-log.md.
+let ENV_NAME = null;
+try { ENV_NAME = localStorage.getItem('vocabEnv'); } catch (e) {}
+if (!VOCAB_ENVS[ENV_NAME]) ENV_NAME = VOCAB_DEFAULT_ENV;
+const SUPABASE_URL  = VOCAB_ENVS[ENV_NAME].url;
+const SUPABASE_ANON = VOCAB_ENVS[ENV_NAME].anon;
+function switchEnv(name) {
+  try { localStorage.setItem('vocabEnv', name); } catch (e) {}
+  location.hash = '';          // or the picker reopens on the way back in
+  location.reload();
+}
 const DEEP_HASH = location.hash;  // stash before Supabase can strip it
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
 const $ = id => document.getElementById(id);
 // exposed for the app's header menu (hamburger, top-left)
 window.appSignOut = async ()=>{ await sb.auth.signOut(); location.reload(); };
 let signup = false, started = false;
+
+// The badge shows on dev and never on live. The gesture sits on the sign-in
+// heading, so switching is reachable only while signed out — which is right,
+// since the two databases have separate accounts anyway.
+vocabEnvBanner(ENV_NAME, switchEnv);
+vocabEnvGesture(document.querySelector('#auth h1'), ENV_NAME, switchEnv);
+if (/^#env\b/.test(DEEP_HASH || '')) vocabEnvPicker(ENV_NAME, switchEnv);
 
 $('toggle').onclick = () => {
   signup = !signup;
