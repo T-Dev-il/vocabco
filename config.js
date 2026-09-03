@@ -125,6 +125,21 @@ function vocabEnvBanner(current, onPick) {
 // you know, invisible when you don't.
 // ─────────────────────────────────────────────────────────────────────────
 
+// The sidebar has no reachable sign-out, so its sign-in heading may never be on
+// screen — which left the switch unreachable there. This is the way in that does
+// not depend on being signed out: a transparent 16px corner, bottom-right, away
+// from the dev badge. Five clicks opens the picker. Nothing to see, nothing to
+// hit by accident.
+function vocabEnvHotspot(current, onPick) {
+  if (typeof document === 'undefined' || document.getElementById('vocab-env-hotspot')) return;
+  const h = document.createElement('div');
+  h.id = 'vocab-env-hotspot';
+  h.style.cssText = 'position:fixed;right:0;bottom:0;width:16px;height:16px;' +
+    'z-index:2147483645;background:transparent';
+  document.body.appendChild(h);
+  vocabEnvGesture(h, current, onPick);
+}
+
 function vocabEnvGesture(el, current, onPick) {
   if (typeof document === 'undefined' || !el) return;
   let n = 0, t = null;
