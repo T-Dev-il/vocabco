@@ -171,24 +171,25 @@ const VocabStore = (() => {
 
   // Phase 2: fetch sources, build texts, merge in, re-render.
   //
-  // FIX-004. This deliberately does NOT ask for `segments` — the word-by-word video
-  // transcripts, measured at 1,509 kB of a 3,109 kB payload, downloaded on every
-  // library load and every window focus to draw a screen that shows titles. They are
-  // fetched per-video by loadSourceContent() when the reader actually opens one.
+  // FIX-004 / FIX-006. This deliberately does NOT ask for `body` or `segments` —
+  // article text (1,589 kB) and word-by-word video transcripts (1,509 kB) out of a
+  // 3,109 kB payload, downloaded on every library load and every window focus to draw
+  // a screen that shows titles. Both are fetched per-source by loadSourceContent()
+  // when the reader actually opens one.
   //
   // `marks` IS still fetched. It is 8 kB in total, and four screens outside the reader
   // read it — tile counts, the activity feed, duplicate and merge. Dropping it saved
   // 0.26% and broke all four. Don't.
   //
-  // Videos built here carry `_lite: true`, meaning "segments were never loaded for
-  // this one". That flag is load-bearing: srcToRow() reads it and omits the column
-  // from writes, so a rename or a folder drag can never blank a transcript. Do not
-  // drop the flag without reading srcToRow().
+  // Everything built here carries `_lite: true`, meaning "content was never loaded
+  // for this one". That flag is load-bearing: srcToRow() reads it and omits those
+  // columns from writes, so a rename or a folder drag can never blank an article.
+  // Do not drop the flag without reading srcToRow().
   //
-  // `body` is still fetched. It cannot leave until the reader stops creating empty
-  // texts, because four places in app.js decide whether a text is a blank scratch
-  // draft by looking at its body. See the backlog item on empty text creation.
-  const SRC_COLS = 'ext_id,title,body,marks,url,video_id,folder_id,engaged_ms,' +
+  // `body` could only leave once blank texts stopped being created (FIX-005). Four
+  // screens used to inspect it to tell a real text from an abandoned scratch draft;
+  // now a text that reached the database is real by definition. See hasSubstance().
+  const SRC_COLS = 'ext_id,title,marks,url,video_id,folder_id,engaged_ms,' +
                    'last_active_at,created_at,updated_at,deleted_at';
   async function hydrateSources() {
     try {
@@ -201,14 +202,13 @@ const VocabStore = (() => {
         if (!r.ext_id) continue;
         const id = r.ext_id;
         const x = {
-          id, name: r.title || 'Untitled', body: r.body || '', marks: Array.isArray(r.marks) ? r.marks : [],
+          id, name: r.title || 'Untitled', body: '', _lite: true, marks: Array.isArray(r.marks) ? r.marks : [],
           folderId: r.folder_id ? (_collExt.get(r.folder_id) || null) : null,
           sourceUrl: r.url || '', sourceTitle: r.title || '',
           createdAt: msOf(r.created_at) || Date.now(), updatedAt: msOf(r.updated_at) || Date.now(),
           lastActiveAt: msOf(r.last_active_at) || Date.now(), engagedMs: r.engaged_ms || 0
         };
-        // only videos have transcripts, so only videos are incomplete
-        if (r.video_id) { x.videoId = r.video_id; x.segments = []; x._lite = true; }
+        if (r.video_id) { x.videoId = r.video_id; x.segments = []; }
         if (r.deleted_at) x.deletedAt = msOf(r.deleted_at);
         texts[id] = x;
       }
@@ -218,9 +218,10 @@ const VocabStore = (() => {
     } catch (e) { console.error('[vocab] hydrate failed', e); }
   }
 
-  // FIX-004. Fetch the transcript for ONE video, on demand — called when the reader
-  // opens it. Clears the `_lite` flag for that one text, after which it saves normally
-  // because it now genuinely holds its own transcript.
+  // FIX-004 / FIX-006. Fetch the content for ONE source, on demand — called when the
+  // reader opens it, and by duplicate and merge, which also need real text. Clears the
+  // `_lite` flag for that one text, after which it saves normally because it now
+  // genuinely holds its own content.
   //
   // Resolves to true when the text is complete and the caller should re-render, false
   // when there was nothing to do or the fetch failed. On failure the flag STAYS set,
@@ -234,15 +235,16 @@ const VocabStore = (() => {
     const p = (async () => {
       try {
         const { data, error } = await SB.from('sources')
-          .select('ext_id,segments').eq('ext_id', extId).limit(1);
-        if (error) { console.error('[vocab] transcript load failed:', error.message); return false; }
+          .select('ext_id,body,segments').eq('ext_id', extId).limit(1);
+        if (error) { console.error('[vocab] content load failed:', error.message); return false; }
         const cur = MEM && MEM.texts && MEM.texts[extId];
         if (!cur) return false;
         const r = (data && data[0]) || {};
-        cur.segments = Array.isArray(r.segments) ? r.segments : [];
+        cur.body = r.body || '';
+        if (cur.videoId) cur.segments = Array.isArray(r.segments) ? r.segments : [];
         delete cur._lite;
         return true;
-      } catch (e) { console.error('[vocab] transcript load failed', e); return false; }
+      } catch (e) { console.error('[vocab] content load failed', e); return false; }
       finally { _contentLoading.delete(extId); }
     })();
     _contentLoading.set(extId, p);
@@ -331,11 +333,11 @@ const VocabStore = (() => {
       deleted_at: c.deletedAt ? iso(c.deletedAt) : null
     };
   }
-  // FIX-004. A video flagged `_lite` never had its transcript loaded, so the empty
-  // `segments` array on it is a placeholder, NOT the truth. Writing it would blank the
-  // real transcript in the database — silently, permanently, on a rename or a folder
-  // drag. So the column is omitted entirely for lite rows and the database keeps what
-  // it already has.
+  // FIX-004 / FIX-006. A source flagged `_lite` never had its content loaded, so the
+  // empty `body` and `segments` on it are placeholders, NOT the truth. Writing them
+  // would blank the real article in the database — silently, permanently, on a rename
+  // or a folder drag. So those columns are omitted entirely for lite rows and the
+  // database keeps what it already has.
   //
   // Because the two shapes differ, lite and full rows must never go into the same
   // upsert batch: PostgREST takes its column list from the first object in the array
@@ -344,7 +346,7 @@ const VocabStore = (() => {
   async function srcToRow(x) {
     const row = {
       id: await rowId(x.id), ext_id: x.id, user_id: UID, kind: x.videoId ? 'video' : 'text',
-      title: x.name || 'Untitled', url: x.sourceUrl || '', body: x.body || '',
+      title: x.name || 'Untitled', url: x.sourceUrl || '',
       video_id: x.videoId || null,
       folder_id: x.folderId ? await rowId(x.folderId) : null, engaged_ms: x.engagedMs || 0,
       last_active_at: x.lastActiveAt ? iso(x.lastActiveAt) : null,
@@ -352,7 +354,7 @@ const VocabStore = (() => {
       deleted_at: x.deletedAt ? iso(x.deletedAt) : null
     };
     row.marks = x.marks || [];
-    if (!x._lite) row.segments = x.segments || null;
+    if (!x._lite) { row.body = x.body || ''; row.segments = x.segments || null; }
     return row;
   }
   const changed = (a, b) => !a || JSON.stringify(a) !== JSON.stringify(b);

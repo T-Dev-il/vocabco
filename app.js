@@ -1568,8 +1568,12 @@ async function itemDuplicate(type, id) {
     }
     await VocabStore.set({ highlightLists:S.highlightLists, highlights:S.highlights });
   } else if (type==='text') {
+    // FIX-006: bodies are not loaded with the library, so fetch the original's before
+    // copying it — otherwise the duplicate is silently empty.
+    if (S.texts[id] && S.texts[id]._lite) { await VocabStore.loadSourceContent(id); S.texts = (await VocabStore.get(['texts'])).texts; }
     const src = S.texts[id]; const nid = VocabStore.uid('x_');
     S.texts[nid] = { ...src, id:nid, name: src.name+' (copy)', marks:JSON.parse(JSON.stringify(src.marks||[])), createdAt:Date.now(), updatedAt:Date.now() };
+    delete S.texts[nid]._lite;   // it holds real content now, so it may be written in full
     delete S.texts[nid].deletedAt;
     await VocabStore.set({ texts:S.texts });
   } else if (type==='folder') {
@@ -1722,7 +1726,7 @@ function openCombineDialog(srcId, targetId, kind = 'list') {
 
 // Combine two texts: append source's body to the target with a divider.
 function openTextCombineDialog(srcId, targetId) {
-  const src = S.texts[srcId], target = S.texts[targetId];
+  let src = S.texts[srcId], target = S.texts[targetId];   // FIX-006: re-pointed by ensureBodies()
   if (!src || !target) return;
   const m = showModal(`
     <h3>Combine texts</h3>
@@ -1740,7 +1744,15 @@ function openTextCombineDialog(srcId, targetId) {
     <div class="modal-btns"><button class="btn" id="m-cancel">Cancel</button></div>`);
 
   const DIV = '\n\n──────────\n\n';
+  // FIX-006: merging reads both bodies, and neither is loaded with the library.
+  const ensureBodies = async () => {
+    for (const t of [target, src]) if (t && t._lite) await VocabStore.loadSourceContent(t.id);
+    // refreshing S.texts hands back NEW objects, so re-point or we edit stale copies
+    S.texts = keepDrafts((await VocabStore.get(['texts'])).texts, localDrafts(S.texts));
+    src = S.texts[srcId]; target = S.texts[targetId];
+  };
   m.querySelector('#opt-append').onclick = async () => {
+    await ensureBodies();
     const base = (target.body||'').replace(/\s+$/,'');
     const addition = (base ? DIV : '') + `${src.name}\n\n` + (src.body||'');
     const offset = base.length + addition.length - (src.body||'').length;
@@ -1753,6 +1765,7 @@ function openTextCombineDialog(srcId, targetId) {
     closeModal(); toastInApp(`Added to ${target.name}`); render();
   };
   m.querySelector('#opt-newtext').onclick = async () => {
+    await ensureBodies();   // FIX-006: this path reads both bodies too
     closeModal();
     const m2 = showModal(`
       <h3>Name the new text</h3>
@@ -2366,6 +2379,13 @@ function ensureReaderText() {
 // settled, the body can leave the library load and this function keeps working.
 function hasSubstance(t) {
   if (!t) return false;
+  // FIX-006. A text that reached the database is real by definition — it passed this
+  // same test when it was saved. Re-examining its contents here is what forced every
+  // article body to be downloaded with the library. Only unsaved drafts are judged.
+  //
+  // This means legacy blank rows created before FIX-005 will now show in the library
+  // instead of being hidden and swept. They are cleared once, by hand, at deploy.
+  if (!t._draft) return true;
   if ((t.body || '').trim()) return true;
   if (t.marks && t.marks.length) return true;
   const nm = (t.name || '').trim();
