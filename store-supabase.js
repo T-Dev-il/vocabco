@@ -395,13 +395,21 @@ const VocabStore = (() => {
         // skip
       } else {
         // FIX-004: two shapes, two batches. See the note above srcToRow().
+        // FIX-005: `_draft` texts have never been written and must not be. app.js is
+        // careful about this, but `set({texts})` is called from a dozen places — folder
+        // drags, deletes, merges — and any of them would otherwise write out whatever
+        // blank draft happened to be open in the reader. The guard lives here so it
+        // covers all of them rather than depending on each caller remembering.
         const full = [], lite = [];
-        for (const id in next) if (changed(was[id], next[id])) {
+        for (const id in next) {
+          if (next[id]._draft) continue;
+          if (!changed(was[id], next[id])) continue;
           (next[id]._lite ? lite : full).push(await srcToRow(next[id]));
         }
         if (full.length) await upsert('sources', full, 'user_id,ext_id');
         if (lite.length) await upsert('sources', lite, 'user_id,ext_id');
-        for (const id in was) if (!next[id]) { const { error } = await SB.from('sources').delete().eq('id', await rowId(id)); if (error) throw new Error('src del: ' + error.message); }
+        // a draft that disappears was never in the database, so there is nothing to delete
+        for (const id in was) if (!next[id] && !was[id]._draft) { const { error } = await SB.from('sources').delete().eq('id', await rowId(id)); if (error) throw new Error('src del: ' + error.message); }
       }
     }
     if ('prompts' in obj || 'settings' in obj || 'session' in obj) {

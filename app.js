@@ -647,9 +647,12 @@ function renderFull() {
   if (ui.view === 'reader') { renderReader(body); return; }
   removeFsOverlay(); stopSpeak(); closeAllReaderNotes(); destroyVideoLayer(); removeFollowBtn();
   // discard empty untitled scratch texts left behind by the reader
+  // FIX-005: these are legacy leftovers only — the reader no longer creates them.
+  // The test is hasSubstance(), so a text the user deliberately titled survives
+  // even with nothing in it.
   let removedEmpty = false;
   for (const t of Object.values(S.texts)) {
-    if (!(t.body||'').trim() && (!t.marks || !t.marks.length)) { delete S.texts[t.id]; removedEmpty = true; }
+    if (!hasSubstance(t)) { delete S.texts[t.id]; removedEmpty = true; }
   }
   if (removedEmpty) VocabStore.set({ texts: S.texts });
 
@@ -677,7 +680,7 @@ function renderLeftNav() {
     const open = f._open !== false;
     const childFolders = Object.values(S.folders).filter(x => (x.parentId||null) === f.id && !x.deletedAt);
     const childLists = Object.values(S.lists).filter(l => (l.folderId||null) === f.id && !l.deletedAt);
-    const childTexts = Object.values(S.texts).filter(t => (t.folderId||null) === f.id && (t.body||'').trim() && !t.deletedAt);
+    const childTexts = Object.values(S.texts).filter(t => (t.folderId||null) === f.id && hasSubstance(t) && !t.deletedAt);
     const childHlLists = Object.values(S.highlightLists||{}).filter(l => (l.folderId||null) === f.id && !l.deletedAt);
     return `
       <div class="tree-folder ${open?'open':''}" data-folder="${f.id}" style="padding-left:${8+depth*12}px">
@@ -695,7 +698,7 @@ function renderLeftNav() {
 
   const rootFolders = Object.values(S.folders).filter(f => !f.parentId && !f.deletedAt);
   const looseLists = Object.values(S.lists).filter(l => !l.folderId && !l.deletedAt);
-  const looseTexts = Object.values(S.texts).filter(t => !t.folderId && (t.body||'').trim() && !t.deletedAt);
+  const looseTexts = Object.values(S.texts).filter(t => !t.folderId && hasSubstance(t) && !t.deletedAt);
   const looseHlLists = Object.values(S.highlightLists||{}).filter(l => !l.folderId && !l.deletedAt);
 
   return `
@@ -1131,7 +1134,7 @@ function renderActivityFeed(cpane) {
   if (ui.actFilter === 'all' || ui.actFilter === 'texts') {
     for (const t of Object.values(S.texts)) {
       if (t.deletedAt) continue;
-      if (!(t.body||'').trim()) continue;
+      if (!hasSubstance(t)) continue;
       if ((t.engagedMs||0) >= 60000 || (t.marks&&t.marks.length)) {
         items.push({ kind:'text', refId:t.id, name:t.name, at:t.lastActiveAt||t.updatedAt||t.createdAt,
           sub: textActivitySub(t) });
@@ -1219,7 +1222,7 @@ function renderLibrary(cpane) {
   for (const f of Object.values(S.folders)) if ((f.parentId||null) === curFolder && !f.deletedAt) tiles.push({ type:'folder', id:f.id, name:f.name, at:f.createdAt });
   for (const l of Object.values(S.lists)) if ((l.folderId||null) === curFolder && !l.deletedAt) tiles.push({ type:'list', id:l.id, name:l.name, at:l.updatedAt||l.createdAt });
   for (const l of Object.values(S.highlightLists||{})) if ((l.folderId||null) === curFolder && !l.deletedAt) tiles.push({ type:'hllist', id:l.id, name:l.name, at:l.updatedAt||l.createdAt });
-  for (const t of Object.values(S.texts)) if ((t.folderId||null) === curFolder && (t.body||'').trim() && !t.deletedAt) tiles.push({ type:'text', id:t.id, name:t.name, at:t.updatedAt||t.createdAt });
+  for (const t of Object.values(S.texts)) if ((t.folderId||null) === curFolder && hasSubstance(t) && !t.deletedAt) tiles.push({ type:'text', id:t.id, name:t.name, at:t.updatedAt||t.createdAt });
 
   if (ui.libSort === 'name') tiles.sort((a,b)=>a.name.localeCompare(b.name));
   else tiles.sort((a,b)=>(b.at||0)-(a.at||0));
@@ -1909,8 +1912,11 @@ function openNewVideoModal(folderId = null) {
 
 async function createNewText(folderId = null) {
   const id = VocabStore.uid('x_');
-  S.texts[id] = { id, name:'Untitled', body:'', marks:[], folderId: folderId||null, createdAt:Date.now(), updatedAt:Date.now(), lastActiveAt:Date.now(), engagedMs:0 };
-  await VocabStore.set({ texts: S.texts });
+  // FIX-005: created in memory only. `_draft` means "never written to the database".
+  // It is cleared by persistDraft() the moment the text has content or a title. Back
+  // out without typing and it simply evaporates, which is what should always have
+  // happened — the old code wrote a blank row here and swept it up later.
+  S.texts[id] = { id, name:'Untitled', body:'', marks:[], folderId: folderId||null, createdAt:Date.now(), updatedAt:Date.now(), lastActiveAt:Date.now(), engagedMs:0, _draft:true };
   ui.view = 'reader'; ui.readerTextId = id; ui.readerEditing = true;
   render();
 }
@@ -2319,12 +2325,31 @@ const SIZE_LABELS = ['XS','S','M','L','XL','2XL','3XL','4XL'];
 function ensureReaderText() {
   if (!ui.readerTextId || !S.texts[ui.readerTextId]) {
     const id = VocabStore.uid('x_');
-    S.texts[id] = { id, name:'Untitled', body:'', marks:[], folderId:null, createdAt:Date.now(), updatedAt:Date.now(), lastActiveAt:Date.now(), engagedMs:0 };
+    // FIX-005: draft only, see createNewText()
+    S.texts[id] = { id, name:'Untitled', body:'', marks:[], folderId:null, createdAt:Date.now(), updatedAt:Date.now(), lastActiveAt:Date.now(), engagedMs:0, _draft:true };
     ui.readerTextId = id;
     ui.readerEditing = true;
-    VocabStore.set({ texts: S.texts });
   }
   return S.texts[ui.readerTextId];
+}
+
+// FIX-005. Does this text amount to anything? Content, marks, or a title the user
+// actually chose. Everything that decides whether a text is real — whether to show
+// it, whether to keep it, whether to write it to the database — asks this one
+// question, so those answers can never drift apart.
+//
+// 'Untitled' is the placeholder the reader starts with, so it does not count as a
+// title. A user who types a name has expressed intent and the text survives empty.
+//
+// This deliberately does NOT look at the body alone. Four screens used to, which is
+// why article bodies still have to be downloaded with the library. Once this has
+// settled, the body can leave the library load and this function keeps working.
+function hasSubstance(t) {
+  if (!t) return false;
+  if ((t.body || '').trim()) return true;
+  if (t.marks && t.marks.length) return true;
+  const nm = (t.name || '').trim();
+  return !!nm && nm !== 'Untitled';
 }
 
 function renderReader(body) {
@@ -2469,7 +2494,7 @@ function renderReader(body) {
     const saveReadBtn = document.getElementById('r-saveread');
     if (saveReadBtn) saveReadBtn.onclick = () => { saveReaderBody(); ui.readerEditing=false; render(); };
     const nameInp = document.getElementById('r-name');
-    nameInp.onblur = () => { text.name = nameInp.value.trim()||'Untitled'; text.updatedAt=Date.now(); VocabStore.set({texts:S.texts}); };
+    nameInp.onblur = () => { text.name = nameInp.value.trim()||'Untitled'; text.updatedAt=Date.now(); persistDraft(text.id); };
     nameInp.onkeydown = (e) => { if (e.key==='Enter') nameInp.blur(); };
   }
 
@@ -2650,11 +2675,26 @@ function reactivateFollow() {
   hideFollowBtn();
 }
 
+// FIX-005. A draft becomes real the first time it has something in it. Until then
+// nothing is written at all — not a blank row, not a placeholder. Called from both
+// the body save and the title field, because either one can be what makes it real.
+// Returns true if anything was written.
+function persistDraft(id) {
+  const t = S.texts[id];
+  if (!t) return false;
+  if (t._draft) {
+    if (!hasSubstance(t)) return false;   // still nothing worth keeping
+    delete t._draft;
+  }
+  VocabStore.set({ texts: S.texts });
+  return true;
+}
+
 function saveReaderBody() {
   const ta = document.getElementById('r-textarea');
   if (ta && S.texts[ui.readerTextId]) S.texts[ui.readerTextId].body = ta.value;
   if (S.texts[ui.readerTextId]) { S.texts[ui.readerTextId].updatedAt = Date.now(); S.texts[ui.readerTextId].lastActiveAt = Date.now(); }
-  VocabStore.set({ texts: S.texts });
+  persistDraft(ui.readerTextId);
 }
 
 // ── render the read-only text with marks + per-word spans for TTS highlight ──
