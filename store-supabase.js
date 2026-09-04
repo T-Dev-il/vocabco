@@ -169,11 +169,31 @@ const VocabStore = (() => {
     hydrateSources();   // pull sources (text/transcript bodies) in the background
   }
 
-  // Phase 2: fetch sources with the proven select('*'), build texts, merge in, re-render.
+  // Phase 2: fetch sources, build texts, merge in, re-render.
+  //
+  // FIX-004. This deliberately does NOT ask for `segments` — the word-by-word video
+  // transcripts, measured at 1,509 kB of a 3,109 kB payload, downloaded on every
+  // library load and every window focus to draw a screen that shows titles. They are
+  // fetched per-video by loadSourceContent() when the reader actually opens one.
+  //
+  // `marks` IS still fetched. It is 8 kB in total, and four screens outside the reader
+  // read it — tile counts, the activity feed, duplicate and merge. Dropping it saved
+  // 0.26% and broke all four. Don't.
+  //
+  // Videos built here carry `_lite: true`, meaning "segments were never loaded for
+  // this one". That flag is load-bearing: srcToRow() reads it and omits the column
+  // from writes, so a rename or a folder drag can never blank a transcript. Do not
+  // drop the flag without reading srcToRow().
+  //
+  // `body` is still fetched. It cannot leave until the reader stops creating empty
+  // texts, because four places in app.js decide whether a text is a blank scratch
+  // draft by looking at its body. See the backlog item on empty text creation.
+  const SRC_COLS = 'ext_id,title,body,marks,url,video_id,folder_id,engaged_ms,' +
+                   'last_active_at,created_at,updated_at,deleted_at';
   async function hydrateSources() {
     try {
       const _t = performance.now();
-      const { data, error } = await SB.from('sources').select('*').limit(100000);
+      const { data, error } = await SB.from('sources').select(SRC_COLS).limit(100000);
       if (error) { console.error('[vocab] sources load failed:', error.message); return; }
       if (!data || !MEM) return;
       const texts = {};
@@ -187,7 +207,8 @@ const VocabStore = (() => {
           createdAt: msOf(r.created_at) || Date.now(), updatedAt: msOf(r.updated_at) || Date.now(),
           lastActiveAt: msOf(r.last_active_at) || Date.now(), engagedMs: r.engaged_ms || 0
         };
-        if (r.video_id) { x.videoId = r.video_id; x.segments = Array.isArray(r.segments) ? r.segments : []; }
+        // only videos have transcripts, so only videos are incomplete
+        if (r.video_id) { x.videoId = r.video_id; x.segments = []; x._lite = true; }
         if (r.deleted_at) x.deletedAt = msOf(r.deleted_at);
         texts[id] = x;
       }
@@ -195,6 +216,37 @@ const VocabStore = (() => {
       console.log('[vocab] sources hydrated:', Math.round(performance.now() - _t) + 'ms | sources', data.length);
       fireChange({ texts: { oldValue: {}, newValue: clone(MEM.texts) } });
     } catch (e) { console.error('[vocab] hydrate failed', e); }
+  }
+
+  // FIX-004. Fetch the transcript for ONE video, on demand — called when the reader
+  // opens it. Clears the `_lite` flag for that one text, after which it saves normally
+  // because it now genuinely holds its own transcript.
+  //
+  // Resolves to true when the text is complete and the caller should re-render, false
+  // when there was nothing to do or the fetch failed. On failure the flag STAYS set,
+  // which is the safe direction: a text we could not complete must not be written back.
+  const _contentLoading = new Map();
+  async function loadSourceContent(extId) {
+    await ensure();
+    const t = MEM && MEM.texts && MEM.texts[extId];
+    if (!t || !t._lite) return false;
+    if (_contentLoading.has(extId)) return _contentLoading.get(extId);
+    const p = (async () => {
+      try {
+        const { data, error } = await SB.from('sources')
+          .select('ext_id,segments').eq('ext_id', extId).limit(1);
+        if (error) { console.error('[vocab] transcript load failed:', error.message); return false; }
+        const cur = MEM && MEM.texts && MEM.texts[extId];
+        if (!cur) return false;
+        const r = (data && data[0]) || {};
+        cur.segments = Array.isArray(r.segments) ? r.segments : [];
+        delete cur._lite;
+        return true;
+      } catch (e) { console.error('[vocab] transcript load failed', e); return false; }
+      finally { _contentLoading.delete(extId); }
+    })();
+    _contentLoading.set(extId, p);
+    return p;
   }
 
   let LOADING = null;
@@ -279,16 +331,29 @@ const VocabStore = (() => {
       deleted_at: c.deletedAt ? iso(c.deletedAt) : null
     };
   }
+  // FIX-004. A video flagged `_lite` never had its transcript loaded, so the empty
+  // `segments` array on it is a placeholder, NOT the truth. Writing it would blank the
+  // real transcript in the database — silently, permanently, on a rename or a folder
+  // drag. So the column is omitted entirely for lite rows and the database keeps what
+  // it already has.
+  //
+  // Because the two shapes differ, lite and full rows must never go into the same
+  // upsert batch: PostgREST takes its column list from the first object in the array
+  // and a lite row arriving in a full batch would be written with nulls. persist()
+  // splits them. If you add a caller, split there too.
   async function srcToRow(x) {
-    return {
+    const row = {
       id: await rowId(x.id), ext_id: x.id, user_id: UID, kind: x.videoId ? 'video' : 'text',
       title: x.name || 'Untitled', url: x.sourceUrl || '', body: x.body || '',
-      video_id: x.videoId || null, segments: x.segments || null, marks: x.marks || [],
+      video_id: x.videoId || null,
       folder_id: x.folderId ? await rowId(x.folderId) : null, engaged_ms: x.engagedMs || 0,
       last_active_at: x.lastActiveAt ? iso(x.lastActiveAt) : null,
       created_at: iso(x.createdAt), updated_at: iso(x.updatedAt || x.createdAt),
       deleted_at: x.deletedAt ? iso(x.deletedAt) : null
     };
+    row.marks = x.marks || [];
+    if (!x._lite) row.segments = x.segments || null;
+    return row;
   }
   const changed = (a, b) => !a || JSON.stringify(a) !== JSON.stringify(b);
 
@@ -329,8 +394,13 @@ const VocabStore = (() => {
       if (Object.keys(next).length === 0 && Object.keys(was).length > 0) {
         // skip
       } else {
-        const rows = []; for (const id in next) if (changed(was[id], next[id])) rows.push(await srcToRow(next[id]));
-        if (rows.length) await upsert('sources', rows, 'user_id,ext_id');
+        // FIX-004: two shapes, two batches. See the note above srcToRow().
+        const full = [], lite = [];
+        for (const id in next) if (changed(was[id], next[id])) {
+          (next[id]._lite ? lite : full).push(await srcToRow(next[id]));
+        }
+        if (full.length) await upsert('sources', full, 'user_id,ext_id');
+        if (lite.length) await upsert('sources', lite, 'user_id,ext_id');
         for (const id in was) if (!next[id]) { const { error } = await SB.from('sources').delete().eq('id', await rowId(id)); if (error) throw new Error('src del: ' + error.message); }
       }
     }
@@ -637,7 +707,7 @@ const VocabStore = (() => {
   }
 
   return {
-    init, get, set, getAll, uid, reload, sinceLocalWrite,
+    init, get, set, getAll, uid, reload, sinceLocalWrite, loadSourceContent,
     addTerm, removeTerms, clearSession,
     createList, assignTermsToList, removeFromList, logActivity, createText, createVideoText, editTerm,
     addHighlight, updateHighlight, removeHighlights,

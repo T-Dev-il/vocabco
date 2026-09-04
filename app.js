@@ -2331,6 +2331,17 @@ function renderReader(body) {
   followWords = []; // invalidate cached word spans on every render
   removeFsOverlay(); // no more overlay approach
   const text = ensureReaderText();
+  // FIX-004: video transcripts are no longer loaded with the library, so fetch this
+  // one's before drawing it. The reader is the only screen that needs it. Re-render
+  // once it lands; the flag is cleared by the store, so this cannot loop. On failure
+  // the flag stays set and the video stays read-safe — no transcript, but nothing lost.
+  if (text && text._lite && VocabStore.loadSourceContent) {
+    VocabStore.loadSourceContent(text.id).then(ok => {
+      if (ok && ui.view === 'reader' && ui.readerTextId === text.id) {
+        VocabStore.get(['texts']).then(d => { S.texts = d.texts; render(); });
+      }
+    });
+  }
   const st = S.settings.reader;
   const fontPx = SIZES[st.size] || 18;
   const widthPct = st.width || 60;   // % of available pane width (40–100)
