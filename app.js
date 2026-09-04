@@ -75,19 +75,39 @@ const __vocabSubscribe = (fn) => {
   if (window.__vocabOnChange) window.__vocabOnChange(fn);
   else if (window.chrome && chrome.storage && chrome.storage.onChanged) chrome.storage.onChanged.addListener(fn);
 };
+// FIX-005. A draft text exists only here, never in the database — that is the whole
+// point of not creating blank rows. So anything that rebuilds S.texts from the store
+// would throw it away, and the reader, finding its text gone, would silently make a
+// new blank one. That is what ate the title you had just typed: sources finish loading
+// about 600ms after first paint, and the refresh landed mid-edit.
+//
+// Any future code that replaces S.texts wholesale must run it through keepDrafts().
+function localDrafts(texts) {
+  const o = {}; for (const id in (texts || {})) if (texts[id] && texts[id]._draft) o[id] = texts[id];
+  return o;
+}
+function keepDrafts(next, drafts) {
+  next = next || {};
+  // a draft that has since been persisted arrives in `next` for real — don't shadow it
+  for (const id in drafts) if (!next[id]) next[id] = drafts[id];
+  return next;
+}
+
 __vocabSubscribe(async (changes) => {
   // If only the engagement counter changed, never re-render (it would reset scroll).
   const keys = Object.keys(changes);
+  const drafts = localDrafts(S.texts);   // FIX-005: survive the swap below
   if (keys.length === 1 && keys[0] === 'texts') {
     // check whether anything other than engagedMs/lastActiveAt changed
     const before = changes.texts.oldValue || {};
     const after = changes.texts.newValue || {};
     if (!structurallyChangedTexts(before, after)) {
-      S.texts = after; // keep state fresh without re-rendering
+      S.texts = keepDrafts(after, drafts); // keep state fresh without re-rendering
       return;
     }
   }
   S = await VocabStore.getAll();
+  S.texts = keepDrafts(S.texts, drafts);
   // don't yank the reader's scroll while actively reading
   if (ui.view === 'reader' && !ui.readerEditing) { refreshLeftNav(); return; }
   render();
@@ -2363,7 +2383,7 @@ function renderReader(body) {
   if (text && text._lite && VocabStore.loadSourceContent) {
     VocabStore.loadSourceContent(text.id).then(ok => {
       if (ok && ui.view === 'reader' && ui.readerTextId === text.id) {
-        VocabStore.get(['texts']).then(d => { S.texts = d.texts; render(); });
+        VocabStore.get(['texts']).then(d => { S.texts = keepDrafts(d.texts, localDrafts(S.texts)); render(); });
       }
     });
   }
