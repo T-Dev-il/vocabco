@@ -709,6 +709,13 @@ function beginRecording(clipId) {
 
 function record(kind, extra) {
   if (!run || run.mode !== 'record') return;
+  // An action stamped while an advert is on screen would be timed against the
+  // advert, not the lesson. Refuse rather than record something wrong.
+  const ms = mediaState().kind;
+  if (ms === 'ad' || ms === 'loading' || ms === 'buffering') {
+    run.note = 'Not marked — the video is ' + (ms === 'ad' ? 'in an advert' : ms) + '.';
+    return render();
+  }
   run.actions.push({ t: r1(now()), kind, ...extra });
 }
 
@@ -774,6 +781,34 @@ async function startReplay(recId) {
 // moving an iframe reloads it — so the panel is created once, positioned fixed,
 // and left alone. Same reasoning as app.js's reader player, which this follows.
 let ytPlayer = null, ytReady = false, ytCurrent = null;
+let ytState = -1;      // YT.PlayerState: 1 playing, 2 paused, 3 buffering
+let ytMaxDur = 0;      // longest duration seen for this video
+
+// AD DETECTION, AND WHY IT IS A HEURISTIC. YouTube's iframe API exposes no ad
+// signal at all — during a pre-roll or mid-roll the player reports state PLAYING
+// and getCurrentTime() counts the *ad* from zero. That is why the walkthrough
+// restarted every time a break began.
+//
+// What does change is getDuration(): it reports the ad's length during the ad and
+// the video's length otherwise. So the longest duration seen is the content, and
+// anything shorter means an ad is on screen. It fails only if an ad is longer than
+// the lesson video, which is not a case worth engineering around.
+//
+// The real answer for a teacher is upstream: their own unmonetised upload carries
+// no ads. This keeps the walkthrough honest when one appears anyway.
+function ytDur() { try { return ytPlayer && ytPlayer.getDuration ? ytPlayer.getDuration() : 0; } catch { return 0; } }
+
+function mediaState() {
+  const cp = runClip(), m = (cp && cp.media) || {};
+  if (!ytId(m.ref)) return { kind:'none' };
+  if (!ytPlayer || !ytReady) return { kind:'loading' };
+  const d = ytDur();
+  if (d > ytMaxDur) ytMaxDur = d;
+  if (ytMaxDur && d && d < ytMaxDur - 1) return { kind:'ad' };
+  if (ytState === 2) return { kind:'paused' };
+  if (ytState === 3) return { kind:'buffering' };
+  return { kind:'ok' };
+}
 
 // Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
 function ytId(ref) {
@@ -824,10 +859,13 @@ function mountVideo(videoId, startAt) {
         host: 'https://www.youtube-nocookie.com',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1,
                       start: Math.floor(startAt || 0), origin: location.origin },
-        events: { onReady: () => {
-          ytReady = true;
-          try { ytPlayer.seekTo(startAt || 0, true); } catch {}
-        } }
+        events: {
+          onReady: () => {
+            ytReady = true; ytMaxDur = 0;
+            try { ytPlayer.seekTo(startAt || 0, true); } catch {}
+          },
+          onStateChange: e => { ytState = e.data; }
+        }
       });
     } catch (err) { console.warn('player failed', err); }
   });
@@ -835,7 +873,7 @@ function mountVideo(videoId, startAt) {
 
 function killVideo() {
   try { if (ytPlayer && ytPlayer.destroy) ytPlayer.destroy(); } catch {}
-  ytPlayer = null; ytReady = false; ytCurrent = null;
+  ytPlayer = null; ytReady = false; ytCurrent = null; ytState = -1; ytMaxDur = 0;
   const p = document.getElementById('sv-panel');
   if (p) p.remove();
 }
@@ -852,11 +890,18 @@ function runClip() {
 // from the clip's in point, so an action recorded at 0:12 is twelve seconds into
 // the clip whatever the video does. Without one it falls back to the stopwatch,
 // so a lesson with no media still records exactly as it did before.
+let lastGood = 0;
 function now() {
   if (!run) return 0;
   const cp = runClip(), m = (cp && cp.media) || {};
-  if (ytPlayer && ytReady && ytId(m.ref)) {
-    try { return Math.max(0, ytPlayer.getCurrentTime() - (m.in_s || 0)); } catch {}
+  const ms = mediaState();
+  if (ms.kind !== 'none') {
+    // An ad, a stall or a player still loading must not move the clock. Holding
+    // the last good reading is what stops the walkthrough replaying itself from
+    // the top every time a break starts.
+    if (ms.kind === 'ad' || ms.kind === 'loading' || ms.kind === 'buffering') return lastGood;
+    try { lastGood = Math.max(0, ytPlayer.getCurrentTime() - (m.in_s || 0)); } catch {}
+    return lastGood;
   }
   const el = (Date.now() - run.t0) / 1000;
   return run.mode === 'record' ? (run.offset || 0) + el : el;
@@ -869,12 +914,26 @@ function syncVideo() {
   mountVideo(id, m.in_s || 0);
 }
 
+// Said out loud, because a walkthrough that has quietly stopped following the
+// video is indistinguishable from one that is working.
+function mediaBadge() {
+  const k = mediaState().kind;
+  return k === 'none'      ? 'no video — stopwatch'
+       : k === 'loading'   ? 'video loading'
+       : k === 'ad'        ? 'advert — holding'
+       : k === 'buffering' ? 'buffering — holding'
+       : k === 'paused'    ? 'paused with the video'
+       : 'following the video';
+}
+
 function tick() {
   clearInterval(timer);
   timer = setInterval(() => {
     if (!run || run.mode === 'play') return clearInterval(timer);
     const t = now();
-    if (run.mode === 'replay') { if (run.finished) return clearInterval(timer); advance(t); }
+    // No early exit at the end any more. The timer keeps running so that dragging
+    // the video back un-finishes the walkthrough and replays from where you land.
+    if (run.mode === 'replay') advance(t);
     const el = $('clock');
     if (el) el.textContent = secs(t);
   }, 100);
@@ -898,15 +957,21 @@ function advance(t) {
   let changed = JSON.stringify([run.at, run.picked, run.reveal]) !== before;
 
   const len = clipLen(clip);
-  if (len > 0 && t >= len) {
-    if (run.ci < run.clips.length - 1) {
-      run.ci++; run.t0 = Date.now(); syncVideo();
-    } else {
-      run.finished = true; clearInterval(timer);
-      run.note = 'End of the walkthrough.';
-    }
+  const over = len > 0 && t >= len;
+  if (over && run.ci < run.clips.length - 1) {
+    run.ci++; run.t0 = Date.now(); syncVideo();
     changed = true;
+  } else {
+    const wasDone = run.finished;
+    run.finished = over && run.ci === run.clips.length - 1;
+    run.note = run.finished ? 'End of the walkthrough.' : '';
+    if (run.finished !== wasDone) changed = true;
   }
+
+  // Redraw when the media state changes too, so the deck can say what the video
+  // is doing rather than looking frozen for no visible reason.
+  const ms = mediaState().kind;
+  if (ms !== run.lastMs) { run.lastMs = ms; changed = true; }
   if (changed) render();
 }
 
@@ -959,6 +1024,7 @@ function renderPlay() {
           <span>${run.mode === 'record'
             ? (run.offset ? 'Recording — carrying on from ' + secs(run.offset) : 'Recording')
             : (run.finished ? 'Finished' : `Replaying · clip ${run.ci + 1} of ${run.clips.length}`)}</span>
+          <span class="kind" style="color:#cfd4c9">${mediaBadge()}</span>
         </div>
         <div class="row">
           ${run.mode === 'record'
