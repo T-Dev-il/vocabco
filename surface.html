@@ -798,16 +798,50 @@ let ytMaxDur = 0;      // longest duration seen for this video
 // no ads. This keeps the walkthrough honest when one appears anyway.
 function ytDur() { try { return ytPlayer && ytPlayer.getDuration ? ytPlayer.getDuration() : 0; } catch { return 0; } }
 
+// A pre-roll defeats "longest duration seen" on its own: before the lesson has
+// ever loaded, the advert's length IS the longest seen, so the first break gets
+// treated as content. So the clip remembers how long its video really is.
+//
+//   known length   -> anything shorter than it is an advert. Exact.
+//   not yet known  -> anything under AD_CEILING is assumed to be one, and the
+//                     first duration above it is saved as the real length.
+//
+// AD_CEILING is the developer's rule: lesson videos run past five minutes and
+// almost no advert does. It only ever applies on the first play of a new video,
+// and if it gets a short lesson wrong there is a button to say so.
+const AD_CEILING = 300;
+
 function mediaState() {
   const cp = runClip(), m = (cp && cp.media) || {};
   if (!ytId(m.ref)) return { kind:'none' };
   if (!ytPlayer || !ytReady) return { kind:'loading' };
   const d = ytDur();
   if (d > ytMaxDur) ytMaxDur = d;
-  if (ytMaxDur && d && d < ytMaxDur - 1) return { kind:'ad' };
+
+  const known = m.dur || 0;
+  if (d > 0) {
+    if (known)                 { if (d < known - 1) return { kind:'ad' }; }
+    else if (d < AD_CEILING)   { return { kind:'ad', unsure:true }; }
+    else                       { rememberDuration(cp, d); }
+  }
   if (ytState === 2) return { kind:'paused' };
   if (ytState === 3) return { kind:'buffering' };
   return { kind:'ok' };
+}
+
+// Written once per video, the first time its real length is seen. Not a trim, so
+// it does not fork a take -- saveMedia's rule is about in and out points.
+let _durSaving = false;
+async function rememberDuration(cp, d) {
+  if (_durSaving || !cp || (cp.media || {}).dur) return;
+  _durSaving = true;
+  const m = { ...(cp.media || {}), dur: Math.round(d) };
+  const { error } = await sb.from('clips').update({ media: m }).eq('id', cp.id);
+  if (!error) {
+    cp.media = m;
+    const local = S.clips.find(x => x.id === cp.id); if (local) local.media = m;
+  }
+  _durSaving = false;
 }
 
 // Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
@@ -917,13 +951,47 @@ function syncVideo() {
 // Said out loud, because a walkthrough that has quietly stopped following the
 // video is indistinguishable from one that is working.
 function mediaBadge() {
-  const k = mediaState().kind;
-  return k === 'none'      ? 'no video — stopwatch'
-       : k === 'loading'   ? 'video loading'
-       : k === 'ad'        ? 'advert — holding'
-       : k === 'buffering' ? 'buffering — holding'
-       : k === 'paused'    ? 'paused with the video'
+  const ms = mediaState();
+  if (ms.kind === 'ad' && ms.unsure)
+    return `advert? — holding <button id="notad" style="padding:1px 6px;font-size:12px">It&rsquo;s the video</button>`;
+  return ms.kind === 'none'      ? 'no video — stopwatch'
+       : ms.kind === 'loading'   ? 'video loading'
+       : ms.kind === 'ad'        ? 'advert — holding'
+       : ms.kind === 'buffering' ? 'buffering — holding'
+       : ms.kind === 'paused'    ? 'paused with the video'
        : 'following the video';
+}
+
+// Until now the video drove the walkthrough and never the other way. This is the
+// return leg: a scrubber over the clip, and the clip's own actions as marks you
+// can jump to. Both seek the video, which then moves the walkthrough — so there
+// is still one clock and one direction of truth, reached from either end.
+function seekClip(t) {
+  const cp = runClip(), m = (cp && cp.media) || {};
+  if (!ytPlayer || !ytReady) return;
+  try {
+    ytPlayer.seekTo((m.in_s || 0) + Math.max(0, t), true);
+    if (ytState !== 1) ytPlayer.playVideo();
+  } catch {}
+  lastGood = Math.max(0, t);
+  if (run && run.mode === 'replay') advance(lastGood);
+  render();
+}
+
+function scrubber() {
+  const cp = runClip(); if (!cp) return '';
+  if (!ytId((cp.media || {}).ref)) return '';
+  const len = clipLen(cp) || (sortedActs(cp).length ? Math.max(...sortedActs(cp).map(a => a.t)) + 5 : 0);
+  if (len <= 0) return '';
+  const t = Math.min(now(), len);
+  return `<div style="margin-top:8px">
+    <input id="scrub" type="range" min="0" max="${r1(len)}" step="0.1" value="${r1(t)}"
+           style="width:100%;accent-color:#8fb39c">
+    <div class="row" style="gap:5px;margin-top:5px">${
+      sortedActs(cp).map(a => `<button class="mark" data-seek="${a.t}"
+        style="padding:1px 6px;font-size:12px">${secs(a.t)} ${esc(a.kind)}</button>`).join('')
+      || '<span class="kind" style="color:#cfd4c9">no marks in this clip</span>'}</div>
+  </div>`;
 }
 
 function tick() {
@@ -1035,6 +1103,7 @@ function renderPlay() {
                <button id="stopplay">Stop</button>`}
         </div>
       </div>
+      ${scrubber()}
     </div>`;
 
   $('app').innerHTML = `
@@ -1058,6 +1127,12 @@ function renderPlay() {
   $('quit').onclick = async () => { clearInterval(timer); killVideo(); view = { mode:'list' }; run = null; await load(); };
   if ($('again'))    $('again').onclick = () => { run.at = 0; run.note=''; run.picked=null; render(); mark(); };
   if ($('stoprec'))  $('stoprec').onclick = stopRecording;
+  if ($('scrub')) $('scrub').oninput = e => seekClip(parseFloat(e.target.value));
+  if ($('notad')) $('notad').onclick = () => {
+    const cp = runClip(); if (cp) rememberDuration(cp, Math.max(ytDur(), AD_CEILING + 1));
+  };
+  $('app').querySelectorAll('[data-seek]').forEach(b =>
+    b.onclick = () => seekClip(parseFloat(b.dataset.seek)));
   if ($('stopplay')) $('stopplay').onclick = async () => { clearInterval(timer); killVideo(); view = { mode:'list' }; run = null; await load(); };
   if ($('skip'))     $('skip').onclick = () => { run.t0 -= 10000; };
   if ($('dorev'))    $('dorev').onclick = () => {
