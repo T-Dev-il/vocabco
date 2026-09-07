@@ -1,0 +1,1543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Surface scaffolding — DEV</title>
+
+<!--
+  surface.html — SCAFFOLDING. This is not the surface.
+
+  route.md §4 asks that a placeholder say at build time which it is. This is
+  scaffolding and gets deleted once the real surface studio (intent.md §15)
+  exists. Nothing should be built on top of it.
+
+  Needs 001-sequences.sql, 002-slots-soft-delete.sql, 003-recordings.sql and
+  004-struggles.sql on dev.
+
+  route.md §3, the six things the skeleton must prove:
+    1 an activity placed in a sequence and launched from it   — done
+    2 the sequence knows where the learner is                 — done
+    3 a struggle recorded against a position                  — done, 004
+    4 a walkthrough recorded as a list of timed actions       — done
+    5 that list replayed against the surface                  — done
+    6 one prepared chip revealed by action                    — done, the reveal action
+
+  RECORD LONG, CARVE AFTERWARDS. A walkthrough is one continuous take that can be
+  stopped and picked up again. Pieces are then carved out of it: extract a stretch
+  into its own tethered walkthrough, or split a clip in two and record the new
+  middle. That is the same whole-and-linked-copies shape as items, activities and
+  sequences.
+
+  THE CLOCK IS A STOPWATCH, NOT MEDIA. §3 says the skeleton must prove the wiring,
+  and trivial stands in as well as real. Swapping a real player in later means
+  changing where the clock comes from and nothing else.
+
+  ACTION TIMES ARE MEASURED FROM THE START OF THEIR OWN CLIP, so inserting a clip
+  in the middle moves nothing after it. Carving rebases the times it takes.
+
+  ACTIONS NAME THEIR TARGET BY ID, NEVER BY NUMBER — slot id, and option id inside
+  an activity. Reorder a lesson or shuffle its answers and a recording still
+  points at the right things.
+
+  DEV ONLY. It never reads the saved environment, because config.js resolves
+  anything unrecognised to live and this must never touch live.
+-->
+
+<style>
+  :root { --line:#c9ccc4; --ink:#21261f; --dim:#5c6156; --bg:#f6f6f3; --good:#2f6f4f; --bad:#8a2d2d; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  .bar { background:#8a2d2d; color:#fff; padding:6px 14px; font-size:13px; }
+  .wrap { max-width:820px; margin:0 auto; padding:20px 16px 80px; }
+  h1 { font-size:20px; margin:18px 0 4px; }
+  h2 { font-size:16px; margin:26px 0 8px; }
+  .note { color:var(--dim); font-size:13px; margin:0 0 14px; }
+  button { font:inherit; padding:5px 10px; border:1px solid var(--line); background:#fff;
+           border-radius:5px; cursor:pointer; }
+  button:hover:not(:disabled) { background:#eceee8; }
+  button:disabled { opacity:.45; cursor:default; }
+  button:focus-visible { outline:2px solid var(--good); outline-offset:2px; }
+  input, select, textarea { font:inherit; padding:5px 7px; border:1px solid var(--line);
+           border-radius:5px; background:#fff; }
+  textarea { width:100%; min-height:80px; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible {
+           outline:2px solid var(--good); outline-offset:1px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .slot, .card { border:1px solid var(--line); background:#fff; border-radius:6px;
+          padding:9px 11px; margin-bottom:7px; }
+  .slot.gone { opacity:.55; background:#f2f1ee; }
+  .slot .top { display:flex; gap:10px; align-items:baseline; justify-content:space-between; }
+  .name { font-weight:600; }
+  .meta { color:var(--dim); font-size:12px; font-family:ui-monospace, monospace; }
+  .kind { color:var(--dim); font-size:13px; }
+  .empty { border:1px dashed var(--line); border-radius:6px; padding:22px;
+           text-align:center; color:var(--dim); }
+  .err { color:var(--bad); }
+  .gate { position:fixed; inset:0; background:rgba(20,22,18,.5); display:grid;
+          place-items:center; padding:16px; z-index:10; }
+  .gate .inner { background:#fff; border-radius:8px; padding:18px; width:min(560px,96vw);
+          max-height:86vh; overflow:auto; }
+  label.copy, label.opt { display:block; padding:4px 0; }
+  hr { border:0; border-top:1px solid var(--line); margin:22px 0; }
+  .stage { background:#fff; border:1px solid var(--line); border-radius:6px; padding:20px; }
+  .choice { display:block; width:100%; text-align:left; margin-bottom:7px; }
+  .choice.right { border-color:var(--good); background:#eef5f0; }
+  .choice.wrong { border-color:var(--bad);  background:#f7eded; }
+  .prog { color:var(--dim); font-size:13px; margin-bottom:10px; }
+  .knob { border:1px solid var(--line); border-radius:6px; padding:9px 11px;
+          background:#fff; margin-bottom:14px; }
+  .deck { position:sticky; top:0; z-index:5; background:#21261f; color:#fff;
+          border-radius:6px; padding:10px 12px; margin-bottom:12px; }
+  .deck .clock { font-family:ui-monospace, monospace; font-size:19px; }
+  .deck button { background:#3a4136; color:#fff; border-color:#4b5346; }
+  .deck button:hover:not(:disabled) { background:#4b5346; }
+  .reveal { background:#fffbe6; border:1px solid #e0d49a; border-radius:6px;
+            padding:10px 12px; margin-top:12px; }
+  .act { font-family:ui-monospace, monospace; font-size:12px; color:var(--dim);
+         padding:2px 0; display:flex; gap:8px; justify-content:space-between; }
+  .sub { border-left:3px solid var(--line); padding-left:10px; margin:8px 0 0; }
+  /* Lives on <body> so no render can touch it — moving the iframe reloads it. */
+  #sv-panel { position:fixed; right:14px; bottom:14px; width:320px; height:180px;
+              z-index:20; background:#000; border-radius:8px; overflow:hidden;
+              box-shadow:0 6px 24px rgba(20,22,18,.34); }
+  #sv-panel iframe, #sv-host { width:100%; height:100%; border:0; display:block; }
+  @media (max-width:520px) { #sv-panel { width:200px; height:113px; right:8px; bottom:8px; } }
+
+  /* the lesson timeline. One rule down the left; conditional steps hang further
+     in, in the marking colour, so who-sees-what is visible without reading. */
+  .lesson { position:relative; padding-left:30px; margin:10px 0 4px; }
+  .lesson::before { content:""; position:absolute; left:9px; top:4px; bottom:4px;
+                    width:2px; background:var(--line); }
+  .lesson .slot { position:relative; }
+  .lesson .slot::before { content:""; position:absolute; left:-21px; top:17px;
+                    width:14px; height:2px; background:var(--line); }
+  .lesson .slot[draggable="true"] { cursor:grab; }
+  .lesson .slot.dragging { opacity:.35; }
+  .lesson .slot.cond { margin-left:24px; border-left:3px solid var(--bad); background:#fdf7f7; }
+  .lesson .slot.cond::before { width:38px; left:-45px; background:var(--bad); }
+  .lesson .slot.over { box-shadow:0 -3px 0 -1px var(--ink); }
+  .len { height:5px; background:#e7e9e3; border-radius:3px; margin-top:8px; }
+  .len > i { display:block; height:100%; background:var(--dim); border-radius:3px; }
+  .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
+  .tag { font-size:12px; padding:2px 7px; border:1px solid var(--line);
+         border-radius:3px; color:var(--dim); background:#fafaf7; }
+  .tag.t-cond { border-color:var(--bad);  color:var(--bad);  background:#fff; }
+  .tag.t-hold { border-color:var(--good); color:var(--good); background:#fff; }
+  .tag.t-warn { border-color:#9a7413;     color:#9a7413;     background:#fff; }
+</style>
+</head>
+<body>
+
+<div class="bar">DEV database only. Build, play and record are all on this page.</div>
+<div class="wrap">
+
+  <div id="auth">
+    <h1>Sign in</h1>
+    <p class="note">This is the dev project, which has its own accounts. A live
+      password will not work here.</p>
+    <div class="row">
+      <input id="email" type="email" placeholder="email" autocomplete="username">
+      <input id="pw" type="password" placeholder="password" autocomplete="current-password">
+      <button id="go">Sign in</button>
+      <button id="mk">Create account</button>
+    </div>
+    <p id="authmsg" class="note err"></p>
+  </div>
+
+  <div id="app" hidden></div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+<script>
+// ── connection ───────────────────────────────────────────────────────────
+const ENV = VOCAB_ENVS.dev;
+const sb  = supabase.createClient(ENV.url, ENV.anon,
+              { auth:{ detectSessionInUrl:false, persistSession:true, autoRefreshToken:true } });
+
+const $   = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[<>&"]/g,
+              c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
+const newExt = p => p + '_' + Math.random().toString(36).slice(2, 10);
+const newTag = () => 'o_' + Math.random().toString(36).slice(2, 8);
+const secs   = t => Math.floor(t/60) + ':' + String(Math.floor(t%60)).padStart(2,'0');
+const r1     = n => Math.round(n * 10) / 10;
+
+let UID = null;
+let S = { sequences: [], activities: [], slots: [], progress: [],
+          recordings: [], clips: [], struggles: [], attempts: [] };
+let HAS_005 = false;
+let view = { mode: 'list', seqId: null, recId: null };
+let run  = null;
+let timer = null;
+
+let POLICY = 'restart';
+try { POLICY = localStorage.getItem('surfaceRemovedPolicy') || 'restart'; } catch (e) {}
+
+// ── sign in ──────────────────────────────────────────────────────────────
+async function boot() {
+  const { data } = await sb.auth.getSession();
+  if (data.session) { UID = data.session.user.id; $('auth').hidden = true; $('app').hidden = false; await load(); }
+}
+$('go').onclick = () => auth('signIn');
+$('mk').onclick = () => auth('signUp');
+
+async function auth(which) {
+  const email = $('email').value.trim(), password = $('pw').value;
+  if (!email || !password) { $('authmsg').textContent = 'Enter an email and a password.'; return; }
+  const { data, error } = await (which === 'signUp'
+    ? sb.auth.signUp({ email, password }) : sb.auth.signInWithPassword({ email, password }));
+  if (error) { $('authmsg').textContent = error.message; return; }
+  if (!data.session) { $('authmsg').textContent = 'Account made. Confirm the email, then sign in.'; return; }
+  UID = data.session.user.id;
+  $('auth').hidden = true; $('app').hidden = false;
+  await load();
+}
+
+// ── loading ──────────────────────────────────────────────────────────────
+// Everything, re-read after every write. Fine for scaffolding with a handful of
+// rows; the real surface must not — FIX-004 and FIX-006.
+async function load() {
+  const [sq, ac, sl, pr, rc, cl, st] = await Promise.all([
+    sb.from('sequences').select('*').is('deleted_at', null),
+    sb.from('activities').select('*').is('deleted_at', null),
+    sb.from('slots').select('*'),
+    sb.from('progress').select('*'),
+    sb.from('recordings').select('*').is('deleted_at', null),
+    sb.from('clips').select('*'),
+    sb.from('struggles').select('*')
+  ]);
+  const ap = await sb.from('attempts').select('*');
+  HAS_005 = !ap.error;
+  const bad = sq.error || ac.error || sl.error || pr.error || rc.error || cl.error || st.error;
+  if (bad) { $('app').innerHTML = '<p class="err">Could not read the tables: ' + esc(bad.message) +
+      '<br>This build needs 001, 002, 003 and 004 run on dev.</p>'; return; }
+  S = { sequences: sq.data, activities: ac.data, slots: sl.data, progress: pr.data,
+        recordings: rc.data, clips: cl.data, struggles: st.data,
+        attempts: HAS_005 ? ap.data : [] };
+  render();
+}
+
+const seqById = id => S.sequences.find(s => s.id === id);
+const actById = id => S.activities.find(a => a.id === id);
+const recById = id => S.recordings.find(r => r.id === id);
+const clipById= id => S.clips.find(c => c.id === id);
+const progOf  = id => S.progress.find(p => p.sequence_id === id);
+const recsOf  = id => S.recordings.filter(r => r.sequence_id === id);
+const clipsOf = id => S.clips.filter(c => c.recording_id === id && !c.deleted_at)
+                             .sort((a,b) => a.position - b.position);
+
+const struggleCount = slotId => S.struggles.filter(x => x.slot_id === slotId).length;
+
+// 005. The most recent attempt is the current state of this learner at this slot;
+// the older rows are history. Sorted here rather than trusted from the server.
+const latestAttempt = slotId => S.attempts
+  .filter(x => x.slot_id === slotId)
+  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+
+// Whether a learner sees this slot at all. A slot with no condition is seen by
+// everyone, which is every slot in a lesson nobody has conditioned.
+function visibleToLearner(sl) {
+  const c = sl.condition && sl.condition.show_if;
+  if (!c) return true;
+  const at = latestAttempt(c.slot);
+  return !!at && at.status === c.is;
+}
+
+// Whether the learner may pass this slot yet. Only a blocking gate holds anyone:
+// a gate waiting on a human marker sets blocks false, so nobody is trapped.
+function gateHolds(sl) {
+  const g = sl && sl.gate;
+  if (!g || !g.blocks) return false;
+  const at = latestAttempt(sl.id);
+  if (!at) return true;
+  if (g.satisfied_when === 'settled') return !(at.status === 'passed' || at.status === 'failed');
+  return at.status !== 'passed';
+}
+
+const allSlotsOf = id => S.slots.filter(s => s.sequence_id === id).sort((a,b) => a.position - b.position);
+const slotsOf    = id => allSlotsOf(id).filter(s => !s.deleted_at);
+
+// asLearner filters out slots whose condition is not met. The teacher building or
+// recording a lesson sees every step; only someone playing it sees a subset. The
+// order is untouched either way -- this is a filter over one ordered list, not a
+// jump to somewhere else.
+function flatten(seqId, withRemoved = false, seen = new Set(), asLearner = false) {
+  if (seen.has(seqId)) return [];
+  seen.add(seqId);
+  const out = [];
+  for (const sl of (withRemoved ? allSlotsOf(seqId) : slotsOf(seqId))) {
+    if (asLearner && !visibleToLearner(sl)) continue;
+    if (sl.activity_id) out.push(sl);
+    else out.push(...flatten(sl.child_sequence_id, withRemoved, seen, asLearner));
+  }
+  return out;
+}
+
+// A clip's length is what was recorded into it. out_s is written when recording
+// stops, so replay knows exactly where the take ends. The fallback is only for a
+// clip whose length was never set.
+function clipLen(cp) {
+  const m = cp.media || {};
+  if (m.out_s != null && m.in_s != null && m.out_s > m.in_s) return m.out_s - m.in_s;
+  const acts = cp.actions || [];
+  return acts.length ? Math.max(...acts.map(a => a.t)) + 2 : 0;
+}
+const sortedActs = cp => (cp.actions || []).slice().sort((a,b) => a.t - b.t);
+
+// Answers need permanent ids, or a recorded action can only say "the second one".
+function options(a) {
+  return ((a.content || {}).options || []).map(o => (o && typeof o === 'object')
+    ? { id: o.id || newTag(), text: o.text || '' } : { id: newTag(), text: String(o) });
+}
+function correctId(a) {
+  const c = a.content || {}, o = options(a);
+  if (typeof c.correct === 'number') return o[c.correct] ? o[c.correct].id : (o[0] && o[0].id);
+  return c.correct || (o[0] && o[0].id);
+}
+
+// ── screens ──────────────────────────────────────────────────────────────
+function render() {
+  if (view.mode === 'play')  return renderPlay();
+  if (view.mode === 'clips') return renderClips();
+  if (view.mode === 'edit')  return renderOne();
+  renderList();
+}
+function bind(sel, fn) { $('app').querySelectorAll(sel).forEach(b => b.onclick = () => fn(b)); }
+
+// One walkthrough on the lesson list. Carvings are drawn under the take they came
+// from, so the whole and its pieces read as a family rather than a flat pile.
+function recRow(r, carved) {
+  const cs = clipsOf(r.id);
+  const total = cs.reduce((t, c) => t + clipLen(c), 0);
+  return `<div class="sub row" style="justify-content:space-between${carved ? ';margin-left:18px' : ''}">
+    <span class="kind">${carved ? '↳ ' : ''}${esc(r.name)} ·
+      ${cs.length} clip${cs.length === 1 ? '' : 's'} · ${secs(total)}</span>
+    <span class="row">
+      <button data-replay="${r.id}" ${cs.length ? '' : 'disabled'}>Replay</button>
+      <button data-clips="${r.id}">Edit clips</button>
+    </span>
+  </div>`;
+}
+
+function renderList() {
+  $('app').innerHTML = `
+    <h1>Lessons and courses</h1>
+    <p class="note">A lesson holds activities. A course holds lessons. Same table —
+      what it holds is what makes the difference.</p>
+
+    <div class="knob">
+      <div class="row">
+        <label for="policy">When the step a learner was on has been removed:</label>
+        <select id="policy">
+          <option value="restart" ${POLICY === 'restart' ? 'selected' : ''}>start the lesson again</option>
+          <option value="next"    ${POLICY === 'next'    ? 'selected' : ''}>carry on from the next step</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <input id="newname" placeholder="Name">
+      <select id="newkind"><option value="lesson">lesson</option><option value="course">course</option></select>
+      <button id="newgo">Create</button>
+    </div>
+    <hr>
+    ${S.sequences.length ? S.sequences.map(s => {
+      const p = progOf(s.id), n = flatten(s.id).length;
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div>
+            <span class="name">${esc(s.name)}</span>
+            <span class="kind">${esc(s.kind)} · ${n} to play</span>
+            ${s.master_id ? `<span class="kind">· copy${s.divorced ? ', gone its own way' : ', still linked'}</span>` : ''}
+            ${p ? `<span class="kind">· started</span>` : ''}
+          </div>
+          <div class="row">
+            <button data-play="${s.id}" ${n ? '' : 'disabled'}>${p ? 'Resume' : 'Play'}</button>
+            <button data-rec="${s.id}"  ${n ? '' : 'disabled'}>Record a walkthrough</button>
+            <button data-open="${s.id}">Edit</button>
+            <button data-dupe="${s.id}">Duplicate</button>
+          </div>
+        </div>
+        ${(() => {
+          const all = recsOf(s.id);
+          const roots = all.filter(r => !r.master_id || !recById(r.master_id));
+          return roots.map(r => recRow(r, false) +
+            all.filter(x => x.master_id === r.id).map(x => recRow(x, true)).join('')).join('');
+        })()}
+      </div>`; }).join('')
+    : `<div class="empty">Nothing yet. Create a lesson above, then open it and add activities.</div>`}
+  `;
+  $('policy').onchange = e => { POLICY = e.target.value;
+    try { localStorage.setItem('surfaceRemovedPolicy', POLICY); } catch (err) {} };
+  $('newgo').onclick = createSequence;
+  bind('[data-open]',   b => { view = { mode:'edit', seqId:b.dataset.open }; render(); });
+  bind('[data-dupe]',   b => duplicate(b.dataset.dupe));
+  bind('[data-play]',   b => startPlay(b.dataset.play));
+  bind('[data-rec]',    b => newWalkthrough(b.dataset.rec));
+  bind('[data-replay]', b => startReplay(b.dataset.replay));
+  bind('[data-clips]',  b => { view = { mode:'clips', recId:b.dataset.clips }; render(); });
+}
+
+// ── the lesson, as the teacher builds it ─────────────────────────────────
+// One page, two modes: this is Build. Play as a learner and Record a walkthrough
+// are the same lesson seen differently, reached from the bar at the top rather
+// than from another page.
+//
+// THE RULE THIS FILE MUST NOT BREAK. A slot's id is its name and its position is
+// its order. Dragging renumbers from the drawn order and writes ids;
+// commitOrder throws the index away. Every condition points at a slot id.
+function renderOne() {
+  const s = seqById(view.seqId);
+  if (!s) { view = { mode:'list' }; return render(); }
+  const all  = allSlotsOf(view.seqId);
+  const live = all.filter(x => !x.deleted_at);
+  const others = S.sequences.filter(x => x.id !== view.seqId);
+  const max = Math.max(1, ...live.map(weight));
+  const playable = flatten(view.seqId).length;
+
+  $('app').innerHTML = `
+    <button id="back">← All lessons</button>
+    <h1>${esc(s.name)}</h1>
+    <div class="row" style="margin:8px 0 12px">
+      <button id="preview" ${playable ? '' : 'disabled'}>Play as a learner</button>
+      <button id="dorec"   ${playable ? '' : 'disabled'}>Record a walkthrough</button>
+      <span class="kind">Everyone walks this list. A step with a condition is
+        skipped by the rest — same order, fewer steps.</span>
+    </div>
+    ${HAS_005 ? '' : `<div class="knob"><b>005-outcomes.sql is not on dev.</b>
+      Reordering and removing work. Conditions and gates are off, because the
+      columns they write to do not exist yet.</div>`}
+    ${all.length
+      ? `<div class="lesson" id="lesson">${all.map(sl => slotHTML(sl, live, max)).join('')}</div>`
+      : `<div class="empty">Empty. Add an activity below.</div>`}
+
+    <h2>Add an activity</h2>
+    <div class="row">
+      <input id="aname" placeholder="Name">
+      <select id="akind">
+        <option value="multiple_choice">multiple choice</option>
+        <option value="text">text</option>
+        <option value="video">video</option>
+      </select>
+      <button id="addnew">Add new</button>
+    </div>
+    <p class="note">Add it, then press Edit on it to write the question. Until you
+      do, it has nothing in it and will show the learner a blank screen.</p>
+
+    <h2>Add one that already exists</h2>
+    <div class="row">
+      <select id="pickact">${S.activities.filter(a => !a.master_id)
+        .map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('') || '<option value="">none yet</option>'}</select>
+      <button id="addexist">Add a linked copy</button>
+    </div>
+
+    ${others.length ? `
+    <h2>Add a lesson inside this one</h2>
+    <div class="row">
+      <select id="pickseq">${others.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}</select>
+      <button id="addseq">Add</button>
+    </div>` : ''}
+  `;
+  $('back').onclick    = () => { view = { mode:'list' }; render(); };
+  $('preview').onclick = () => startPlay(view.seqId);
+  $('dorec').onclick   = () => newWalkthrough(view.seqId);
+  $('addnew').onclick  = addNewActivity;
+  $('addexist').onclick = addExistingActivity;
+  if ($('addseq')) $('addseq').onclick = addChildSequence;
+  bind('[data-up]',      b => move(b.dataset.up, -1));
+  bind('[data-down]',    b => move(b.dataset.down, 1));
+  bind('[data-del]',     b => setRemoved(b.dataset.del, true));
+  bind('[data-restore]', b => setRemoved(b.dataset.restore, false));
+  bind('[data-edit]',    b => openEditor(b.dataset.edit));
+  bind('[data-cond]',    b => openCondition(b.dataset.cond));
+  bind('[data-hold]',    b => openGate(b.dataset.hold));
+  wireDrag();
+}
+
+const slotLabel = sl => {
+  const a = sl.activity_id ? actById(sl.activity_id) : null;
+  const c = sl.child_sequence_id ? seqById(sl.child_sequence_id) : null;
+  return a ? a.name : (c ? c.name : '(missing)');
+};
+
+// An activity nobody has filled in. It draws as a blank screen in play, which
+// looked like a bug and was an empty row -- so it is now said out loud here.
+function isEmpty(a) {
+  if (!a) return false;
+  const c = a.content || {};
+  if (a.kind === 'multiple_choice') return !(c.question || (c.options || []).length);
+  if (a.kind === 'text')  return !c.body;
+  if (a.kind === 'video') return !c.url;
+  return false;
+}
+
+// A rough weight for how long a step takes, so the page can draw proportion
+// rather than print a number. Nothing records duration yet; this reads what the
+// activity actually contains and is a placeholder.
+function weight(sl) {
+  if (sl.child_sequence_id) return Math.max(1, slotsOf(sl.child_sequence_id).length) * 2;
+  const a = actById(sl.activity_id); if (!a) return 1;
+  const c = a.content || {};
+  if (a.kind === 'text')  return Math.min(9, 1 + Math.ceil(String(c.body || '').length / 350));
+  if (a.kind === 'video') return 5;
+  return 1 + ((c.options || []).length ? 1 : 0);
+}
+
+function slotHTML(sl, live, max) {
+  const gone = !!sl.deleted_at;
+  const i = live.findIndex(x => x.id === sl.id);
+  const a = sl.activity_id ? actById(sl.activity_id) : null;
+  const cond = sl.condition && sl.condition.show_if;
+  const g = sl.gate;
+  const st = struggleCount(sl.id);
+
+  const tags = [];
+  if (cond) {
+    const t = S.slots.find(x => x.id === cond.slot);
+    tags.push(`<span class="tag t-cond">Shown if “${esc(t ? slotLabel(t) : '?')}” was ${esc(cond.is)}</span>`);
+  }
+  if (g) {
+    tags.push(`<span class="tag t-hold">Must be ${esc(g.satisfied_when)} to go on</span>`);
+    if (g.may_be_pending) tags.push(`<span class="tag t-warn">Waits on a marker — does not hold</span>`);
+  }
+  if (isEmpty(a)) tags.push(`<span class="tag t-warn">Nothing written in it yet</span>`);
+  if (st) tags.push(`<span class="tag">${st} struggled here${gone ? ', before it was removed' : ''}</span>`);
+
+  return `<div class="slot${gone ? ' gone' : ''}${cond ? ' cond' : ''}"
+      data-id="${sl.id}" ${gone ? '' : 'draggable="true"'}>
+    <div class="top">
+      <div>
+        <span class="name">${esc(slotLabel(sl))}</span>
+        <span class="kind">${a ? esc(a.kind) : 'lesson inside this one'}${gone ? ' · removed' : ''}${
+          a && a.master_id ? `· copy${a.divorced ? ', gone its own way' : ', linked'}` : ''}</span>
+      </div>
+      <div class="row">
+        ${gone ? `<button data-restore="${sl.id}">Put back</button>` : `
+          <button data-up="${sl.id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+          <button data-down="${sl.id}" ${i === live.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+          ${a ? `<button data-edit="${a.id}">Edit</button>` : ''}
+          <button data-cond="${sl.id}" ${HAS_005 ? '' : 'disabled'}>Who sees it</button>
+          <button data-hold="${sl.id}" ${HAS_005 ? '' : 'disabled'}>Before going on</button>
+          <button data-del="${sl.id}">Remove</button>`}
+      </div>
+    </div>
+    ${gone ? '' : `<div class="len"><i style="width:${Math.round(weight(sl) / max * 100)}%"></i></div>`}
+    ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
+    <div class="meta">position ${sl.position} · slot ${sl.id.slice(0,8)}…</div>
+  </div>`;
+}
+
+// ── reordering ───────────────────────────────────────────────────────────
+// Renumbers from the order on screen and writes ids. The drawn index produces a
+// position and is then thrown away; nothing stores it.
+async function commitOrder(ids) {
+  const rows = ids.map((id, i) => {
+    const sl = S.slots.find(x => x.id === id);
+    return { id: sl.id, user_id: UID, sequence_id: sl.sequence_id,
+             activity_id: sl.activity_id, child_sequence_id: sl.child_sequence_id, position: i };
+  });
+  const { error } = await sb.from('slots').upsert(rows);
+  if (error) return alert(error.message);
+  await load();
+}
+
+function wireDrag() {
+  const box = $('lesson'); if (!box) return;
+  let dragging = null;
+  const clear = () => box.querySelectorAll('.over').forEach(x => x.classList.remove('over'));
+
+  box.querySelectorAll('.slot[draggable="true"]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragging = el; el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', el.dataset.id);
+    });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragging = null; clear(); });
+    el.addEventListener('dragover', e => {
+      if (!dragging || el === dragging) return;
+      e.preventDefault(); clear(); el.classList.add('over');
+    });
+    el.addEventListener('drop', e => {
+      if (!dragging || el === dragging) return;
+      e.preventDefault();
+      const ids = [...box.querySelectorAll('.slot[draggable="true"]')].map(x => x.dataset.id);
+      const from = ids.indexOf(dragging.dataset.id), to = ids.indexOf(el.dataset.id);
+      ids.splice(from, 1);
+      ids.splice(ids.indexOf(el.dataset.id) + (from < to ? 1 : 0), 0, dragging.dataset.id);
+      commitOrder(ids);
+    });
+  });
+}
+
+// ── conditions and gates ─────────────────────────────────────────────────
+async function patchSlot(id, patch) {
+  const { error } = await sb.from('slots').update(patch).eq('id', id);
+  if (error) return alert(error.message);
+  await load();
+}
+
+function sheet(html, onsave) {
+  const el = document.createElement('div');
+  el.className = 'gate';
+  el.innerHTML = `<div class="inner">${html}
+    <div class="row" style="margin-top:18px;justify-content:flex-end">
+      <button id="scancel">Cancel</button><button id="ssave">Save</button></div></div>`;
+  document.body.appendChild(el);
+  const close = () => el.remove();
+  $('scancel').onclick = close;
+  $('ssave').onclick = async () => { const p = onsave(); close(); await p; };
+  return el;
+}
+
+function openCondition(id) {
+  const sl = S.slots.find(x => x.id === id);
+  const live = slotsOf(view.seqId);
+  // Only steps before this one can be tested: a condition reading the future has
+  // nothing to read when the learner arrives.
+  const before = live.slice(0, live.findIndex(x => x.id === id));
+  const c = (sl.condition || {}).show_if || {};
+
+  if (!before.length) {
+    sheet(`<h2 style="margin-top:0">Who sees “${esc(slotLabel(sl))}”</h2>
+      <p class="note">Nothing comes before this step, so there is nothing yet to
+      decide on. Move it further down first.</p>`, () => Promise.resolve());
+    return;
+  }
+
+  sheet(`
+    <h2 style="margin-top:0">Who sees “${esc(slotLabel(sl))}”</h2>
+    <p class="note">Leave it as everyone unless this step is remediation, or
+      something only some people need.</p>
+    <label class="copy">Show this step to</label>
+    <select id="cwho" style="width:100%">
+      <option value="">everyone</option>
+      <option value="failed"  ${c.is === 'failed'  ? 'selected' : ''}>whoever got an earlier step wrong</option>
+      <option value="passed"  ${c.is === 'passed'  ? 'selected' : ''}>whoever got an earlier step right</option>
+      <option value="pending" ${c.is === 'pending' ? 'selected' : ''}>whoever is waiting to be marked</option>
+    </select>
+    <label class="copy" style="margin-top:10px">Which step</label>
+    <select id="cslot" style="width:100%">${before.map(b =>
+      `<option value="${b.id}" ${c.slot === b.id ? 'selected' : ''}>${esc(slotLabel(b))}</option>`).join('')}</select>
+  `, () => {
+    const is = $('cwho').value, slot = $('cslot').value;
+    return patchSlot(id, { condition: is ? { show_if: { slot, is } } : null });
+  });
+}
+
+function openGate(id) {
+  const sl = S.slots.find(x => x.id === id);
+  const g = sl.gate || {};
+  sheet(`
+    <h2 style="margin-top:0">Before going on from “${esc(slotLabel(sl))}”</h2>
+    <p class="note">A gate holds the learner here. Use one only where being held
+      is the point — this is the one place the platform withholds progress, and it
+      does so because you asked for it.</p>
+    <label class="copy">The learner may go on when this step is</label>
+    <select id="gwhen" style="width:100%">
+      <option value="">reached — no gate</option>
+      <option value="settled" ${g.satisfied_when === 'settled' ? 'selected' : ''}>finished, however it went</option>
+      <option value="passed"  ${g.satisfied_when === 'passed'  ? 'selected' : ''}>passed</option>
+    </select>
+    <label class="copy" style="margin-top:10px">How it gets judged</label>
+    <select id="gpend" style="width:100%">
+      <option value="no"  ${g.may_be_pending ? '' : 'selected'}>straight away</option>
+      <option value="yes" ${g.may_be_pending ? 'selected' : ''}>someone marks it later</option>
+    </select>
+    <p class="note" id="gwarn" style="margin:10px 0 0"></p>
+  `, () => {
+    const when = $('gwhen').value;
+    if (!when) return patchSlot(id, { gate: null });
+    const pending = $('gpend').value === 'yes';
+    return patchSlot(id, { gate: { satisfied_when: when, may_be_pending: pending, blocks: !pending } });
+  });
+
+  // A gate on something a human must mark cannot block, or the learner sits stuck
+  // until someone gets round to it. Said at the moment it is chosen.
+  const warn = () => {
+    $('gwarn').innerHTML = ($('gwhen').value && $('gpend').value === 'yes')
+      ? `<span class="err">This one will not hold the learner.</span> Waiting on a
+         marker could take days, so they carry on and the mark lands afterwards.`
+      : '';
+  };
+  $('gwhen').onchange = warn; $('gpend').onchange = warn; warn();
+}
+
+// ── recording ────────────────────────────────────────────────────────────
+// A walkthrough is one long take. Stop and pick it up again as often as you like:
+// the clock carries on from where the clip ended, and the lesson reopens on the
+// step the last action left it on.
+async function newWalkthrough(seqId) {
+  const live = flatten(seqId);
+  if (!live.length) return;
+  const { data: rec, error } = await sb.from('recordings').insert({
+    user_id: UID, sequence_id: seqId,
+    name: 'Walkthrough ' + (recsOf(seqId).length + 1), ext_id: newExt('rc')
+  }).select().single();
+  if (error) return alert(error.message);
+  const { data: cp, error: e2 } = await sb.from('clips').insert({
+    user_id: UID, recording_id: rec.id, position: 0,
+    media: { provider:'none', ref:'', in_s:0, out_s:0 }, actions: []
+  }).select().single();
+  if (e2) return alert(e2.message);
+  S.recordings.push(rec); S.clips.push(cp);
+  beginRecording(cp.id);
+}
+
+function beginRecording(clipId) {
+  const cp = clipById(clipId);
+  const rec = recById(cp.recording_id);
+  const live = flatten(rec.sequence_id);
+  if (!live.length) return alert('That lesson has nothing in it.');
+
+  const acts = sortedActs(cp);
+  const offset = clipLen(cp) || (acts.length ? Math.max(...acts.map(a => a.t)) : 0);
+  // reopen on the step the take left off at
+  const lastGoto = [...acts].reverse().find(a => a.kind === 'goto' && a.slot);
+  let at = 0;
+  if (lastGoto) { const i = live.findIndex(s => s.id === lastGoto.slot); if (i >= 0) at = i; }
+
+  run = { mode:'record', seqId: rec.sequence_id, order: live, at, note:'', picked:null,
+          reveal:null, clipId, offset, t0: Date.now(), actions: acts.slice() };
+  view = { mode:'play', seqId: rec.sequence_id };
+  render();
+  syncVideo();
+  tick();
+}
+
+function record(kind, extra) {
+  if (!run || run.mode !== 'record') return;
+  run.actions.push({ t: r1(now()), kind, ...extra });
+}
+
+async function stopRecording() {
+  clearInterval(timer);
+  const cp = clipById(run.clipId);
+  const end = r1(now());
+  const m = cp.media || {};
+  await save('clips', [{ id: cp.id, user_id: UID, recording_id: cp.recording_id,
+    position: cp.position, actions: run.actions,
+    media: { ...m, in_s: m.in_s ?? 0, out_s: Math.max(end, m.out_s || 0) } }]);
+  const keep = cp.recording_id;
+  run = null; view = { mode:'clips', recId: keep };
+  await load();
+}
+
+// ── playing and replaying ────────────────────────────────────────────────
+async function startPlay(seqId) {
+  const live = flatten(seqId, false, new Set(), true);
+  if (!live.length) return;
+  const p = progOf(seqId);
+  let at = 0, note = '';
+  if (p && p.slot_id) {
+    const i = live.findIndex(s => s.id === p.slot_id);
+    if (i >= 0) { at = i; note = 'Picking up where you left off.'; }
+    else {
+      const all = flatten(seqId, true);
+      const j = all.findIndex(s => s.id === p.slot_id);
+      if (j < 0) note = 'Your place in this lesson could not be found. Starting again.';
+      else if (POLICY === 'next') {
+        const after = all.slice(j + 1).find(s => !s.deleted_at);
+        if (after) { at = live.findIndex(s => s.id === after.id);
+                     note = 'The step you were on has been removed. Carrying on from the next one.'; }
+        else { at = live.length; note = 'The step you were on has been removed, and it was the last one.'; }
+      } else note = 'The step you were on has been removed from this lesson. Starting again.';
+    }
+  }
+  run = { mode:'play', seqId, order: live, at, note, picked:null, reveal:null };
+  view = { mode:'play', seqId };
+  render();
+  await mark();
+}
+
+async function startReplay(recId) {
+  const rec = recById(recId);
+  const clips = clipsOf(recId).filter(c => clipLen(c) > 0 || sortedActs(c).length);
+  if (!clips.length) return alert('That walkthrough has nothing recorded in it yet.');
+  const live = flatten(rec.sequence_id);
+  run = { mode:'replay', seqId: rec.sequence_id, order: live, at:0, note:'', picked:null,
+          reveal:null, recId, clips, ci:0, t0: Date.now(), finished:false };
+  view = { mode:'play', seqId: rec.sequence_id };
+  render();
+  syncVideo();
+  tick();
+}
+
+// ── real media under the clock ───────────────────────────────────────────
+// Until now the clock was a stopwatch and a walkthrough played against nothing.
+// A clip's media.ref already held an address; this makes it a YouTube video and
+// makes the clock read from it.
+//
+// THE PANEL LIVES ON <body>, NEVER INSIDE #app. Every render wipes #app, and
+// moving an iframe reloads it — so the panel is created once, positioned fixed,
+// and left alone. Same reasoning as app.js's reader player, which this follows.
+let ytPlayer = null, ytReady = false, ytCurrent = null;
+
+// Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
+function ytId(ref) {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  if (/^[\w-]{11}$/.test(r)) return r;
+  const m = r.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+function loadYtApi(cb) {
+  if (window.YT && window.YT.Player) return cb();
+  (window._ytCbs = window._ytCbs || []).push(cb);
+  if (window._ytLoading) return;
+  window._ytLoading = true;
+  window.onYouTubeIframeAPIReady = () => {
+    (window._ytCbs || []).forEach(f => { try { f(); } catch {} });
+    window._ytCbs = [];
+  };
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+}
+
+function videoPanel() {
+  let p = document.getElementById('sv-panel');
+  if (p) return p;
+  p = document.createElement('div');
+  p.id = 'sv-panel';
+  p.innerHTML = '<div id="sv-host"></div>';
+  document.body.appendChild(p);
+  return p;
+}
+
+function mountVideo(videoId, startAt) {
+  if (ytCurrent === videoId && ytPlayer) {
+    if (ytReady) { try { ytPlayer.seekTo(startAt || 0, true); } catch {} }
+    return;
+  }
+  killVideo();
+  ytCurrent = videoId;
+  videoPanel();
+  loadYtApi(() => {
+    if (ytCurrent !== videoId || !document.getElementById('sv-host')) return;
+    try {
+      ytPlayer = new YT.Player('sv-host', {
+        videoId,
+        host: 'https://www.youtube-nocookie.com',
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1,
+                      start: Math.floor(startAt || 0), origin: location.origin },
+        events: { onReady: () => {
+          ytReady = true;
+          try { ytPlayer.seekTo(startAt || 0, true); } catch {}
+        } }
+      });
+    } catch (err) { console.warn('player failed', err); }
+  });
+}
+
+function killVideo() {
+  try { if (ytPlayer && ytPlayer.destroy) ytPlayer.destroy(); } catch {}
+  ytPlayer = null; ytReady = false; ytCurrent = null;
+  const p = document.getElementById('sv-panel');
+  if (p) p.remove();
+}
+
+// The clip currently being recorded into or replayed, and its media.
+function runClip() {
+  if (!run) return null;
+  if (run.mode === 'record') return clipById(run.clipId);
+  if (run.mode === 'replay') return run.clips[run.ci];
+  return null;
+}
+
+// One clock for everything. With a video it is the video's own time, measured
+// from the clip's in point, so an action recorded at 0:12 is twelve seconds into
+// the clip whatever the video does. Without one it falls back to the stopwatch,
+// so a lesson with no media still records exactly as it did before.
+function now() {
+  if (!run) return 0;
+  const cp = runClip(), m = (cp && cp.media) || {};
+  if (ytPlayer && ytReady && ytId(m.ref)) {
+    try { return Math.max(0, ytPlayer.getCurrentTime() - (m.in_s || 0)); } catch {}
+  }
+  const el = (Date.now() - run.t0) / 1000;
+  return run.mode === 'record' ? (run.offset || 0) + el : el;
+}
+
+function syncVideo() {
+  const cp = runClip(), m = (cp && cp.media) || {};
+  const id = ytId(m.ref);
+  if (!id) { if (ytCurrent) killVideo(); return; }
+  mountVideo(id, m.in_s || 0);
+}
+
+function tick() {
+  clearInterval(timer);
+  timer = setInterval(() => {
+    if (!run || run.mode === 'play') return clearInterval(timer);
+    const t = now();
+    if (run.mode === 'replay') { if (run.finished) return clearInterval(timer); advance(t); }
+    const el = $('clock');
+    if (el) el.textContent = secs(t);
+  }, 100);
+}
+
+// Rebuilds the state at time t from the clip's actions, rather than firing each
+// one once as the clock passes it.
+//
+// WHY THIS CHANGED. With a stopwatch, time only went forwards, so firing each
+// action once was enough and scrubbing backwards was left as a known gap. A real
+// player has a scrubber, so backwards is now one drag away. Replaying every
+// action up to t from a clean base is correct in both directions and costs
+// nothing at this size.
+function advance(t) {
+  const clip = run.clips[run.ci];
+  if (!clip) return;
+
+  const before = JSON.stringify([run.at, run.picked, run.reveal]);
+  run.picked = null; run.reveal = null;
+  for (const a of sortedActs(clip)) if (a.t <= t) apply(a);
+  let changed = JSON.stringify([run.at, run.picked, run.reveal]) !== before;
+
+  const len = clipLen(clip);
+  if (len > 0 && t >= len) {
+    if (run.ci < run.clips.length - 1) {
+      run.ci++; run.t0 = Date.now(); syncVideo();
+    } else {
+      run.finished = true; clearInterval(timer);
+      run.note = 'End of the walkthrough.';
+    }
+    changed = true;
+  }
+  if (changed) render();
+}
+
+function apply(a) {
+  if (a.kind === 'goto') {
+    const i = run.order.findIndex(s => s.id === a.slot);
+    run.picked = null;
+    if (i >= 0) run.at = i;
+    else run.note = 'A step this walkthrough points at is no longer in the lesson.';
+  } else if (a.kind === 'pick')   run.picked = a.option;
+  else if (a.kind === 'reveal')   run.reveal = a.text;
+}
+
+function renderPlay() {
+  const s = seqById(run.seqId);
+  const slot = run.order[run.at];
+  const done = !slot;
+  const a = slot ? actById(slot.activity_id) : null;
+  const c = a ? (a.content || {}) : {};
+
+  let stage = '';
+  if (done) {
+    stage = `<div class="stage"><h2 style="margin-top:0">Finished</h2>
+      <p class="note">That is the end of ${esc(s.name)}.</p>
+      ${run.mode === 'play' ? '<button id="again">Start again</button>' : ''}</div>`;
+  } else if (a.kind === 'multiple_choice') {
+    const opts = options(a).filter(o => o.text !== '');
+    const right = correctId(a);
+    stage = `<div class="stage">
+      <p style="font-weight:600;margin-top:0">${esc(c.question || '(no question written yet)')}</p>
+      ${opts.length ? opts.map(o => `<button class="choice${
+          run.picked === o.id ? (o.id === right ? ' right' : ' wrong') : ''}"
+          data-pick="${o.id}">${esc(o.text)}</button>`).join('')
+        : '<p class="note">No answers written. Edit this activity to add some.</p>'}
+      ${run.picked ? `<p class="note">${run.picked === right ? 'Right.' : 'Not that one.'}</p>` : ''}
+    </div>`;
+  } else if (a.kind === 'text') {
+    stage = `<div class="stage"><p style="white-space:pre-wrap;margin:0">${esc(c.body || '(nothing written yet)')}</p></div>`;
+  } else {
+    stage = `<div class="stage"><p class="note">${
+      c.url ? 'This step points at ' + esc(c.url) + '. An activity playing its own video is not wired yet — the player in the corner is the walkthrough&rsquo;s.'
+            : 'Nothing written in this step yet.'}</p></div>`;
+  }
+
+  const deck = run.mode === 'play' ? '' : `
+    <div class="deck">
+      <div class="row" style="justify-content:space-between">
+        <div class="row">
+          <span class="clock" id="clock">${secs(run.mode === 'record' ? run.offset : 0)}</span>
+          <span>${run.mode === 'record'
+            ? (run.offset ? 'Recording — carrying on from ' + secs(run.offset) : 'Recording')
+            : (run.finished ? 'Finished' : `Replaying · clip ${run.ci + 1} of ${run.clips.length}`)}</span>
+        </div>
+        <div class="row">
+          ${run.mode === 'record'
+            ? `<input id="revtext" placeholder="a note to reveal" style="width:170px">
+               <button id="dorev">Reveal it</button>
+               <button id="stoprec">Stop and save</button>`
+            : `<button id="skip" ${run.finished ? 'disabled' : ''}>Skip 10s</button>
+               <button id="stopplay">Stop</button>`}
+        </div>
+      </div>
+    </div>`;
+
+  $('app').innerHTML = `
+    ${deck}
+    <button id="quit">← Leave</button>
+    <h1>${esc(s.name)}</h1>
+    ${run.note ? `<p class="note">${esc(run.note)}</p>` : ''}
+    <p class="prog">${done ? 'Done' : `Step ${run.at + 1} of ${run.order.length}`}${
+       slot ? ` · slot ${slot.id.slice(0,8)}…` : ''}</p>
+    ${stage}
+    ${run.reveal ? `<div class="reveal">${esc(run.reveal)}</div>` : ''}
+    ${done ? '' : `<div class="row" style="margin-top:14px">
+      <button id="prev" ${run.at === 0 ? 'disabled' : ''}>Back</button>
+      <button id="next" ${run.mode === 'play' && gateHolds(slot) ? 'disabled' : ''}>${
+        run.at === run.order.length - 1 ? 'Finish' : 'Next'}</button>
+      ${run.mode === 'play' && gateHolds(slot)
+        ? `<span class="kind">Answer this correctly before going on.</span>` : ''}
+    </div>`}
+  `;
+
+  $('quit').onclick = async () => { clearInterval(timer); killVideo(); view = { mode:'list' }; run = null; await load(); };
+  if ($('again'))    $('again').onclick = () => { run.at = 0; run.note=''; run.picked=null; render(); mark(); };
+  if ($('stoprec'))  $('stoprec').onclick = stopRecording;
+  if ($('stopplay')) $('stopplay').onclick = async () => { clearInterval(timer); killVideo(); view = { mode:'list' }; run = null; await load(); };
+  if ($('skip'))     $('skip').onclick = () => { run.t0 -= 10000; };
+  if ($('dorev'))    $('dorev').onclick = () => {
+    const txt = $('revtext').value.trim(); if (!txt) return;
+    record('reveal', { text: txt }); run.reveal = txt; render();
+  };
+
+  const go = d => {
+    run.at += d; run.picked = null; run.reveal = null; run.note = '';
+    const s2 = run.order[run.at];
+    record('goto', { slot: s2 ? s2.id : null });
+    render(); if (run.mode === 'play') mark();
+  };
+  if ($('next')) $('next').onclick = () => go(1);
+  if ($('prev')) $('prev').onclick = () => go(-1);
+
+  bind('[data-pick]', async b => {
+    if (run.mode === 'replay') return;
+    run.picked = b.dataset.pick;
+    record('pick', { slot: slot.id, option: b.dataset.pick });
+    render();
+    // A wrong answer while actually playing is a struggle, recorded against the
+    // slot id — not against a number, and not against the activity, because the
+    // teacher wants to know which point in this lesson people came unstuck at.
+    // Not recorded while recording or replaying: that is the teacher demonstrating.
+    if (run.mode !== 'play') return;
+    const right = b.dataset.pick === correctId(a);
+
+    // A struggle is still only written when it goes wrong -- 004 is a record of
+    // where people came unstuck, and a right answer is not one.
+    if (!right) {
+      const { error } = await sb.from('struggles').insert({
+        user_id: UID, sequence_id: run.seqId, slot_id: slot.id, kind: 'wrong_answer',
+        detail: { option: b.dataset.pick, activity: a.id }
+      });
+      if (error) console.warn('struggle not saved:', error.message);
+      else { const st = await sb.from('struggles').select('*');
+             if (!st.error) S.struggles = st.data; }
+    }
+
+    // An attempt is written either way, and this is the half that was missing.
+    // Nothing recorded success before, so a condition asking who got this right
+    // had nothing to read and every learner looked the same.
+    if (HAS_005) {
+      const { error } = await sb.from('attempts').insert({
+        user_id: UID, sequence_id: run.seqId, slot_id: slot.id,
+        status: right ? 'passed' : 'failed',
+        detail: { option: b.dataset.pick, activity: a.id }
+      });
+      if (error) { console.warn('attempt not saved:', error.message); return; }
+      const at = await sb.from('attempts').select('*');
+      if (!at.error) S.attempts = at.data;
+
+      // Re-walk the lesson. An answer can make remediation appear or disappear,
+      // and the learner must stay on the step they are on while it happens --
+      // so the place is kept by slot id and looked up again, never by index.
+      const here = run.order[run.at];
+      run.order = flatten(run.seqId, false, new Set(), true);
+      const i = run.order.findIndex(x => x.id === here.id);
+      if (i >= 0) run.at = i;
+      render();
+    }
+  });
+}
+
+// ── clips: carving the long take up ──────────────────────────────────────
+function renderClips() {
+  const rec = recById(view.recId);
+  if (!rec) { view = { mode:'list' }; return render(); }
+  const clips = clipsOf(rec.id);
+
+  $('app').innerHTML = `
+    <button id="back">← All lessons</button>
+    <h1>${esc(rec.name)}</h1>
+    <p class="note">A walkthrough of ${esc(seqById(rec.sequence_id)?.name || '?')}.
+      Each clip carries its own actions, timed from its own start, so inserting or
+      reordering clips moves nothing.</p>
+    ${isTake(rec) ? `<div class="knob">
+      <b>This is the take, as it was recorded.</b>
+      <p class="note" style="margin:4px 0 8px">It stays whole. Splitting, removing a clip
+        or dropping an action here makes a version to work in and leaves this untouched —
+        so you can always come back to the whole thing.</p>
+      <button id="mkver">Make a version to edit</button>
+    </div>` : `<p class="note">A version of
+      <b>${esc(recById(rec.master_id)?.name || 'a take')}</b>. Editing here changes nothing
+      about the take it came from.</p>`}
+    <div class="row" style="margin-bottom:14px">
+      <input id="recname" value="${esc(rec.name)}" style="flex:1">
+      <button id="rename">Rename</button>
+      <button id="doreplay" ${clips.length ? '' : 'disabled'}>Replay</button>
+      <button id="editseq">Edit the lesson</button>
+    </div>
+
+    ${clips.length ? clips.map((cp, i) => {
+      const m = cp.media || {};
+      const acts = sortedActs(cp);
+      return `<div class="card">
+        <div class="row" style="justify-content:space-between">
+          <div><span class="name">Clip ${i + 1}</span>
+            <span class="kind">${acts.length} action${acts.length===1?'':'s'} · ${secs(clipLen(cp))} long</span></div>
+          <div class="row">
+            <button data-cup="${cp.id}" ${i===0?'disabled':''} aria-label="Move up">↑</button>
+            <button data-cdown="${cp.id}" ${i===clips.length-1?'disabled':''} aria-label="Move down">↓</button>
+            <button data-cont="${cp.id}">Carry on recording</button>
+            <button data-join="${cp.id}" ${i === clips.length-1 ? 'disabled' : ''}>Join with the next</button>
+            <button data-cdel="${cp.id}">Remove</button>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <span class="kind">Media${isTake(rec) ? ' — moving from or to makes a version' : ''}</span>
+          <input data-ref="${cp.id}" value="${esc(m.ref || '')}" placeholder="address" style="flex:1">
+          <span class="kind">from</span><input data-in="${cp.id}" value="${m.in_s ?? 0}" style="width:64px">
+          <span class="kind">to</span><input data-out="${cp.id}" value="${m.out_s ?? 0}" style="width:64px">
+          <button data-csave="${cp.id}">Save</button>
+        </div>
+
+        <div class="row" style="margin-top:8px">
+          <span class="kind">Carve out</span>
+          <input data-xfrom="${cp.id}" value="0" style="width:64px" aria-label="from, seconds">
+          <input data-xto="${cp.id}" value="${clipLen(cp)}" style="width:64px" aria-label="to, seconds">
+          <button data-extract="${cp.id}">Take a copy of that stretch</button>
+          <span class="kind">·</span>
+          <input data-split="${cp.id}" value="" placeholder="at" style="width:64px" aria-label="split at, seconds">
+          <button data-dosplit="${cp.id}">Split here</button>
+        </div>
+
+        <div style="margin-top:8px">
+          ${acts.map((a, n) => `<div class="act">
+            <span>${secs(a.t)} · ${esc(a.kind)}${a.text ? ' · ' + esc(a.text) : ''}${
+              a.slot ? ' · slot ' + esc(String(a.slot).slice(0,8)) : ''}</span>
+            <button data-adel="${cp.id}:${n}">drop</button>
+          </div>`).join('') || '<div class="act">no actions</div>'}
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">No clips yet.</div>'}
+  `;
+  $('back').onclick = () => { view = { mode:'list' }; render(); };
+  $('rename').onclick = async () => {
+    await save('recordings', [{ id: rec.id, user_id: UID, sequence_id: rec.sequence_id,
+      name: $('recname').value.trim() || rec.name, master_id: rec.master_id, divorced: rec.divorced }]);
+    await load();
+  };
+  $('doreplay').onclick = () => startReplay(rec.id);
+  if ($('mkver')) $('mkver').onclick = async () => {
+    const f = await forkForEdit(rec.id);
+    if (!f) return;
+    view = { mode:'clips', recId: f.recId };
+    await load();
+  };
+  $('editseq').onclick  = () => { view = { mode:'edit', seqId: rec.sequence_id }; render(); };
+  bind('[data-join]',    b => joinClip(b.dataset.join));
+  bind('[data-cup]',     b => moveClip(b.dataset.cup, -1));
+  bind('[data-cdown]',   b => moveClip(b.dataset.cdown, 1));
+  bind('[data-cdel]',    b => setClipRemoved(b.dataset.cdel));
+  bind('[data-cont]',    b => beginRecording(b.dataset.cont));
+  bind('[data-csave]',   b => saveMedia(b.dataset.csave));
+  bind('[data-extract]', b => extract(b.dataset.extract));
+  bind('[data-dosplit]', b => split(b.dataset.dosplit));
+  bind('[data-adel]',    b => dropAction(b.dataset.adel));
+}
+
+const fieldVal = (attr, id) => Number($('app').querySelector(`[data-${attr}="${id}"]`).value) || 0;
+
+// Setting the media address is not an edit — it says where the take lives. Moving
+// the from or to is a trim, which is, so on a take it makes a version first. This
+// was the one edit that slipped past the guard and quietly clipped a raw take.
+async function saveMedia(id) {
+  const before = clipById(id);
+  const ref = $('app').querySelector(`[data-ref="${id}"]`).value.trim();
+  const inS = fieldVal('in', id), outS = fieldVal('out', id);
+  const m0 = before.media || {};
+  const trimmed = inS !== (m0.in_s ?? 0) || outS !== (m0.out_s ?? 0);
+
+  let target = id;
+  if (trimmed) { const e = await editable(id); if (!e) return; target = e.clipId; }
+  const cp = clipById(target);
+  await save('clips', [{ id: cp.id, user_id: UID, recording_id: cp.recording_id,
+    position: cp.position, media: { ...(cp.media || {}), ref, in_s: inS, out_s: outS },
+    actions: cp.actions }]);
+  await load();
+}
+
+async function moveClip(id, dir) {
+  const clips = clipsOf(clipById(id).recording_id);
+  const i = clips.findIndex(c => c.id === id), j = i + dir;
+  if (j < 0 || j >= clips.length) return;
+  await save('clips', [
+    { id: clips[i].id, user_id: UID, recording_id: clips[i].recording_id, position: clips[j].position,
+      media: clips[i].media, actions: clips[i].actions },
+    { id: clips[j].id, user_id: UID, recording_id: clips[j].recording_id, position: clips[i].position,
+      media: clips[j].media, actions: clips[j].actions }
+  ]);
+  await load();
+}
+
+async function setClipRemoved(id) {
+  const e = await editable(id);
+  if (!e) return;
+  const { error } = await sb.from('clips')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', e.clipId);
+  if (error) return alert(error.message);
+  await load();
+}
+
+async function dropAction(key) {
+  const [id, n] = key.split(':');
+  const e = await editable(id);
+  if (!e) return;
+  const cp = clipById(e.clipId);
+  const acts = sortedActs(cp);
+  acts.splice(Number(n), 1);
+  await save('clips', [{ id: cp.id, user_id: UID, recording_id: cp.recording_id,
+    position: cp.position, media: cp.media, actions: acts }]);
+  await load();
+}
+
+// Carving a stretch out for reuse. Nothing is cut or copied at the media end —
+// the new clip points at the same media with different in and out points, and its
+// actions are the ones inside the stretch, rebased to start at zero. The new
+// walkthrough is tethered to the one it came from, exactly as a linked copy of an
+// activity is.
+async function extract(clipId) {
+  const cp = clipById(clipId);
+  const from = fieldVal('xfrom', clipId), to = fieldVal('xto', clipId);
+  if (to <= from) return alert('The end has to come after the start.');
+  const src = recById(cp.recording_id);
+  const acts = sortedActs(cp).filter(a => a.t >= from && a.t <= to).map(a => ({ ...a, t: r1(a.t - from) }));
+  if (!acts.length && !confirm('Nothing was recorded in that stretch. Take it anyway?')) return;
+
+  const { data: rec, error } = await sb.from('recordings').insert({
+    user_id: UID, sequence_id: src.sequence_id,
+    name: src.name + ' — ' + secs(from) + ' to ' + secs(to),
+    master_id: src.master_id || src.id, divorced: false, ext_id: newExt('rc')
+  }).select().single();
+  if (error) return alert(error.message);
+  const m = cp.media || {};
+  const e2 = await sb.from('clips').insert({ user_id: UID, recording_id: rec.id, position: 0,
+    media: { ...m, in_s: (m.in_s || 0) + from, out_s: (m.in_s || 0) + to }, actions: acts });
+  if (e2.error) return alert(e2.error.message);
+  view = { mode:'clips', recId: rec.id };
+  await load();
+}
+
+// Splitting is a divider drawn across a version, never across the take. On a take
+// it makes a version first and splits that, so the whole survives underneath and
+// can be gone back to. Clip positions are renumbered freely — nothing outside
+// this table points at them, unlike slots.
+async function split(clipId) {
+  const at = fieldVal('split', clipId);
+  const first = clipById(clipId);
+  const len0 = clipLen(first);
+  if (at <= 0 || at >= len0) return alert('Split somewhere inside the clip.');
+
+  const e = await editable(clipId);
+  if (!e) return;
+  const cp = clipById(e.clipId);
+  const len = clipLen(cp);
+  const m = cp.media || {}, inS = m.in_s || 0;
+  const acts = sortedActs(cp);
+
+  await save('clips', [{ id: cp.id, user_id: UID, recording_id: cp.recording_id, position: cp.position,
+    media: { ...m, in_s: inS, out_s: inS + at }, actions: acts.filter(a => a.t <= at) }]);
+  const after = clipsOf(cp.recording_id).filter(c => c.id !== cp.id && c.position > cp.position);
+  if (after.length) await save('clips', after.map(c => ({ id:c.id, user_id:UID,
+    recording_id:c.recording_id, position:c.position + 1, media:c.media, actions:c.actions })));
+  const { error } = await sb.from('clips').insert({
+    user_id: UID, recording_id: cp.recording_id, position: cp.position + 1,
+    media: { ...m, in_s: inS + at, out_s: inS + len },
+    actions: acts.filter(a => a.t > at).map(a => ({ ...a, t: r1(a.t - at) }))
+  });
+  if (error) return alert(error.message);
+  await load();
+}
+
+// Undoing a split. The second clip's actions are shifted forward by the length of
+// the first and appended, and the first clip's out point moves to cover both. It
+// is only a true undo when the two halves are adjacent stretches of the same
+// media, which is what split leaves behind; joining a clip to an unrelated one
+// keeps the actions and takes the first clip's media, and says so.
+async function joinClip(clipId) {
+  const e = await editable(clipId);
+  if (!e) return;
+  const cp = clipById(e.clipId);
+  const clips = clipsOf(cp.recording_id);
+  const i = clips.findIndex(c => c.id === cp.id);
+  const next = clips[i + 1];
+  if (!next) return;
+
+  const m = cp.media || {}, mn = next.media || {};
+  const adjacent = (m.ref || '') === (mn.ref || '') && Math.abs((m.out_s ?? 0) - (mn.in_s ?? 0)) < 0.2;
+  if (!adjacent && !confirm(
+      'These two clips are not adjacent stretches of the same media. Joining keeps every ' +
+      'action but the result will play against the first clip\'s media only. Join anyway?')) return;
+
+  const len = clipLen(cp);
+  const merged = sortedActs(cp)
+    .concat(sortedActs(next).map(a => ({ ...a, t: r1(a.t + len) })))
+    .sort((a, b) => a.t - b.t);
+
+  await save('clips', [{ id: cp.id, user_id: UID, recording_id: cp.recording_id,
+    position: cp.position, actions: merged,
+    media: { ...m, in_s: m.in_s ?? 0, out_s: (m.in_s ?? 0) + len + clipLen(next) } }]);
+  const { error } = await sb.from('clips')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', next.id);
+  if (error) return alert(error.message);
+  await load();
+}
+
+// ── takes and versions ───────────────────────────────────────────────────
+// A recording with no master is the TAKE: the walkthrough as it was captured. It
+// stays whole. Nothing that edits its shape is allowed to touch it.
+//
+// Everything else is a version derived from a take — a carving, or an edit. A
+// version holds clips that point into the same media with their own in and out
+// points, so splitting, reordering and rejoining rearrange a view of the take
+// rather than the take itself. Same whole-and-linked-copies shape as items,
+// activities and sequences.
+//
+// Recording into a take is not an edit; it is more of the take, so carrying on is
+// allowed there. Renaming is not an edit either.
+const isTake = rec => !rec.master_id;
+
+// Copies a take's clips into a fresh version and returns the new recording id
+// plus a map from each old clip id to its copy, so the caller can carry on with
+// the clip the user actually pressed.
+async function forkForEdit(recId, why) {
+  const src = recById(recId);
+  const clips = clipsOf(recId);
+  const { data: rec, error } = await sb.from('recordings').insert({
+    user_id: UID, sequence_id: src.sequence_id, name: src.name + ' — edit',
+    master_id: src.id, divorced: false, ext_id: newExt('rc')
+  }).select().single();
+  if (error) { alert(error.message); return null; }
+
+  const rows = clips.map(c => ({ user_id: UID, recording_id: rec.id, position: c.position,
+                                 media: c.media, actions: c.actions }));
+  const { data: made, error: e2 } = await sb.from('clips').insert(rows).select();
+  if (e2) { alert(e2.message); return null; }
+
+  const map = {};
+  clips.forEach((c, i) => {
+    const twin = made.find(x => x.position === c.position) || made[i];
+    if (twin) map[c.id] = twin.id;
+  });
+  return { recId: rec.id, map, why };
+}
+
+// Every edit below runs through this. On a take it makes a version first and
+// moves the user into it; inside a version it does nothing.
+async function editable(clipId) {
+  const cp = clipById(clipId);
+  const rec = recById(cp.recording_id);
+  if (!isTake(rec)) return { clipId, forked: false };
+  const f = await forkForEdit(rec.id);
+  if (!f) return null;
+  const pr = await sb.from('recordings').select('*').is('deleted_at', null);
+  const pc = await sb.from('clips').select('*');
+  if (!pr.error) S.recordings = pr.data;
+  if (!pc.error) S.clips = pc.data;
+  view = { mode:'clips', recId: f.recId };
+  return { clipId: f.map[clipId] || clipId, forked: true };
+}
+
+// ── writes ───────────────────────────────────────────────────────────────
+async function save(table, rows) {
+  const { error } = await sb.from(table).upsert(rows);
+  if (error) alert('Could not save: ' + error.message);
+  return !error;
+}
+
+async function mark() {
+  if (!run || run.mode !== 'play') return;
+  const slot = run.order[run.at];
+  const existing = progOf(run.seqId);
+  const row = existing
+    ? { id: existing.id, user_id: UID, sequence_id: run.seqId, slot_id: slot ? slot.id : null }
+    : { user_id: UID, sequence_id: run.seqId, slot_id: slot ? slot.id : null };
+  const { error } = await sb.from('progress').upsert(row);
+  if (error) return console.warn('progress not saved:', error.message);
+  const pr = await sb.from('progress').select('*');
+  if (!pr.error) S.progress = pr.data;
+}
+
+async function createSequence() {
+  const name = $('newname').value.trim();
+  if (!name) return;
+  await save('sequences', [{ user_id: UID, name, kind: $('newkind').value, ext_id: newExt('sq') }]);
+  await load();
+}
+
+async function addNewActivity() {
+  const name = $('aname').value.trim();
+  if (!name) return;
+  const kind = $('akind').value;
+  const blank = kind === 'multiple_choice'
+      ? { question:'', options:[{id:newTag(),text:''},{id:newTag(),text:''},{id:newTag(),text:''}], correct:null }
+      : kind === 'text' ? { body:'' } : { url:'' };
+  if (blank.options) blank.correct = blank.options[0].id;
+  const { data, error } = await sb.from('activities')
+    .insert({ user_id: UID, name, kind, content: blank, ext_id: newExt('ac') }).select().single();
+  if (error) return alert(error.message);
+  await appendSlot({ activity_id: data.id });
+}
+
+async function addExistingActivity() {
+  const src = actById($('pickact').value);
+  if (!src) return;
+  const { data, error } = await sb.from('activities').insert({
+    user_id: UID, name: src.name, kind: src.kind, content: src.content,
+    master_id: src.master_id || src.id, divorced: false, ext_id: newExt('ac')
+  }).select().single();
+  if (error) return alert(error.message);
+  await appendSlot({ activity_id: data.id });
+}
+
+async function addChildSequence() { await appendSlot({ child_sequence_id: $('pickseq').value }); }
+
+async function appendSlot(member) {
+  const all = allSlotsOf(view.seqId);
+  const next = all.length ? Math.max(...all.map(s => s.position)) + 1 : 0;
+  await save('slots', [{ user_id: UID, sequence_id: view.seqId, position: next, ...member }]);
+  await load();
+}
+
+// Swaps two positions rather than renumbering, so removed slots keep the numbers
+// that say where they used to sit. Slot ids are never touched.
+async function move(slotId, dir) {
+  const live = slotsOf(view.seqId);
+  const i = live.findIndex(s => s.id === slotId), j = i + dir;
+  if (j < 0 || j >= live.length) return;
+  await save('slots', [
+    { id: live[i].id, user_id: UID, sequence_id: live[i].sequence_id, activity_id: live[i].activity_id,
+      child_sequence_id: live[i].child_sequence_id, position: live[j].position, deleted_at: live[i].deleted_at },
+    { id: live[j].id, user_id: UID, sequence_id: live[j].sequence_id, activity_id: live[j].activity_id,
+      child_sequence_id: live[j].child_sequence_id, position: live[i].position, deleted_at: live[j].deleted_at }
+  ]);
+  await load();
+}
+
+async function setRemoved(slotId, gone) {
+  const { error } = await sb.from('slots')
+    .update({ deleted_at: gone ? new Date().toISOString() : null }).eq('id', slotId);
+  if (error) return alert(error.message);
+  await load();
+}
+
+async function duplicate(seqId) {
+  const src = seqById(seqId);
+  const { data: newSeq, error } = await sb.from('sequences').insert({
+    user_id: UID, name: src.name + ' (copy)', kind: src.kind,
+    master_id: src.master_id || src.id, divorced: false, ext_id: newExt('sq')
+  }).select().single();
+  if (error) return alert(error.message);
+  for (const sl of slotsOf(seqId)) {
+    let member;
+    if (sl.activity_id) {
+      const a = actById(sl.activity_id);
+      const { data: copy } = await sb.from('activities').insert({
+        user_id: UID, name: a.name, kind: a.kind, content: a.content,
+        master_id: a.master_id || a.id, divorced: false, ext_id: newExt('ac')
+      }).select().single();
+      member = { activity_id: copy.id };
+    } else member = { child_sequence_id: sl.child_sequence_id };
+    await save('slots', [{ user_id: UID, sequence_id: newSeq.id, position: sl.position, ...member }]);
+  }
+  await load();
+}
+
+// ── the gate ─────────────────────────────────────────────────────────────
+function openEditor(actId) {
+  const a = actById(actId);
+  const c = a.content || {};
+  const copies = a.master_id ? []
+    : S.activities.filter(x => x.master_id === a.id && !x.divorced && !x.deleted_at);
+  const whereIsIt = x => {
+    const sl = S.slots.find(s => s.activity_id === x.id && !s.deleted_at);
+    return sl ? (seqById(sl.sequence_id)?.name || 'a lesson') : 'not placed';
+  };
+
+  let fields = '';
+  if (a.kind === 'multiple_choice') {
+    const opts = options(a), right = correctId(a);
+    fields = `<p class="note" style="margin-top:12px">Question</p>
+      <input id="q" value="${esc(c.question || '')}" style="width:100%">
+      <p class="note" style="margin-top:12px">Answers — tick the right one. Each keeps its own
+        id, so a recording still picks the right answer if you shuffle them.</p>
+      ${opts.map(o => `<label class="opt">
+        <input type="radio" name="correct" value="${o.id}" ${o.id === right ? 'checked' : ''}>
+        <input class="opt-text" data-id="${o.id}" value="${esc(o.text)}" style="width:78%">
+      </label>`).join('')}`;
+  } else if (a.kind === 'text') {
+    fields = `<p class="note" style="margin-top:12px">Text</p>
+      <textarea id="body">${esc(c.body || '')}</textarea>`;
+  } else {
+    fields = `<p class="note" style="margin-top:12px">Media address</p>
+      <input id="url" value="${esc(c.url || '')}" style="width:100%">`;
+  }
+
+  const box = document.createElement('div');
+  box.className = 'gate';
+  box.innerHTML = `<div class="inner">
+    <h2 style="margin-top:0">Edit “${esc(a.name)}”</h2>
+    <input id="ename" value="${esc(a.name)}" style="width:100%">
+    ${fields}
+    ${a.master_id ? `<p class="note">This is a copy. Saving a change here separates it from
+        the original for good — it will stop receiving updates.</p>` : ''}
+    ${copies.length ? `
+      <p class="note">This appears in ${copies.length} other place${copies.length > 1 ? 's' : ''}.
+        Tick the ones that should change too. Unticked ones stay as they are and will be
+        offered again next time.</p>
+      ${copies.map(x => `<label class="copy">
+          <input type="checkbox" data-copy="${x.id}"> ${esc(whereIsIt(x))}
+        </label>`).join('')}` : ''}
+    <div class="row" style="margin-top:14px">
+      <button id="esave">Save changes</button><button id="ecancel">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(box);
+  box.querySelector('#ecancel').onclick = () => box.remove();
+
+  box.querySelector('#esave').onclick = async () => {
+    const name = box.querySelector('#ename').value.trim();
+    if (!name) return;
+    let content;
+    if (a.kind === 'multiple_choice') {
+      content = { question: box.querySelector('#q').value,
+                  options: [...box.querySelectorAll('.opt-text')].map(i => ({ id:i.dataset.id, text:i.value })),
+                  correct: box.querySelector('[name=correct]:checked')?.value || null };
+    } else if (a.kind === 'text') content = { body: box.querySelector('#body').value };
+    else content = { url: box.querySelector('#url').value.trim() };
+
+    const chosen = [...box.querySelectorAll('[data-copy]:checked')].map(i => i.dataset.copy);
+    const rows = [{ id:a.id, user_id:UID, name, kind:a.kind, content,
+                    master_id:a.master_id, divorced: a.master_id ? true : a.divorced }];
+    for (const id of chosen) {
+      const x = actById(id);
+      rows.push({ id:x.id, user_id:UID, name, kind:x.kind, content, master_id:x.master_id, divorced:false });
+    }
+    box.remove();
+    await save('activities', rows);
+    await load();
+  };
+}
+
+boot();
+</script>
+</body>
+</html>
