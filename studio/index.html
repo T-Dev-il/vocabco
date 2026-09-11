@@ -347,6 +347,8 @@ const S = {
   live: {},           // slot_id -> what you have done to it in Preview, unsaved
   handed: {},         // slot_id -> this handout has been given. Preview only.
   take: null,         // the open take: {id,name,clipId,base,startedMs,actions}
+  arming: null,       // a take prepared but not yet started
+  play: null,         // a take being replayed
   finished: false,
   error: null
 };
@@ -1294,22 +1296,39 @@ function takeSeconds() {
 // open; this is the first thing written into it, and the only thing so far.
 function clipSeconds() { return Math.round(takeSeconds() - S.take.base); }
 
-async function startTake() {
-  const name = 'Take ' + (S.takes.length + 1);
-  const { data: rec, error } = await S.sb.from('recordings')
-    .insert({ sequence_id: S.lesson.id, name }).select('id').single();
-  if (error) { S.error = error.message; return render(); }
-  await openClip(rec.id, name, 0);
+// Nothing is written and no clock runs until Start is pressed. A recording that
+// began the instant you reached for it would have you in it before you were
+// ready, and a take is the thing you keep.
+function armNew() {
+  S.arming = { recId: null, name: 'Take ' + (S.takes.length + 1), base: 0 };
+  S.mode = 'record';
+  render();
 }
 
-async function resumeTake(recId) {
+async function armResume(recId) {
   const rec = S.takes.find(t => t.id === recId);
   if (!rec) return;
   // Everything banked so far, read back rather than remembered.
   const { data: clips } = await S.sb.from('clips')
     .select('media').eq('recording_id', recId).is('deleted_at', null);
   const base = (clips || []).reduce((n, c) => n + ((c.media && c.media.seconds) || 0), 0);
-  await openClip(recId, rec.name, base);
+  S.arming = { recId, name: rec.name, base };
+  S.mode = 'record';
+  render();
+}
+
+async function startArmed() {
+  if (!S.arming) return;
+  const a = S.arming;
+  let recId = a.recId;
+  if (!recId) {
+    const { data: rec, error } = await S.sb.from('recordings')
+      .insert({ sequence_id: S.lesson.id, name: a.name }).select('id').single();
+    if (error) { S.error = error.message; return render(); }
+    recId = rec.id;
+  }
+  S.arming = null;
+  await openClip(recId, a.name, a.base);
 }
 
 async function openClip(recId, name, base) {
@@ -1362,7 +1381,91 @@ function tick() {
 }
 function stopTick() { if (TICK) { clearInterval(TICK); TICK = null; } }
 
+
+// ── Playing a take back ────────────────────────────────────────────────────
+//
+// There is no video. What was recorded is what the teacher DID, each action
+// timed from the start of its own clip. So the take replays itself: the stage
+// moves, handouts arrive, at the times they originally did.
+//
+// Clips are laid end to end here, and only here. Inside a clip an action's time
+// is its own; across a take the offset is the sum of the clips before it. That
+// conversion belongs at the point of playing, not in the stored data.
+async function playTake(recId) {
+  const rec = S.takes.find(t => t.id === recId);
+  const { data: clips } = await S.sb.from('clips')
+    .select('position,media,actions').eq('recording_id', recId)
+    .is('deleted_at', null).order('position', { ascending: true });
+
+  let base = 0;
+  const seq = [];
+  (clips || []).forEach(c => {
+    (c.actions || []).forEach(a => seq.push({ ...a, at: base + (a.t || 0) }));
+    base += (c.media && c.media.seconds) || 0;
+  });
+  seq.sort((x, y) => x.at - y.at);
+
+  S.play = { recId, name: rec ? rec.name : 'Take', seq, total: base, done: 0, startedMs: Date.now() };
+  S.handed = {};
+  S.live = {};
+  playTick();
+  render();
+}
+
+function playTick() {
+  stopTick();
+  TICK = setInterval(async () => {
+    if (!S.play) return stopTick();
+    const el = (Date.now() - S.play.startedMs) / 1000;
+
+    const c = document.getElementById('clk');
+    if (c) c.textContent = clock(el);
+    const u = document.getElementById('trk');
+    if (u) u.style.width = Math.min(100, S.play.total ? (el / S.play.total) * 100 : 100) + '%';
+
+    let moved = false;
+    while (S.play.done < S.play.seq.length && S.play.seq[S.play.done].at <= el) {
+      const a = S.play.seq[S.play.done++];
+      if (a.kind === 'handed out' && a.slot) { S.handed[a.slot] = true; moved = true; }
+      if ((a.kind === 'moved to' || a.kind === 'went back to' || a.kind === 'made') && a.slot) {
+        S.lookSlot = a.slot; await loadContent(a.slot); moved = true;
+      }
+    }
+    if (moved) render();
+
+    if (el >= S.play.total && S.play.done >= S.play.seq.length) stopPlay();
+  }, 250);
+}
+
+function stopPlay() {
+  S.play = null;
+  stopTick();
+  render();
+}
+
 function deck() {
+  if (S.play) {
+    return '<div class="deck">' +
+      '<button class="btn" id="stopplay">Stop</button>' +
+      '<span class="clock" id="clk">0:00</span>' +
+      '<div class="track"><u id="trk" style="width:0"></u></div>' +
+      '<span style="color:#8B939B">Playing ' + esc(S.play.name) + ' · ' + clock(S.play.total) + '</span>' +
+    '</div>';
+  }
+
+  if (S.arming) {
+    return '<div class="deck">' +
+      '<button class="btn" id="go" style="background:#6b2e2e;border-color:#8a3d3d">Start ' +
+        esc(S.arming.name) + '</button>' +
+      '<span class="clock">' + clock(S.arming.base) + '</span>' +
+      '<div class="track"><u style="width:0"></u></div>' +
+      '<span style="color:#8B939B">' +
+        (S.arming.base ? 'Carries on from ' + clock(S.arming.base) + '. Nothing is recorded yet.'
+                       : 'Nothing is recorded until you press Start.') + '</span>' +
+      '<button class="btn" id="unarm">Cancel</button>' +
+    '</div>';
+  }
+
   if (!S.take) return '';
   return '<div class="deck">' +
     '<button class="btn" id="stop" style="background:#6b2e2e;border-color:#8a3d3d">Stop</button>' +
@@ -1378,6 +1481,15 @@ function deck() {
 // its own window it will need its own strip.
 function takePanel() {
   if (S.mode !== 'record') return '';
+  if (S.play) {
+    return '<div class="lbl">Playing back</div>' +
+      '<div class="none">Following ' + esc(S.play.name) + '. Nothing here is being recorded.</div>';
+  }
+  if (S.arming) {
+    return '<div class="lbl">Ready</div>' +
+      '<div class="none">' + esc(S.arming.name) + ' is set up. Press Start on the deck below ' +
+      'when you are ready.</div>';
+  }
   if (S.take) {
     const acts = S.take.actions.slice(-8).reverse();
     return '<div class="lbl">This take</div>' +
@@ -1390,24 +1502,36 @@ function takePanel() {
   const left = S.leftOpen
     ? '<div class="none" style="color:#C6CCD2">A take was left open here. Carrying on appends to it.</div>'
     : '';
-  const resumable = S.takes.length
-    ? S.takes.map(t => '<div style="padding:0 10px 7px"><button class="btn wide" data-resume="' +
-        esc(t.id) + '">Carry on with ' + esc(t.name) + '</button></div>').join('')
-    : '';
+  const resumable = S.takes.map(t =>
+    '<div style="padding:0 10px 7px">' +
+      '<div class="act" style="padding:0 0 4px"><span class="t">' + t.clips + '</span><b>' +
+        esc(t.name) + '</b></div>' +
+      '<div style="display:flex;gap:5px">' +
+        '<button class="btn" style="flex:1" data-playtake="' + esc(t.id) + '">Play</button>' +
+        '<button class="btn" style="flex:1" data-resume="' + esc(t.id) + '">Carry on</button>' +
+      '</div>' +
+    '</div>').join('');
+
   return '<div class="lbl">Takes</div>' + left + resumable +
     '<div style="padding:0 10px 7px"><button class="btn wide" id="starttake">Start a new take</button></div>' +
-    '<div class="none">A take is not a session. Stop, come back tomorrow, carry on — the clock ' +
-    'is the sum of its parts.</div>';
+    '<div class="none">Playing a take replays what you did — the stage moves and handouts arrive ' +
+    'at the times they originally did. There is no video yet, so there is nothing to watch, only ' +
+    'to follow.</div>';
 }
 
 function wireRecord() {
   const $ = id => document.getElementById(id);
   if ($('torecord')) $('torecord').onclick = () => { S.mode = 'record'; render(); };
-  if ($('starttake')) $('starttake').onclick = startTake;
+  if ($('starttake')) $('starttake').onclick = armNew;
+  if ($('go')) $('go').onclick = startArmed;
+  if ($('unarm')) $('unarm').onclick = () => { S.arming = null; render(); };
   if ($('stop')) $('stop').onclick = stopTake;
+  if ($('stopplay')) $('stopplay').onclick = stopPlay;
   if ($('mark')) $('mark').onclick = () => { act('marked', S.lookSlot); render(); };
   root.querySelectorAll('[data-resume]').forEach(el =>
-    el.onclick = () => resumeTake(el.getAttribute('data-resume')));
+    el.onclick = () => armResume(el.getAttribute('data-resume')));
+  root.querySelectorAll('[data-playtake]').forEach(el =>
+    el.onclick = () => playTake(el.getAttribute('data-playtake')));
 }
 
 // The teacher's own gesture, standing in for itself. In Record this is the real
@@ -1832,7 +1956,7 @@ function wire() {
   wireRecord();
   if (S.mode === 'preview' || S.mode === 'record') wirePreview();
   else if (!S.rack) wireEdit();
-  if (S.take) tick();
+  if (S.take && !S.play) tick();
 }
 </script>
 </body>
