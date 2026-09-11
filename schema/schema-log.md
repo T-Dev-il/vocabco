@@ -1,9 +1,11 @@
 # Schema log
 
-> **rev 6 · 2026-09-06** · verified against: `000-baseline.sql`, `001-sequences.sql`,
-> `002-slots-soft-delete.sql`, `003-recordings.sql`, `004-struggles.sql`, all read this
-> session; all four were applied to dev by the developer on 2026-09-06 and used
-> through `surface.html`
+> **rev 7 · 2026-09-07** · verified against: `005-outcomes.sql`, read in full this
+> session; rev 6's verification of `000-baseline.sql`, `001-sequences.sql`,
+> `002-slots-soft-delete.sql`, `003-recordings.sql` and `004-struggles.sql` stands
+> unchanged and was not re-done. Rev 7 adds the 005 row, which rev 6 predates.
+> **The 005 entry was written by Contractor 06, which is not the chat that applied
+> it** — see the note under *Applied*
 > **Status: current**
 
 Two Supabase projects, same structure, separate data (`route.md` §9).
@@ -17,8 +19,9 @@ Created 2026-09-03 by Contractor 01. All three clients can point at either — s
 `config.js` (website, extension) and `Sync.java` (Android).
 
 > **The two projects are no longer identical, on purpose.** Since 2026-09-06 dev
-> carries six tables that live does not. See *Checking for drift* below before
-> reading a fingerprint comparison as a fault.
+> carries tables that live does not — eight of them as of 005 — plus two extra
+> columns on `slots`. See *Checking for drift* below before reading a fingerprint
+> comparison as a fault.
 
 ---
 
@@ -87,13 +90,28 @@ the only place install state lives.**
 | 002 | `slots.deleted_at`, plus a partial index on the live ones. Removing an activity from a lesson must not destroy the record that it was there | 2026-09-06 | — |
 | 003 | `recordings`, `clips`. The walkthrough automation: a take made of clips, each clip holding a media reference with in/out points and its own timed actions | 2026-09-06 | — |
 | 004 | `struggles`. Where a learner came unstuck, anchored to a slot id. `slot_id` is `on delete restrict` — the generalised lesson from 002: a reference to a slot must not be allowed to lose its meaning quietly, so a hard delete becomes an error rather than silent loss | 2026-09-06 | — |
+| 005 | `attempts`, plus `slots.condition` and `slots.gate`. What happened when a learner reached a slot, and the two authored fields that read it back. **`pending` is a first-class status**, because a test is marked by a person later, so an attempt may sit unsettled for days. No unique constraint on (user, slot) — a second attempt is the retry case, and the current one is simply the most recent. `condition` decides who sees a slot at all, `gate` what must be true before they pass it; both are jsonb, both point at a **slot id and never a position**, and both are null by default, so a lesson using neither is exactly what it is today. `slot_id` is `on delete restrict`, following 002 and 004 without variation | 2026-09-07 | — |
 
 *(One row per change from here. Dates, not ticks — knowing **when** live diverged
 is worth more than knowing that it did.)*
 
-**None of 001 to 004 belongs in live yet.** They support `surface.html`, which is
+**Who wrote the 005 row.** Contractor 05 wrote `005-outcomes.sql` and did not add
+an entry here; Contractor 06 wrote this one on 2026-09-07 from the file itself,
+which it read in full. **The Dev date is the developer's, confirmed 2026-09-07**:
+he ran the file against dev once, and has built and saved a lesson through
+`surface.html` since.
+
+**A thing that came up while confirming it, worth writing down.** The run happened
+while `surface.html` was being opened locally, and the site has since moved to
+GitHub Pages — which raised the reasonable question of whether the change needed
+running again. It does not. **The SQL is applied to the Supabase project, not to
+the page that talks to it**, so where the client is served from has no bearing on
+it. The only thing that would undo 005 in dev is rebuilding dev from the baseline,
+in which case every numbered file is replayed in order anyway (see *Start here*).
+
+**None of 001 to 005 belongs in live yet.** They support `surface.html`, which is
 scaffolding (`route.md` §4) and is not deployed. Nothing in the website, the
-extension or the Android app reads any of these six tables. Applying them to live
+extension or the Android app reads any of these tables. Applying them to live
 would be harmless but pointless until something there uses them.
 
 ---
@@ -103,12 +121,15 @@ would be harmless but pointless until something there uses them.
 `fingerprint.sql` prints the structure of whichever project you run it in, as a
 plain list of lines. Run it in both, download both results, compare.
 
-**Identical no longer means no drift, and different no longer means drift.** As of
-2026-09-06 dev holds six tables live does not — `activities`, `sequences`,
-`slots`, `progress`, `recordings`, `clips` — with their indexes, triggers and
-policies, and a seventh, `struggles`, from 004. A comparison will show all of that as a difference, correctly. What to
-check is that **the six baseline tables still match** and that the extra lines
-account for exactly the changes in the Applied table above and nothing else.
+**Identical no longer means no drift, and different no longer means drift.** Dev
+holds eight tables live does not — `activities`, `sequences`, `slots`, `progress`,
+`recordings`, `clips` from 001 and 003, `struggles` from 004, and `attempts` from
+005 — with their indexes, triggers and policies. 005 also adds two columns,
+`condition` and `gate`, to `slots`, so from here the differences are no longer all
+whole tables and a comparison that only counts tables will miss them. All of that
+will show as a difference, correctly. What to check is that **the six baseline
+tables still match** and that the extra lines account for exactly the changes in
+the Applied table above and nothing else.
 
 This is the ordinary state of a project that develops in dev first, and it will
 stay this way until the surface work reaches live. It is worth saying out loud
@@ -125,7 +146,8 @@ is exactly what happened the first time this was run, on 2026-09-03. Dev's outpu
 is now longer again, so this matters more than it did.
 
 **Last run: 2026-09-03. 135 rows each side, identical.** Not re-run since 001 to
-004 were applied, so the last comparison predates all seven new tables.
+005 were applied, so the last comparison predates all eight new tables and both
+new `slots` columns.
 
 ---
 
@@ -145,9 +167,12 @@ Honest limits, so nobody assumes more than is here.
   end of 2026. Migrating is a separate task with a real deadline.
 - **Sharing.** Every table in both projects, old and new, carries one policy of
   the same shape: you can read and write your own rows and nobody else's. A
-  teacher's lesson is therefore unreadable by a learner. Nothing in 001 to 003
+  teacher's lesson is therefore unreadable by a learner. Nothing in 001 to 005
   changes that, and `intent.md` §13 needs it changed eventually. It is a design
-  task, not a column.
+  task, not a column. **005 is where this bites hardest so far**: `attempts`
+  carries a `pending` status for work a person marks later, and under own-rows-only
+  a teacher cannot read the attempt they are supposed to mark. The status is
+  correct and the marking case does not work yet — `route.md` §12.
 
 ---
 
@@ -172,7 +197,8 @@ unique `(user_id, ext_id)` indexes on items, highlights, collections and sources
 and `user_id` defaulting to `auth.uid()` on every table.
 
 **`sources.kind` is also the standing warning about check constraints**, and it is
-why `activities.kind` and `sequences.kind` in 001 carry none. A permitted value
+why `activities.kind` and `sequences.kind` in 001, `struggles.kind` in 004 and
+`attempts.status` in 005 all carry none — 005 cites this paragraph by name. A permitted value
 that never holds a row outlives the idea it came from, and under rule 2 every new
 activity type would otherwise be its own numbered change applied to two
 databases. Add the constraint once the set of kinds has stopped moving.
