@@ -341,6 +341,8 @@ const S = {
   mode: 'build',
   rack: null,          // {kind, opts:n} while the quick rack is open
   rackErr: null, saving: false,
+  att: {},            // slot_id -> latest attempt status, for conditions and gates
+  live: {},           // slot_id -> what you have done to it in Preview, unsaved
   error: null
 };
 
@@ -479,6 +481,7 @@ async function openLesson(id) {
   // Looking starts where you are. If nobody has started, it starts at the top.
   S.lookSlot = S.hereSlot || (S.slots[0] && S.slots[0].id) || null;
 
+  await loadAttempts(id);
   await loadTakes(id);
   if (S.lookSlot) await loadContent(S.lookSlot);
 }
@@ -761,7 +764,8 @@ function render() {
   root.innerHTML =
     tabs() +
     '<div class="top">' + lessonPicker() + modes() + '</div>' +
-    '<div class="body">' + spine() + stage() + corner() + '</div>' +
+    '<div class="body">' + spine() +
+      (S.mode === 'preview' ? previewStage() : stage()) + corner() + '</div>' +
     deck();
 
   wire();
@@ -794,7 +798,7 @@ function modes() {
     (dis ? ' disabled' : '') + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
   return '<div class="modes">' +
     m('build', 'Build', S.mode === 'build', false) +
-    m('preview', 'Preview', S.mode === 'preview', true, 'Walking your own lesson as yourself. Not built yet.') +
+    m('preview', 'Preview', S.mode === 'preview', false, 'Walk your own lesson as yourself.') +
     m('record', 'Record', S.mode === 'record', true, 'Takes are built after the canvas.') +
     m('review', 'Review', false, true, 'Reserved. Needs a cohort, and sharing does not exist yet.') +
   '</div>';
@@ -827,6 +831,288 @@ function stepRow(r) {
                           : '<span class="kind">' + esc(m.kind) + '</span>';
   return '<button class="' + cls.join(' ') + '" data-slot="' + esc(s.id) + '">' +
     num + '<span class="nm">' + esc(m.name) + '</span>' + cond + '</button>';
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────
+// Preview
+//
+// There is no student zone and none can be started — own-rows-only RLS on every
+// table (route.md §12, proposal §10). So Preview is the teacher walking their
+// own lesson as themselves. That is the honest version, not a stand-in, and the
+// rows it writes are real rows.
+//
+// Three rules from §4 are enforced here and are the whole point of the mode:
+//   - a handout never advances `progress`
+//   - looking back never costs your position
+//   - redoing writes a NEW attempt; 005 has no unique constraint on
+//     learner-and-slot precisely so history survives a second go
+// ───────────────────────────────────────────────────────────────────────────
+
+async function loadAttempts(seqId) {
+  S.att = {};
+  const { data } = await S.sb.from('attempts')
+    .select('slot_id,status,created_at').eq('sequence_id', seqId)
+    .order('created_at', { ascending: true });
+  // last one wins — the current state of this learner at this slot
+  (data || []).forEach(a => { S.att[a.slot_id] = a.status; });
+}
+
+// Who sees this slot at all. Null condition means everyone.
+function visible(slot) {
+  const c = slot.condition && slot.condition.show_if;
+  if (!c || !c.slot) return true;
+  return S.att[c.slot] === c.is;
+}
+
+// What has to be true before you may pass. A gate that waits on a person cannot
+// block (§10) — `pending` would strand you — so a blocking gate on a pending
+// attempt is treated as open and says so rather than trapping you.
+function gateHolds(slot) {
+  const g = slot.gate;
+  if (!g || !g.blocks) return null;
+  const got = S.att[slot.id];
+  if (got === g.satisfied_when) return null;
+  if (got === 'pending') return null;
+  return got ? 'This needs to be ' + esc(g.satisfied_when) + ' before moving on.'
+             : 'Answer this before moving on.';
+}
+
+function steps() { return outline().filter(r => visible(r.slot)); }
+
+function stepAt(slotId) {
+  const rows = steps();
+  const i = rows.findIndex(r => r.slot.id === slotId);
+  return { rows, i };
+}
+
+// ── judging ────────────────────────────────────────────────────────────────
+function judge(kind, content, given) {
+  if (kind === 'mcq')       return given.picked === content.answer;
+  if (kind === 'truefalse') return given.picked === (content.answer ? 0 : 1);
+  if (kind === 'blank')     return String(given.typed || '').trim().toLowerCase()
+                                 === String(content.answer || '').trim().toLowerCase();
+  if (kind === 'order')     return (given.order || []).join('\u0001')
+                                 === (content.items || []).join('\u0001');
+  return null;                                   // video and display ask nothing
+}
+
+async function answer(slot, content, kind) {
+  const given = S.live[slot.id] || {};
+  const right = judge(kind, content, given);
+  if (right === null) return;
+
+  S.live[slot.id] = { ...given, judged: right ? 'passed' : 'failed' };
+
+  // A new row every time. Never an update — the second go is a second row.
+  const { error } = await S.sb.from('attempts').insert({
+    sequence_id: S.lesson.id, slot_id: slot.id,
+    status: right ? 'passed' : 'failed', detail: given
+  });
+  if (!error) S.att[slot.id] = right ? 'passed' : 'failed';
+  render();
+}
+
+async function setProgress(slotId) {
+  // progress has a unique index on (user_id, sequence_id), and user_id is
+  // defaulted rather than sent, so upsert has nothing to match on. Read, then
+  // write the row that is there.
+  const { data: row } = await S.sb.from('progress')
+    .select('id').eq('sequence_id', S.lesson.id).maybeSingle();
+  if (row) await S.sb.from('progress').update({ slot_id: slotId }).eq('id', row.id);
+  else     await S.sb.from('progress').insert({ sequence_id: S.lesson.id, slot_id: slotId });
+  S.hereSlot = slotId;
+}
+
+// ── the live stage ─────────────────────────────────────────────────────────
+function previewStage() {
+  const rows = steps();
+  if (!rows.length) {
+    return '<div class="stage"><div class="look"></div><div class="paper"><div class="learner">' +
+      '<p class="unknown">Nothing in this lesson is visible yet.</p></div></div></div>';
+  }
+
+  if (!S.hereSlot || !rows.some(r => r.slot.id === S.hereSlot)) S.hereSlot = rows[0].slot.id;
+  if (!S.lookSlot || !S.slots.some(s => s.id === S.lookSlot)) S.lookSlot = S.hereSlot;
+
+  const away = S.lookSlot !== S.hereSlot;
+  const showing = S.slots.find(s => s.id === S.lookSlot);
+  const cur = S.slots.find(s => s.id === S.hereSlot);
+  const { i } = stepAt(S.hereSlot);
+
+  const bar = away
+    ? '<span>Looking back. Your place has not moved.</span>' +
+      '<button class="btn light" id="back">Go back to where you are</button>'
+    : '<span>Step ' + (i + 1) + ' of ' + rows.length + '.</span>';
+
+  // the step itself, then anything handed out while you stay on it
+  const kids = (outline().find(r => r.slot.id === S.lookSlot) || {}).kids || [];
+  let body = liveOne(showing, false);
+  kids.filter(visible).forEach(k => { body += liveOne(k, true); });
+
+  const held = gateHolds(cur);
+  const foot = away ? ''
+    : '<div class="look">' +
+        '<button class="btn light" id="prev"' + (i <= 0 ? ' disabled' : '') + '>Back</button>' +
+        '<button class="btn light" id="next"' + (held ? ' disabled title="' + esc(held) + '"' : '') +
+          ' style="background:var(--here);border-color:var(--here);color:#fff">' +
+          (i >= rows.length - 1 ? 'Finish' : 'Next') + '</button>' +
+        (held ? '<span>' + held + '</span>' : '') +
+      '</div>';
+
+  return '<div class="stage"><div class="look">' + bar + '</div>' +
+    '<div class="paper"><div class="learner">' + body + '</div></div>' + foot + '</div>';
+}
+
+function liveOne(slot, isHandout) {
+  if (!slot) return '';
+  const a = S.acts[slot.activity_id] || {};
+  const c = (S.contentFor === slot.id ? S.content : S.live['c:' + slot.id]) || null;
+  if (!c) { loadInto(slot); return '<p class="unknown">Reading…</p>'; }
+
+  const K = KINDS[a.kind];
+  const wrap = s => isHandout
+    ? '<div style="border:1px solid var(--handline);background:#FDFBF6;border-radius:5px 5px 5px 0;' +
+      'padding:14px 16px;margin:16px 0 0">' +
+      '<p class="carries" style="margin:0 0 8px">Handed to you. Your place does not move.</p>' + s + '</div>'
+    : s;
+
+  if (!K) return wrap('<p class="unknown">This kind cannot be walked yet.</p>');
+
+  const g = S.live[slot.id] || {};
+  let out = (a.name && a.kind !== 'display' && !isHandout) ? '<h1>' + esc(a.name) + '</h1>' : '';
+  out += liveBody(slot, a.kind, c, g);
+
+  if (judge(a.kind, c, g) !== null || ['mcq','truefalse','blank','order'].indexOf(a.kind) >= 0) {
+    if (g.judged) {
+      out += '<p class="after"><b>' + (g.judged === 'passed' ? 'Right.' : 'Not quite.') + '</b> ' +
+             '<button class="addopt" data-again="' + esc(slot.id) + '">Try it again</button></p>';
+    } else {
+      out += '<p class="after"><button class="btn light" data-check="' + esc(slot.id) + '">Check</button></p>';
+    }
+  }
+  return wrap(out);
+}
+
+function liveBody(slot, kind, c, g) {
+  const id = esc(slot.id);
+  const done = !!g.judged;
+
+  if (kind === 'mcq' || kind === 'truefalse') {
+    const opts = kind === 'mcq' ? (c.options || []) : ['True', 'False'];
+    const rightIdx = kind === 'mcq' ? c.answer : (c.answer ? 0 : 1);
+    return '<p class="q">' + esc(c.ask) + '</p><ul class="opts">' + opts.map((o, n) => {
+      let cls = '';
+      if (done && n === rightIdx) cls = ' class="right"';
+      const mark = g.picked === n ? 'background:#e7edf1;border-color:var(--here)' : '';
+      return '<li' + cls + ' style="cursor:pointer;' + mark + '" data-pick="' + id + '" data-n="' + n + '">' +
+        '<span class="bul"></span><span>' + esc(o) + '</span></li>';
+    }).join('') + '</ul>';
+  }
+
+  if (kind === 'blank') {
+    const bits = String(c.text || '').split('___');
+    let out = '<p class="q">';
+    bits.forEach((b, n) => {
+      out += esc(b);
+      if (n < bits.length - 1) {
+        out += '<input class="inp" style="width:150px;display:inline-block" data-type="' + id + '" ' +
+               'value="' + esc(g.typed || '') + '"' + (done ? ' disabled' : '') + '>';
+      }
+    });
+    return out + '</p>';
+  }
+
+  if (kind === 'order') {
+    const chosen = g.order || [];
+    const left = (c.items || []).filter(x => chosen.indexOf(x) < 0);
+    // shuffled once per slot, kept stable so it does not jump while you work
+    if (!S.live['s:' + slot.id]) S.live['s:' + slot.id] = left.slice().sort(() => Math.random() - 0.5);
+    const pool = S.live['s:' + slot.id].filter(x => chosen.indexOf(x) < 0);
+    return '<p class="q">' + esc(c.ask) + '</p>' +
+      '<ol class="ord">' + chosen.map(x => '<li>' + esc(x) + '</li>').join('') + '</ol>' +
+      (pool.length ? '<p class="carries">Click them in order:</p><ul class="opts">' +
+        pool.map(x => '<li style="cursor:pointer" data-take="' + id + '" data-v="' + esc(x) + '">' +
+          '<span>' + esc(x) + '</span></li>').join('') + '</ul>' : '') +
+      (chosen.length ? '<p class="after"><button class="addopt" data-clear="' + id + '">Start over</button></p>' : '');
+  }
+
+  if (kind === 'video') return KINDS.video.draw(c);
+  return KINDS.display.draw(c);
+}
+
+// content for a slot that is not the selected one — handouts need theirs too
+async function loadInto(slot) {
+  if (!slot.activity_id || S.live['loading:' + slot.id]) return;
+  S.live['loading:' + slot.id] = true;
+  const { data } = await S.sb.from('activities').select('content').eq('id', slot.activity_id).maybeSingle();
+  S.live['c:' + slot.id] = data ? data.content : {};
+  render();
+}
+
+function wirePreview() {
+  const $ = id => document.getElementById(id);
+  const set = (slotId, patch) => {
+    S.live[slotId] = { ...(S.live[slotId] || {}), ...patch };
+  };
+
+  root.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-pick');
+    if ((S.live[id] || {}).judged) return;
+    set(id, { picked: +el.getAttribute('data-n') });
+    render();
+  });
+
+  root.querySelectorAll('[data-take]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-take');
+    const cur = (S.live[id] || {}).order || [];
+    set(id, { order: cur.concat([el.getAttribute('data-v')]) });
+    render();
+  });
+
+  root.querySelectorAll('[data-clear]').forEach(el => el.onclick = () => {
+    set(el.getAttribute('data-clear'), { order: [] });
+    render();
+  });
+
+  root.querySelectorAll('[data-type]').forEach(el => el.oninput = () => {
+    set(el.getAttribute('data-type'), { typed: el.value });
+  });
+
+  root.querySelectorAll('[data-check]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-check');
+    const slot = S.slots.find(s => s.id === id);
+    const a = S.acts[slot.activity_id] || {};
+    const c = (S.contentFor === id ? S.content : S.live['c:' + id]) || {};
+    answer(slot, c, a.kind);
+  });
+
+  // Redoing writes a new attempt — so clearing the local state is all this does.
+  root.querySelectorAll('[data-again]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-again');
+    S.live[id] = {};
+    delete S.live['s:' + id];
+    render();
+  });
+
+  if ($('next')) $('next').onclick = async () => {
+    const { rows, i } = stepAt(S.hereSlot);
+    const to = rows[Math.min(i + 1, rows.length - 1)];
+    if (!to) return;
+    await setProgress(to.slot.id);
+    S.lookSlot = to.slot.id;
+    await loadContent(S.lookSlot);
+    render();
+  };
+  if ($('prev')) $('prev').onclick = async () => {
+    const { rows, i } = stepAt(S.hereSlot);
+    const to = rows[Math.max(i - 1, 0)];
+    if (!to) return;
+    await setProgress(to.slot.id);
+    S.lookSlot = to.slot.id;
+    await loadContent(S.lookSlot);
+    render();
+  };
 }
 
 function stage() {
@@ -1142,6 +1428,7 @@ function wire() {
   if (add) add.onclick = () => { S.rack = { kind: null }; S.rackErr = null; render(); };
 
   wireRack();
+  if (S.mode === 'preview') wirePreview();
 }
 </script>
 </body>
