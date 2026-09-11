@@ -126,6 +126,8 @@
     box-shadow:inset 3px 0 0 var(--here), 0 0 0 2px #cfe0ea;
   }
   .step.ghost{background:transparent; border-style:dashed; color:var(--dim)}
+  .hand.ghost{background:transparent; border-style:dashed; color:var(--dim)}
+  .hand.ghost::after{background:transparent}
   .step:focus-visible,.hand:focus-visible,.apptab:focus-visible,
   .modes button:focus-visible,.btn:focus-visible{
     outline:2px solid var(--here); outline-offset:2px;
@@ -343,6 +345,8 @@ const S = {
   rackErr: null, saving: false,
   att: {},            // slot_id -> latest attempt status, for conditions and gates
   live: {},           // slot_id -> what you have done to it in Preview, unsaved
+  handed: {},         // slot_id -> this handout has been given. Preview only.
+  finished: false,
   error: null
 };
 
@@ -826,6 +830,8 @@ function stepRow(r) {
   const cls = [reg === 'handout' ? 'hand' : 'step'];
   if (s.id === S.hereSlot) cls.push('here');
   if (s.id === S.lookSlot) cls.push('looking');
+  // dashed means authored but not yet shown to the learner (the mockup's key)
+  if (S.mode === 'preview' && reg === 'handout' && !S.handed[s.id]) cls.push('ghost');
   const num = r.attached ? '' : '<span class="n">' + r.number + '</span>';
   const cond = r.attached ? '<span class="kind">' + conditionLine(s) + '</span>'
                           : '<span class="kind">' + esc(m.kind) + '</span>';
@@ -927,6 +933,7 @@ async function setProgress(slotId) {
 // ── the live stage ─────────────────────────────────────────────────────────
 function previewStage() {
   const rows = steps();
+  if (S.finished) return finishStage(rows);
   if (!rows.length) {
     return '<div class="stage"><div class="look"></div><div class="paper"><div class="learner">' +
       '<p class="unknown">Nothing in this lesson is visible yet.</p></div></div></div>';
@@ -946,9 +953,13 @@ function previewStage() {
     : '<span>Step ' + (i + 1) + ' of ' + rows.length + '.</span>';
 
   // the step itself, then anything handed out while you stay on it
+  // A handout reveals itself at the moment it is given. Until then it is not on
+  // the stage at all — that is what makes it a handout rather than a step that
+  // happens to be indented. In Record the teacher's own gesture does this; here
+  // the button in the corner stands in for it.
   const kids = (outline().find(r => r.slot.id === S.lookSlot) || {}).kids || [];
   let body = liveOne(showing, false);
-  kids.filter(visible).forEach(k => { body += liveOne(k, true); });
+  kids.filter(k => visible(k) && S.handed[k.id]).forEach(k => { body += liveOne(k, true); });
 
   const held = gateHolds(cur);
   const foot = away ? ''
@@ -962,6 +973,32 @@ function previewStage() {
 
   return '<div class="stage"><div class="look">' + bar + '</div>' +
     '<div class="paper"><div class="learner">' + body + '</div></div>' + foot + '</div>';
+}
+
+
+function finishStage(rows) {
+  const ids = S.slots.map(s => s.id);
+  let asked = 0, right = 0;
+  ids.forEach(id => {
+    const st = S.att[id];
+    if (st === 'passed' || st === 'failed') { asked++; if (st === 'passed') right++; }
+  });
+
+  const line = asked
+    ? right + ' of ' + asked + ' right.'
+    : 'Nothing in this lesson asked you anything.';
+
+  return '<div class="stage"><div class="look"><span>The end of the lesson.</span></div>' +
+    '<div class="paper"><div class="learner">' +
+      '<h1>' + esc(S.lesson.name) + '</h1>' +
+      '<p>You walked ' + rows.length + (rows.length === 1 ? ' step' : ' steps') + '. ' + esc(line) + '</p>' +
+      '<p class="after">Every answer above is a row that stayed. Walking it again ' +
+      'writes new attempts beside the old ones rather than replacing them.</p>' +
+    '</div></div>' +
+    '<div class="look"><button class="btn light" id="restart" ' +
+      'style="background:var(--here);border-color:var(--here);color:#fff">Walk it again</button>' +
+      '<button class="btn light" id="tobuild">Back to building</button></div>' +
+  '</div>';
 }
 
 function liveOne(slot, isHandout) {
@@ -1097,13 +1134,28 @@ function wirePreview() {
 
   if ($('next')) $('next').onclick = async () => {
     const { rows, i } = stepAt(S.hereSlot);
-    const to = rows[Math.min(i + 1, rows.length - 1)];
+    if (i >= rows.length - 1) { S.finished = true; render(); return; }
+    const to = rows[i + 1];
     if (!to) return;
     await setProgress(to.slot.id);
     S.lookSlot = to.slot.id;
     await loadContent(S.lookSlot);
     render();
   };
+  if ($('restart')) $('restart').onclick = async () => {
+    S.finished = false; S.live = {}; S.handed = {};
+    const rows = steps();
+    if (rows[0]) { await setProgress(rows[0].slot.id); S.lookSlot = rows[0].slot.id; await loadContent(S.lookSlot); }
+    render();
+  };
+  if ($('tobuild')) $('tobuild').onclick = () => { S.finished = false; S.mode = 'build'; render(); };
+
+  root.querySelectorAll('[data-hand]').forEach(el => el.onclick = async () => {
+    const id = el.getAttribute('data-hand');
+    S.handed[id] = true;
+    render();
+  });
+
   if ($('prev')) $('prev').onclick = async () => {
     const { rows, i } = stepAt(S.hereSlot);
     const to = rows[Math.max(i - 1, 0)];
@@ -1191,6 +1243,26 @@ function paper(slot) {
   return out;
 }
 
+
+// The teacher's own gesture, standing in for itself. In Record this is the real
+// thing and it lands at a time in the take; here it just reveals the card.
+function handOutList() {
+  if (S.mode !== 'preview' || S.finished) return '';
+  const row = outline().find(r => r.slot.id === S.lookSlot);
+  const kids = ((row && row.kids) || []).filter(visible);
+  if (!kids.length) return '';
+
+  return '<div class="lbl">To hand out</div>' +
+    kids.map(k => {
+      const n = memberOf(k).name;
+      return S.handed[k.id]
+        ? '<div class="act"><span class="t">given</span><b>' + esc(n) + '</b></div>'
+        : '<div style="padding:0 10px 7px"><button class="btn wide" data-hand="' + esc(k.id) + '">' +
+          'Hand out ' + esc(n) + '</button></div>';
+    }).join('') +
+    '<div class="none">Handing something out does not move anyone on.</div>';
+}
+
 function corner() {
   const vids = S.slots.map(s => S.acts[s.activity_id])
     .filter(a => a && (a.kind === 'video' || a.kind === 'audio'));
@@ -1210,6 +1282,7 @@ function corner() {
 
   return '<div class="auto">' +
     '<div class="lbl">Teacher\'s corner</div>' +
+    handOutList() +
     '<div class="cam">your camera</div>' +
     media +
     '<div class="lbl">Takes</div>' + takes +
