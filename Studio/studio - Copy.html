@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Studio</title>
+
+<!--
+  studio.html — frame 1 of studio-design-proposal.md rev 2: the studio at rest.
+
+  Spine left, stage centre, teacher's corner right, deck below. Reads a real
+  lesson from the database. No editing.
+
+  THE GUARD (proposal §1, route.md §4). This page does not import from
+  surface.html, does not share a file with it, and does not read anything it
+  writes. Same database, same config.js, no shared code. Deleting surface.html
+  must cost this page nothing.
+
+  What is deliberately copied, with its reason:
+    - A lesson is walked as ONE ORDERED LIST of slots. 005-outcomes.sql: a
+      condition decides who sees a slot; it never branches the walk. So the
+      trunk is straight and only conditional strips hang off it.
+    - Everything points at a slot id, never a position (001-sequences.sql, the
+      comment on the slots table). Reorder changes nothing about what anything
+      points at.
+    - activities.content is never selected in a list query (001-sequences.sql:
+      "potentially large -- never select it in a list query", FIX-004/FIX-006).
+      The spine query takes id, name, kind. Content is fetched for one activity
+      at a time, when it goes on the stage.
+
+  Written by Contractor 07, 2026-09-09. No fix number: construction, not repair.
+-->
+
+<style>
+  /* ── chrome ────────────────────────────────────────────────────────────
+     Tokens lifted from studio-mockups-all.html so the build and the drawing
+     stay comparable. The mockup left typography plain on purpose; so does this. */
+  :root{
+    --stage:#FCFCFA; --chrome:#262A2E; --rail:#EDEEEA; --ink:#1B1E21;
+    --dim:#6B7178; --here:#0F5D8C; --hand:#F5EFE2; --handline:#CDBE9E;
+    --line:#D9DBD5; --felt:#E4E6E0; --past:#7A8288;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--rail); color:var(--ink);
+    font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+
+  /* window tabs — the canvas is a separate window (§2); this is its doorway */
+  .apptop{
+    height:38px; flex:0 0 38px; background:#DFE1DB; display:flex;
+    align-items:flex-end; gap:3px; padding:0 10px; border-bottom:1px solid #C8CBC4;
+  }
+  .apptab{
+    font-size:12.5px; padding:6px 14px; border-radius:6px 6px 0 0; color:var(--dim);
+    background:#EAEBE6; border:1px solid #C8CBC4; border-bottom:none;
+    cursor:pointer; font-family:inherit;
+  }
+  .apptab.on{background:#fff; color:var(--ink); font-weight:600; cursor:default}
+  .apptab[disabled]{opacity:.5; cursor:not-allowed}
+
+  .top{
+    height:38px; flex:0 0 38px; background:#fff; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:12px; padding:0 12px;
+  }
+  .lesson{font-weight:650; font-size:13.5px; border:0; background:transparent;
+          font-family:inherit; color:inherit; max-width:44ch; padding:2px 4px}
+  .lesson:focus-visible{outline:2px solid var(--here); outline-offset:1px}
+  .modes{display:flex; gap:2px; margin-left:auto}
+  .modes button{
+    font-size:12px; color:var(--dim); padding:3px 9px; border-radius:4px;
+    border:0; background:transparent; font-family:inherit; cursor:pointer;
+  }
+  .modes button.on{background:var(--chrome); color:#fff}
+  .modes button.off{opacity:.4}
+  .modes button[disabled]{opacity:.28; cursor:not-allowed}
+
+  .body{flex:1; display:flex; min-height:0}
+  .lbl{font-size:10.5px; color:var(--dim); padding:7px 10px 5px}
+
+  /* ── the spine ─────────────────────────────────────────────────────────
+     Vertical, read as an outline. A tree indents, and indentation is free
+     vertically and expensive horizontally (§3). */
+  .pane{
+    flex:0 0 244px; background:#fff; border-right:1px solid var(--line);
+    display:flex; flex-direction:column; min-width:0;
+  }
+  .spine{padding:0 10px 10px; display:flex; flex-direction:column; gap:5px;
+         overflow-y:auto; flex:1}
+  .kids{margin-left:16px; display:flex; flex-direction:column; gap:5px}
+
+  .step,.hand{
+    border-radius:5px; padding:7px 9px; font-size:12.5px; display:flex; gap:8px;
+    align-items:center; text-align:left; width:100%; font-family:inherit;
+    cursor:pointer; color:inherit;
+  }
+  .step{background:#fff; border:1px solid var(--line)}
+  .hand{background:var(--hand); border:1px solid var(--handline); font-size:12px;
+        position:relative; border-radius:5px 5px 5px 0}
+  /* the tab that makes a handout read as handed to you */
+  .hand::after{
+    content:""; position:absolute; left:-1px; bottom:-7px; width:12px; height:7px;
+    background:var(--hand); border:1px solid var(--handline); border-top:none;
+    border-radius:0 0 3px 3px;
+  }
+  .step .n,.hand .n{font-size:11px; min-width:12px}
+  .step .n{color:var(--dim)}
+  .hand .n{color:#9a8a68}
+  .step .kind,.hand .kind{color:var(--dim); font-size:11px; margin-left:auto;
+                          padding-left:8px; white-space:nowrap}
+  .hand .kind{color:#9a8a68}
+  .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+
+  /* blue means one thing only: where the learner is */
+  .step.here,.hand.here{border-color:var(--here); box-shadow:inset 3px 0 0 var(--here)}
+  /* the second cursor: where you are looking. Never moves your place. */
+  .step.looking,.hand.looking{
+    border-color:var(--past); border-style:dashed;
+    box-shadow:inset 3px 0 0 var(--past); background:#F6F7F5;
+  }
+  .hand.looking{background:#F6F2E7}
+  .step.here.looking,.hand.here.looking{
+    border-style:solid; border-color:var(--here);
+    box-shadow:inset 3px 0 0 var(--here), 0 0 0 2px #cfe0ea;
+  }
+  .step.ghost{background:transparent; border-style:dashed; color:var(--dim)}
+  .step:focus-visible,.hand:focus-visible,.apptab:focus-visible,
+  .modes button:focus-visible,.btn:focus-visible{
+    outline:2px solid var(--here); outline-offset:2px;
+  }
+  .cond{font-size:11px; color:var(--dim); padding:1px 2px}
+
+  .panefoot{margin-top:auto; padding:10px; border-top:1px solid var(--line)}
+
+  /* ── the stage ─────────────────────────────────────────────────────────
+     Renders the lesson in the learner's own typography. The studio never
+     restyles it — otherwise the teacher designs against a lie (§3). */
+  .stage{flex:1; background:var(--rail); padding:13px; display:flex;
+         flex-direction:column; min-width:0; gap:9px}
+  .look{
+    display:flex; align-items:center; gap:9px; font-size:11.5px; color:var(--dim);
+    min-height:22px;
+  }
+  .look b{color:var(--ink); font-weight:600}
+  .paper{
+    flex:1; background:var(--stage); border:1px solid var(--line); border-radius:6px;
+    padding:22px 26px; overflow:auto;
+  }
+
+  /* The learner's typography, scoped. Everything inside .learner belongs to the
+     reader, not to the studio. Replace this block wholesale with the reader's
+     own stylesheet when the reader and the studio meet — nothing outside it
+     depends on anything inside it. */
+  .learner{
+    --vc-text:#1a1c19; --vc-text2:#62655f; --vc-text3:#9b9e96;
+    --vc-accent-bg:#edffdf; --vc-accent-line:#a8cf8e; --vc-accent-text:#4a7a35;
+    color:var(--vc-text);
+    font:16px/1.7 ui-serif,Georgia,"Times New Roman",serif;
+    max-width:62ch;
+  }
+  .learner h1{font:600 22px/1.35 inherit; margin:0 0 12px}
+  .learner p{margin:0 0 12px}
+  .learner .mark{background:var(--vc-accent-bg); border-bottom:2px solid var(--vc-accent-line);
+                 padding:0 2px}
+  .learner .vid{
+    height:150px; background:#20242a; border-radius:5px; margin:0 0 14px;
+    display:flex; align-items:center; justify-content:center;
+    color:#7b838c; font:12px/1.4 ui-sans-serif,system-ui,sans-serif;
+    text-align:center; padding:0 16px;
+  }
+  .learner .raw{
+    font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap;
+    background:#F4F4F0; border:1px solid var(--line); border-radius:5px; padding:10px;
+    color:#3a3f36; max-height:340px; overflow:auto;
+  }
+  .unknown{font:13px/1.6 ui-sans-serif,system-ui,sans-serif; color:var(--dim);
+           margin:0 0 10px; max-width:60ch}
+
+  /* ── the teacher's corner ──────────────────────────────────────────────── */
+  .auto{flex:0 0 214px; background:var(--chrome); color:#E8EAEC; display:flex;
+        flex-direction:column; overflow-y:auto}
+  .auto .lbl{color:#8B939B}
+  .auto .box{margin:0 10px 8px; background:#31363C; border:1px solid #3E444B;
+             border-radius:5px; padding:7px 9px; font-size:11.5px; color:#C6CCD2;
+             line-height:1.5}
+  .auto .cam{height:70px; background:#171A1E; border-radius:5px; margin:0 10px 8px;
+             display:flex; align-items:center; justify-content:center;
+             color:#5E666E; font-size:11px}
+  .auto .act{font-size:11px; color:#98A0A8; padding:2px 10px; display:flex; gap:8px}
+  .auto .act b{color:#E8EAEC; font-weight:500}
+  .auto .t{font-variant-numeric:tabular-nums; color:#7E868E; min-width:34px}
+  .auto .none{font-size:11px; color:#7E868E; padding:0 10px 8px; line-height:1.5}
+  .autofoot{margin-top:auto; padding:10px}
+
+  .btn{border:1px solid #4A5158; background:#31363C; border-radius:4px;
+       padding:4px 9px; font-size:11.5px; color:#E8EAEC; font-family:inherit;
+       cursor:pointer}
+  .btn.light{background:#fff; border-color:var(--line); color:var(--ink)}
+  .btn.wide{display:block; width:100%; text-align:center}
+  .btn[disabled]{opacity:.45; cursor:not-allowed}
+
+  /* ── the deck ──────────────────────────────────────────────────────────
+     Exists only when there is a clock (§3). At rest there is none, so this
+     element is absent from the DOM rather than empty. */
+  .deck{
+    height:44px; flex:0 0 44px; background:var(--chrome); color:#E8EAEC;
+    display:flex; align-items:center; gap:12px; padding:0 12px; font-size:12px;
+  }
+  .deck .clock{font-variant-numeric:tabular-nums; font-size:14px}
+  .track{flex:1; height:5px; background:#3E444B; border-radius:3px; position:relative}
+  .track u{position:absolute; left:0; top:0; height:5px; width:0; background:#59626B;
+           border-radius:3px}
+  .track i{position:absolute; left:0; top:-4px; width:2px; height:13px; background:var(--here)}
+
+  /* ── whole-screen states ───────────────────────────────────────────────── */
+  .screen{
+    flex:1; display:grid; place-items:center; padding:40px 24px; background:var(--rail);
+  }
+  .card{
+    background:#fff; border:1px solid var(--line); border-radius:9px;
+    padding:24px 26px; max-width:52ch; line-height:1.6;
+  }
+  .card h2{font-size:16px; font-weight:650; margin:0 0 8px}
+  .card p{margin:0 0 12px; color:var(--dim); font-size:13.5px}
+  .card a{color:var(--here)}
+  .card ul{margin:0 0 12px; padding-left:18px; color:var(--dim); font-size:13.5px}
+  .card code{font:12px ui-monospace,Menlo,monospace; background:#F2F3EF; padding:1px 4px;
+             border-radius:3px}
+
+  select{font:12.5px inherit; font-family:inherit; padding:2px 4px;
+         border:1px solid var(--line); border-radius:4px; background:#fff;
+         color:var(--ink); max-width:30ch}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+<div id="root"><div class="screen"><div class="card"><h2>Opening the studio</h2>
+<p>Reading the lesson.</p></div></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+"use strict";
+
+// ───────────────────────────────────────────────────────────────────────────
+// State. One object, read by render(), written by the loaders.
+// ───────────────────────────────────────────────────────────────────────────
+const S = {
+  env: 'live', sb: null,
+  lessons: [], lesson: null,
+  slots: [], acts: {}, seqs: {},
+  hereSlot: null,      // where the learner is    — from progress.slot_id
+  lookSlot: null,      // where you are looking   — never written to the database
+  content: null, contentFor: null, contentErr: null,
+  takes: [], openTake: null,
+  mode: 'build',
+  error: null
+};
+
+const root = document.getElementById('root');
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+function screen(title, html) {
+  root.innerHTML = '<div class="screen"><div class="card"><h2>' + esc(title) + '</h2>' + html + '</div></div>';
+}
+
+function loadScript(src) {
+  return new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => no(new Error(src));
+    document.head.appendChild(s);
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Boot
+// ───────────────────────────────────────────────────────────────────────────
+(async function boot() {
+  // config.js is the shared file (its own header says so). The studio may sit
+  // one folder down from the site root, so try both and say plainly if neither
+  // is there — a missing config is otherwise a silent blank page.
+  try { await loadScript('../config.js'); }
+  catch (e) {
+    try { await loadScript('config.js'); }
+    catch (e2) {
+      return screen('config.js is not where this page looked',
+        '<p>The studio tried <code>../config.js</code> and <code>config.js</code> and found neither. ' +
+        'It needs the same config the rest of the site uses — it must not keep its own copy of the ' +
+        'database details.</p><p>Put this page in a folder beside <code>config.js</code>, ' +
+        'or one folder below it.</p>');
+    }
+  }
+
+  try { S.env = localStorage.getItem('vocabEnv') || 'live'; } catch (e) {}
+  const env = vocabEnv(S.env);
+  S.env = env.name;
+
+  if (!window.supabase || !supabase.createClient) {
+    return screen('The database library did not load',
+      '<p>This page pulls supabase-js from a CDN, the same way <code>index.html</code> does. ' +
+      'Check the connection, then reload.</p>');
+  }
+
+  // persistSession picks up the session the main app already stored, on this
+  // same origin. The studio does not have its own sign-in and should not.
+  S.sb = supabase.createClient(env.url, env.anon, {
+    auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true }
+  });
+
+  // the DEV badge, from config.js — forgetting which database you are in is
+  // exactly the failure it exists to prevent
+  vocabEnvBanner(S.env, () => {});
+
+  const { data: { session } } = await S.sb.auth.getSession();
+  if (!session) {
+    return screen('Sign in on the main app first',
+      '<p>The studio uses the session the app already holds. Open the app, sign in, ' +
+      'then come back to this page.</p>' +
+      '<p>You are pointed at the <b>' + esc(env.label) + '</b> database.</p>');
+  }
+
+  await loadLessons();
+  render();
+})().catch(e => screen('The studio stopped', '<p>' + esc(e && e.message || e) + '</p>'));
+
+// ───────────────────────────────────────────────────────────────────────────
+// Loading
+// ───────────────────────────────────────────────────────────────────────────
+async function loadLessons() {
+  // No filter on kind, and none on master_id. A linked copy (§7) is still a
+  // lesson you can open, and 'lesson' is a label for the screen rather than a
+  // rule (001-sequences.sql) — filtering on either would show an empty studio
+  // for real data.
+  const { data, error } = await S.sb.from('sequences')
+    .select('id,name,kind,updated_at,master_id')
+    .is('deleted_at', null)
+    .order('updated_at', { ascending: false });
+  if (error) { S.error = error.message; return; }
+  S.lessons = data || [];
+
+  const wanted = new URLSearchParams(location.search).get('lesson');
+  const pick = (wanted && S.lessons.find(l => l.id === wanted)) || S.lessons[0];
+  if (pick) await openLesson(pick.id);
+}
+
+async function openLesson(id) {
+  S.lesson = S.lessons.find(l => l.id === id) || null;
+  S.slots = []; S.acts = {}; S.seqs = {}; S.takes = [];
+  S.hereSlot = null; S.lookSlot = null;
+  S.content = null; S.contentFor = null; S.contentErr = null; S.openTake = null;
+  if (!S.lesson) return;
+
+  // One ordered list. deleted_at came in with 002-slots-soft-delete.sql.
+  const { data: slots, error } = await S.sb.from('slots')
+    .select('id,activity_id,child_sequence_id,position,condition,gate')
+    .eq('sequence_id', id).is('deleted_at', null)
+    .order('position', { ascending: true });
+  if (error) { S.error = error.message; return; }
+  S.slots = slots || [];
+
+  // NO content in this query. See the header.
+  const actIds = S.slots.map(s => s.activity_id).filter(Boolean);
+  if (actIds.length) {
+    const { data } = await S.sb.from('activities').select('id,name,kind').in('id', actIds);
+    (data || []).forEach(a => { S.acts[a.id] = a; });
+  }
+  const seqIds = S.slots.map(s => s.child_sequence_id).filter(Boolean);
+  if (seqIds.length) {
+    const { data } = await S.sb.from('sequences').select('id,name,kind').in('id', seqIds);
+    (data || []).forEach(q => { S.seqs[q.id] = q; });
+  }
+
+  const { data: prog } = await S.sb.from('progress')
+    .select('slot_id').eq('sequence_id', id).maybeSingle();
+  S.hereSlot = prog ? prog.slot_id : null;
+
+  // Looking starts where you are. If nobody has started, it starts at the top.
+  S.lookSlot = S.hereSlot || (S.slots[0] && S.slots[0].id) || null;
+
+  await loadTakes(id);
+  if (S.lookSlot) await loadContent(S.lookSlot);
+}
+
+async function loadTakes(seqId) {
+  const { data: recs } = await S.sb.from('recordings')
+    .select('id,name,created_at').eq('sequence_id', seqId)
+    .is('deleted_at', null).order('created_at', { ascending: true });
+  S.takes = recs || [];
+  if (!S.takes.length) return;
+  // A take's clock is the sum of its clips and must never be wall-clock (§6).
+  // Clip count is all this page can honestly report — see the note in the corner.
+  const { data: clips } = await S.sb.from('clips')
+    .select('id,recording_id').in('recording_id', S.takes.map(t => t.id))
+    .is('deleted_at', null);
+  const n = {};
+  (clips || []).forEach(c => { n[c.recording_id] = (n[c.recording_id] || 0) + 1; });
+  S.takes.forEach(t => { t.clips = n[t.id] || 0; });
+}
+
+async function loadContent(slotId) {
+  S.content = null; S.contentErr = null; S.contentFor = slotId;
+  const slot = S.slots.find(s => s.id === slotId);
+  if (!slot || !slot.activity_id) return;
+  const { data, error } = await S.sb.from('activities')
+    .select('content').eq('id', slot.activity_id).maybeSingle();
+  if (S.contentFor !== slotId) return;          // a later click won the race
+  if (error) { S.contentErr = error.message; return; }
+  S.content = data ? data.content : null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Structure and register
+//
+// The schema stores NEITHER of these yet, and the design (§4) says register is
+// separate from structure and authorable. Both are derived here as a stopgap,
+// in one place each, so that when slots gains the columns there are exactly two
+// functions to change.
+//
+//   structure — is this slot attached to another, or its own step?
+//               Derived from `condition`: a slot shown only on the outcome of
+//               another slot hangs off that slot. That much is real data.
+//   register  — does it draw as handed to you, or as the stage?
+//               Default per §4: attached draws as a handout, own steps draw as
+//               stage. There is no override until there is a column.
+// ───────────────────────────────────────────────────────────────────────────
+function attachedTo(slot) {
+  if (slot.parent_slot_id) return slot.parent_slot_id;      // when the column exists
+  const c = slot.condition;
+  const t = c && c.show_if && c.show_if.slot;
+  return (t && S.slots.some(s => s.id === t)) ? t : null;
+}
+function registerOf(slot, isAttached) {
+  if (slot.register) return slot.register;                   // when the column exists
+  return isAttached ? 'handout' : 'stage';
+}
+
+// Walk the ordered list once, hanging attached slots off their parent.
+function outline() {
+  const rows = [];
+  const byParent = {};
+  S.slots.forEach(s => {
+    const p = attachedTo(s);
+    if (p) (byParent[p] = byParent[p] || []).push(s);
+  });
+  let n = 0;
+  S.slots.forEach(s => {
+    if (attachedTo(s)) return;
+    rows.push({ slot: s, number: ++n, attached: false, kids: byParent[s.id] || [] });
+  });
+  return rows;
+}
+
+function memberOf(slot) {
+  if (slot.activity_id) {
+    const a = S.acts[slot.activity_id];
+    return { name: a ? a.name : 'Missing activity', kind: a ? a.kind : 'not readable' };
+  }
+  const q = S.seqs[slot.child_sequence_id];
+  return { name: q ? q.name : 'Missing sequence', kind: q ? q.kind : 'not readable' };
+}
+
+function conditionLine(slot) {
+  const c = slot.condition && slot.condition.show_if;
+  if (!c) return '';
+  return 'shown if that ' + esc(c.is || 'changes');
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Render
+// ───────────────────────────────────────────────────────────────────────────
+function render() {
+  if (S.error) return screen('The database refused that', '<p>' + esc(S.error) + '</p>');
+
+  if (!S.lessons.length) {
+    return screen('No lessons here yet',
+      '<p>The studio reads a lesson that already exists. Make one in the app — a sequence ' +
+      'of kind <code>lesson</code> — and it will appear in the list at the top of this page.</p>' +
+      '<p>You are on the <b>' + esc(vocabEnv(S.env).label) + '</b> database.</p>');
+  }
+
+  root.innerHTML =
+    tabs() +
+    '<div class="top">' + lessonPicker() + modes() + '</div>' +
+    '<div class="body">' + spine() + stage() + corner() + '</div>' +
+    deck();
+
+  wire();
+}
+
+function tabs() {
+  return '<div class="apptop">' +
+    '<button class="apptab" disabled title="The canvas is its own window and is not built yet">Canvas</button>' +
+    '<span class="apptab on">Studio — ' + esc(S.lesson ? S.lesson.name : '') + '</span>' +
+  '</div>';
+}
+
+function lessonPicker() {
+  if (S.lessons.length === 1) return '<span class="lesson">' + esc(S.lesson.name) + '</span>';
+  return '<select id="pick" aria-label="Which lesson">' + S.lessons.map(l => {
+    let label = l.name;
+    if (l.kind && l.kind !== 'lesson') label += ' (' + l.kind + ')';
+    if (l.master_id) label += ' — copy';
+    return '<option value="' + esc(l.id) + '"' +
+      (S.lesson && l.id === S.lesson.id ? ' selected' : '') + '>' + esc(label) + '</option>';
+  }).join('') + '</select>';
+}
+
+// Build · Preview · Record · Review over the same regions (§3). No Plan — the
+// developer threw it out and §8 records that; frame 1's drawing still shows a
+// Plan tab and is out of date on that one point.
+function modes() {
+  const m = (id, label, on, dis, title) =>
+    '<button class="' + (on ? 'on' : 'off') + '" data-mode="' + id + '"' +
+    (dis ? ' disabled' : '') + (title ? ' title="' + esc(title) + '"' : '') + '>' + label + '</button>';
+  return '<div class="modes">' +
+    m('build', 'Build', S.mode === 'build', false) +
+    m('preview', 'Preview', S.mode === 'preview', true, 'Walking your own lesson as yourself. Not built yet.') +
+    m('record', 'Record', S.mode === 'record', true, 'Takes are built after the canvas.') +
+    m('review', 'Review', false, true, 'Reserved. Needs a cohort, and sharing does not exist yet.') +
+  '</div>';
+}
+
+function spine() {
+  const rows = outline();
+  const body = rows.length
+    ? rows.map(r => stepRow(r) + (r.kids.length
+        ? '<div class="kids">' + r.kids.map(k => stepRow({ slot: k, attached: true })).join('') + '</div>'
+        : '')).join('')
+    : '<p class="cond">This lesson has no slots yet. Add something to it in the app and reload.</p>';
+
+  return '<div class="pane">' +
+    '<div class="lbl">The lesson</div>' +
+    '<div class="spine">' + body + '</div>' +
+    '<div class="panefoot"><button class="btn light wide" disabled ' +
+      'title="Adding comes with the door, frame 2">Add something</button></div>' +
+  '</div>';
+}
+
+function stepRow(r) {
+  const s = r.slot;
+  const reg = registerOf(s, r.attached);
+  const m = memberOf(s);
+  const cls = [reg === 'handout' ? 'hand' : 'step'];
+  if (s.id === S.hereSlot) cls.push('here');
+  if (s.id === S.lookSlot) cls.push('looking');
+  const num = r.attached ? '' : '<span class="n">' + r.number + '</span>';
+  const cond = r.attached ? '<span class="kind">' + conditionLine(s) + '</span>'
+                          : '<span class="kind">' + esc(m.kind) + '</span>';
+  return '<button class="' + cls.join(' ') + '" data-slot="' + esc(s.id) + '">' +
+    num + '<span class="nm">' + esc(m.name) + '</span>' + cond + '</button>';
+}
+
+function stage() {
+  const looking = S.slots.find(s => s.id === S.lookSlot);
+  const away = S.hereSlot && S.lookSlot && S.hereSlot !== S.lookSlot;
+
+  let bar = '';
+  if (away) {
+    const here = S.slots.find(s => s.id === S.hereSlot);
+    bar = '<span>Looking at <b>' + esc(memberOf(looking).name) + '</b>. ' +
+          'The learner is at <b>' + esc(here ? memberOf(here).name : 'a slot that has gone') + '</b>.</span>' +
+          '<button class="btn light" id="back">Go back to where you are</button>';
+  } else if (looking) {
+    bar = '<span>Where the learner is.</span>';
+  }
+
+  return '<div class="stage">' +
+    '<div class="look">' + bar + '</div>' +
+    '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' +
+  '</div>';
+}
+
+function paper(slot) {
+  if (!slot) return '<p class="unknown">Nothing selected.</p>';
+  if (slot.child_sequence_id) {
+    const q = S.seqs[slot.child_sequence_id];
+    return '<p class="unknown">This step is another sequence — ' +
+      esc(q ? q.name : 'not readable') + '. Opening one inside the studio is not built yet.</p>';
+  }
+  if (S.contentErr) return '<p class="unknown">That activity would not load: ' + esc(S.contentErr) + '</p>';
+  if (S.contentFor !== slot.id) return '<p class="unknown">Reading…</p>';
+
+  const a = S.acts[slot.activity_id] || {};
+  const c = S.content || {};
+  let out = '';
+
+  if (a.kind === 'video' || c.video_id || c.video) {
+    // §10: a video activity does not play its own video. Only the walkthrough's
+    // player is real. Saying so is better than a dead play button.
+    out += '<div class="vid">A video activity does not play its own video yet.<br>' +
+           'Only the walkthrough\'s player is real.</div>';
+  }
+  if (a.name) out += '<h1>' + esc(a.name) + '</h1>';
+
+  const text = c.html || c.text || c.body || (Array.isArray(c.paragraphs) ? c.paragraphs.join('\n\n') : null);
+  if (typeof text === 'string' && text.trim()) {
+    // Text only. Nothing here trusts stored markup enough to inject it.
+    out += text.split(/\n\s*\n/).map(p => '<p>' + esc(p.trim()) + '</p>').join('');
+    return out;
+  }
+
+  const keys = Object.keys(c);
+  if (!keys.length) {
+    out += '<p class="unknown">This activity has no content stored.</p>';
+    return out;
+  }
+  out += '<p class="unknown">The studio does not know how to lay out a <b>' + esc(a.kind || 'this') +
+         '</b> activity yet, so here is what it holds. Tell me the shape of one and it will render properly.</p>' +
+         '<div class="raw">' + esc(JSON.stringify(c, null, 2).slice(0, 4000)) + '</div>';
+  return out;
+}
+
+function corner() {
+  const vids = S.slots.map(s => S.acts[s.activity_id])
+    .filter(a => a && (a.kind === 'video' || a.kind === 'audio'));
+
+  const media = vids.length
+    ? vids.map(v => '<div class="box">' + esc(v.name) + '<br><span style="color:#8B939B">' +
+        esc(v.kind) + '</span></div>').join('')
+    : '<div class="none">No media in this lesson.</div>';
+
+  const takes = S.takes.length
+    ? S.takes.map(t => '<div class="act"><span class="t">' + t.clips + '</span><b>' +
+        esc(t.name) + '</b></div>').join('') +
+      '<div class="none">Clip counts, not lengths. A take\'s clock is the sum of its ' +
+      'clips and must never be wall-clock — the lengths live in each clip\'s media, ' +
+      'whose shape is not settled.</div>'
+    : '<div class="none">No takes yet.</div>';
+
+  return '<div class="auto">' +
+    '<div class="lbl">Teacher\'s corner</div>' +
+    '<div class="cam">your camera</div>' +
+    media +
+    '<div class="lbl">Takes</div>' + takes +
+    '<div class="autofoot"><button class="btn wide" disabled ' +
+      'title="Recording comes after the canvas">Start recording</button></div>' +
+  '</div>';
+}
+
+// The deck exists only when there is a clock. At rest there is none.
+function deck() {
+  if (!S.openTake) return '';
+  return '<div class="deck"><button class="btn">Play</button>' +
+    '<span class="clock">0:00</span>' +
+    '<div class="track"><u></u><i></i></div></div>';
+}
+
+function wire() {
+  const pick = document.getElementById('pick');
+  if (pick) pick.onchange = async e => {
+    const id = e.target.value;
+    screen('Opening', '<p>Reading the lesson.</p>');
+    await openLesson(id);
+    history.replaceState(null, '', '?lesson=' + id);
+    render();
+  };
+
+  // Clicking a slot moves your gaze and nothing else. Browsing your own lesson
+  // never costs your position (§4) — nothing here writes to `progress`.
+  root.querySelectorAll('[data-slot]').forEach(el => {
+    el.onclick = async () => {
+      S.lookSlot = el.getAttribute('data-slot');
+      render();
+      await loadContent(S.lookSlot);
+      render();
+    };
+  });
+
+  const back = document.getElementById('back');
+  if (back) back.onclick = async () => {
+    S.lookSlot = S.hereSlot;
+    render();
+    await loadContent(S.lookSlot);
+    render();
+  };
+
+  root.querySelectorAll('[data-mode]').forEach(el => {
+    el.onclick = () => { S.mode = el.getAttribute('data-mode'); render(); };
+  });
+}
+</script>
+</body>
+</html>
