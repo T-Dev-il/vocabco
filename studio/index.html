@@ -349,6 +349,8 @@ const S = {
   take: null,         // the open take: {id,name,clipId,base,startedMs,actions}
   arming: null,       // a take prepared but not yet started
   play: null,         // a take being replayed
+  media: null,        // {stream, recorder, chunks, mime} while capturing
+  carve: null,        // the carve panel's working state
   finished: false,
   error: null
 };
@@ -986,7 +988,8 @@ function previewStage() {
       '</div>';
 
   return '<div class="stage"><div class="look">' + bar + '</div>' +
-    '<div class="paper"><div class="learner">' + body + '</div></div>' + foot + '</div>';
+    '<div class="paper"><div class="learner">' + body + '</div></div>' + foot +
+    carvePanel() + '</div>';
 }
 
 
@@ -1209,7 +1212,7 @@ function stage() {
     '<div class="look">' + bar + '</div>' +
     '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' +
     editBar() +
-    rack() +
+    rack() + carvePanel() +
   '</div>';
 }
 
@@ -1328,6 +1331,8 @@ async function startArmed() {
     recId = rec.id;
   }
   S.arming = null;
+  S.mediaNote = null;
+  await startCapture();
   await openClip(recId, a.name, a.base);
 }
 
@@ -1342,6 +1347,10 @@ async function openClip(recId, name, base) {
   if (error) { S.error = error.message; return render(); }
 
   S.take = { id: recId, name, clipId: clip.id, base, startedMs: Date.now(), actions: [] };
+  // Where the take begins is itself an action. Without it a replay has no idea
+  // where to put you and simply leaves you wherever you already were — which is
+  // exactly what it did before this line existed.
+  await act('opened on', S.lookSlot);
   try { localStorage.setItem(OPEN_TAKE, JSON.stringify({ lesson: S.lesson.id, rec: recId })); } catch (e) {}
   S.mode = 'record';
   tick();
@@ -1359,9 +1368,13 @@ async function act(kind, slotId, extra) {
 
 async function stopTake() {
   if (!S.take) return;
+  const seconds = clipSeconds();
+  const clipId = S.take.clipId, recId = S.take.id;
+
+  const file = await finishCapture(recId, clipId);
   await S.sb.from('clips')
-    .update({ actions: S.take.actions, media: { seconds: clipSeconds() } })
-    .eq('id', S.take.clipId);
+    .update({ actions: S.take.actions, media: { seconds, ...(file || {}) } })
+    .eq('id', clipId);
   S.take = null;
   try { localStorage.removeItem(OPEN_TAKE); } catch (e) {}
   stopTick();
@@ -1382,6 +1395,86 @@ function tick() {
 function stopTick() { if (TICK) { clearInterval(TICK); TICK = null; } }
 
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// Media
+//
+// Until now a take stored what the teacher DID and nothing of what they said.
+// This captures camera and microphone into each clip and puts the file in
+// Supabase Storage, with the path in `clips.media` beside the seconds already
+// there. 003 left media's shape open; it is now { seconds, path, mime }.
+//
+// The file is per CLIP, not per recording, which falls straight out of §6: a
+// take resumed tomorrow appends a clip, and that clip is its own file. Nothing
+// has to stitch yesterday and today together on disk — only playback lays them
+// end to end, and only while playing.
+//
+// If the camera is refused the take still runs. Actions are the take; media is
+// what it sounds like.
+// ───────────────────────────────────────────────────────────────────────────
+const BUCKET = 'takes';
+
+function pickMime() {
+  const want = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4'];
+  for (const m of want) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m;
+  }
+  return '';
+}
+
+async function startCapture() {
+  if (!navigator.mediaDevices || !window.MediaRecorder) return null;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    const mime = pickMime();
+    const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks = [];
+    recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+    recorder.start(1000);                       // a chunk a second, so a crash loses one
+    S.media = { stream, recorder, chunks, mime: mime || 'video/webm' };
+    return S.media;
+  } catch (e) {
+    S.mediaNote = 'Recording without camera — ' + (e.name === 'NotAllowedError'
+      ? 'permission was refused.' : 'no camera or microphone available.');
+    return null;
+  }
+}
+
+function stopStream() {
+  if (!S.media) return;
+  try { S.media.stream.getTracks().forEach(t => t.stop()); } catch (e) {}
+}
+
+// Returns { path, mime } or null. Never throws — a failed upload must not cost
+// the actions, which are already saved.
+async function finishCapture(recId, clipId) {
+  if (!S.media) return null;
+  const m = S.media;
+  const blob = await new Promise(res => {
+    m.recorder.onstop = () => res(new Blob(m.chunks, { type: m.mime }));
+    if (m.recorder.state !== 'inactive') m.recorder.stop(); else res(new Blob(m.chunks, { type: m.mime }));
+  });
+  stopStream();
+  S.media = null;
+  if (!blob.size) return null;
+
+  const { data: { user } } = await S.sb.auth.getUser();
+  const ext = m.mime.indexOf('mp4') >= 0 ? 'mp4' : 'webm';
+  // own-rows-only is the rule everywhere else; the path starts with the user id
+  // so the bucket's policies can say the same thing about files.
+  const path = user.id + '/' + recId + '/' + clipId + '.' + ext;
+
+  const { error } = await S.sb.storage.from(BUCKET)
+    .upload(path, blob, { contentType: m.mime, upsert: true });
+  if (error) { S.mediaNote = 'The clip did not upload: ' + error.message; return null; }
+  return { path, mime: m.mime };
+}
+
+async function clipUrl(path) {
+  const { data } = await S.sb.storage.from(BUCKET).createSignedUrl(path, 3600);
+  return data ? data.signedUrl : null;
+}
+
 // ── Playing a take back ────────────────────────────────────────────────────
 //
 // There is no video. What was recorded is what the teacher DID, each action
@@ -1399,24 +1492,59 @@ async function playTake(recId) {
 
   let base = 0;
   const seq = [];
+  const reel = [];
   (clips || []).forEach(c => {
     (c.actions || []).forEach(a => seq.push({ ...a, at: base + (a.t || 0) }));
-    base += (c.media && c.media.seconds) || 0;
+    const sec = (c.media && c.media.seconds) || 0;
+    reel.push({ offset: base, seconds: sec, path: c.media && c.media.path });
+    base += sec;
   });
   seq.sort((x, y) => x.at - y.at);
 
-  S.play = { recId, name: rec ? rec.name : 'Take', seq, total: base, done: 0, startedMs: Date.now() };
+  S.play = { recId, name: rec ? rec.name : 'Take', seq, reel, at: 0, total: base,
+             done: 0, startedMs: Date.now() };
+  if (reel.some(r => r.path)) await cueClip(0);
   S.handed = {};
   S.live = {};
+  S.finished = false;
+
+  // Older takes have no 'opened on' action, so fall back to the first action
+  // that names a slot, and then to the first step of the lesson.
+  const first = seq.find(a => a.slot);
+  const rows = steps();
+  const from = (first && first.slot) || (rows[0] && rows[0].slot.id) || null;
+  if (from) { S.lookSlot = from; await loadContent(from); }
   playTick();
   render();
+}
+
+
+// The video is the clock when there is one. Nothing keeps a second timer in
+// step with it — a drifting replay is worse than no replay.
+async function cueClip(i) {
+  if (!S.play || !S.play.reel[i]) return;
+  S.play.at = i;
+  const r = S.play.reel[i];
+  if (!r.path) return;
+  S.play.url = await clipUrl(r.path);
+  render();
+  const v = document.getElementById('reel');
+  if (v) { v.src = S.play.url; v.play().catch(() => {}); }
+}
+
+function playElapsed() {
+  if (!S.play) return 0;
+  const r = S.play.reel[S.play.at];
+  const v = document.getElementById('reel');
+  if (r && r.path && v && !isNaN(v.currentTime)) return r.offset + v.currentTime;
+  return (Date.now() - S.play.startedMs) / 1000;
 }
 
 function playTick() {
   stopTick();
   TICK = setInterval(async () => {
     if (!S.play) return stopTick();
-    const el = (Date.now() - S.play.startedMs) / 1000;
+    const el = playElapsed();
 
     const c = document.getElementById('clk');
     if (c) c.textContent = clock(el);
@@ -1433,6 +1561,11 @@ function playTick() {
     }
     if (moved) render();
 
+    const r = S.play.reel[S.play.at];
+    if (r && r.seconds && el >= r.offset + r.seconds - 0.25 && S.play.at < S.play.reel.length - 1) {
+      await cueClip(S.play.at + 1);
+      return;
+    }
     if (el >= S.play.total && S.play.done >= S.play.seq.length) stopPlay();
   }, 250);
 }
@@ -1509,6 +1642,7 @@ function takePanel() {
       '<div style="display:flex;gap:5px">' +
         '<button class="btn" style="flex:1" data-playtake="' + esc(t.id) + '">Play</button>' +
         '<button class="btn" style="flex:1" data-resume="' + esc(t.id) + '">Carry on</button>' +
+        '<button class="btn" style="flex:1" data-carve="' + esc(t.id) + '">Carve</button>' +
       '</div>' +
     '</div>').join('');
 
@@ -1521,6 +1655,9 @@ function takePanel() {
 
 function wireRecord() {
   const $ = id => document.getElementById(id);
+  const cam = $('cam');
+  if (cam && S.media && cam.srcObject !== S.media.stream) cam.srcObject = S.media.stream;
+
   if ($('torecord')) $('torecord').onclick = () => { S.mode = 'record'; render(); };
   if ($('starttake')) $('starttake').onclick = armNew;
   if ($('go')) $('go').onclick = startArmed;
@@ -1532,6 +1669,149 @@ function wireRecord() {
     el.onclick = () => armResume(el.getAttribute('data-resume')));
   root.querySelectorAll('[data-playtake]').forEach(el =>
     el.onclick = () => playTake(el.getAttribute('data-playtake')));
+  root.querySelectorAll('[data-carve]').forEach(el =>
+    el.onclick = () => openCarve(el.getAttribute('data-carve')));
+  wireCarve();
+}
+
+
+
+// ───────────────────────────────────────────────────────────────────────────
+// Carve
+//
+// A carved take is a shorter take made out of a longer one — the intro on its
+// own, the bit that worked. `recordings.master_id` already exists for exactly
+// this (intent.md §8), so a carve is a recording whose master is the take it
+// came from, and `divorced` is there for when someone edits it away from its
+// parent.
+//
+// WHAT IS COPIED AND WHAT IS NOT. The actions inside the range are copied and
+// rebased to zero, so the carve plays from its own beginning. The video is NOT
+// copied — trimming a file needs a server, and there is none. A carve therefore
+// follows the lesson's shape without the footage, and says so.
+//
+// Marks are the obvious carve boundaries, which is what the Mark button on the
+// deck is for.
+// ───────────────────────────────────────────────────────────────────────────
+async function openCarve(recId) {
+  const rec = S.takes.find(t => t.id === recId);
+  const { data: clips } = await S.sb.from('clips')
+    .select('position,media,actions').eq('recording_id', recId)
+    .is('deleted_at', null).order('position', { ascending: true });
+
+  let base = 0;
+  const seq = [];
+  (clips || []).forEach(c => {
+    (c.actions || []).forEach(a => seq.push({ ...a, at: base + (a.t || 0) }));
+    base += (c.media && c.media.seconds) || 0;
+  });
+  seq.sort((x, y) => x.at - y.at);
+
+  S.carve = { recId, name: rec ? rec.name : 'Take', seq, total: base, from: 0, to: base };
+  render();
+}
+
+async function doCarve() {
+  const c = S.carve;
+  if (!c) return;
+  const from = Math.max(0, Math.min(c.from, c.to));
+  const to = Math.max(c.from, c.to);
+  if (to - from < 1) { S.carveErr = 'That is less than a second.'; return render(); }
+
+  const inside = c.seq.filter(a => a.at >= from && a.at <= to)
+                      .map(a => ({ ...a, t: +(a.at - from).toFixed(2), at: undefined }));
+
+  const { data: rec, error } = await S.sb.from('recordings')
+    .insert({ sequence_id: S.lesson.id, name: c.name + ' — ' + clock(from) + ' to ' + clock(to),
+              master_id: c.recId })
+    .select('id').single();
+  if (error) { S.carveErr = error.message; return render(); }
+
+  const { error: e2 } = await S.sb.from('clips').insert({
+    recording_id: rec.id, position: 1,
+    media: { seconds: Math.round(to - from), carved_from: c.recId },
+    actions: inside
+  });
+  if (e2) { S.carveErr = e2.message; return render(); }
+
+  S.carve = null; S.carveErr = null;
+  await loadTakes(S.lesson.id);
+  render();
+}
+
+function carvePanel() {
+  const c = S.carve;
+  if (!c) return '';
+  const marks = c.seq.filter(a => a.kind === 'marked');
+
+  return '<div class="scrim"></div><div class="panel">' +
+    '<div class="phead"><span>Carve a piece out of ' + esc(c.name) + '</span>' +
+    '<div style="flex:1"></div><button class="btn light" id="ccancel">Cancel</button></div>' +
+    '<div class="pbody"><div class="form">' +
+      (S.carveErr ? '<p class="err">' + esc(S.carveErr) + '</p>' : '') +
+      '<p class="why">The whole take runs ' + clock(c.total) + '. A carve copies what you ' +
+      '<b>did</b> between two times and starts it from zero. It does not copy the video — ' +
+      'trimming a file needs a server, and there is not one.</p>' +
+      '<div class="field"><label>From</label>' +
+        '<input class="inp" id="cfrom" value="' + clock(c.from) + '" style="width:110px"></div>' +
+      '<div class="field"><label>To</label>' +
+        '<input class="inp" id="cto" value="' + clock(c.to) + '" style="width:110px"></div>' +
+      (marks.length
+        ? '<div class="field"><label>Marks you dropped — click one to set From</label>' +
+          marks.map(m => '<button class="addopt" data-mark="' + m.at + '" ' +
+            'style="margin-right:12px">' + clock(m.at) + '</button>').join('') + '</div>'
+        : '<p class="why">No marks in this take. The Mark button on the deck drops one ' +
+          'while you record, and they show up here as boundaries.</p>') +
+    '</div></div>' +
+    '<div class="pfoot"><span>' +
+      c.seq.filter(a => a.at >= c.from && a.at <= c.to).length + ' actions in that stretch.</span>' +
+      '<div style="flex:1"></div>' +
+      '<button class="btn light" id="cgo" style="background:var(--here);border-color:var(--here);' +
+      'color:#fff">Carve it</button></div>' +
+  '</div>';
+}
+
+// "2:40" or "160" both mean the same thing, and a teacher will type either.
+function readClock(s) {
+  s = String(s || '').trim();
+  if (s.indexOf(':') < 0) return +s || 0;
+  const [m, sec] = s.split(':');
+  return (+m || 0) * 60 + (+sec || 0);
+}
+
+function wireCarve() {
+  if (!S.carve) return;
+  const $ = id => document.getElementById(id);
+  const read = () => {
+    S.carve.from = readClock($('cfrom') ? $('cfrom').value : 0);
+    S.carve.to   = readClock($('cto') ? $('cto').value : 0);
+  };
+  if ($('cfrom')) $('cfrom').onchange = () => { read(); S.carveErr = null; render(); };
+  if ($('cto'))   $('cto').onchange   = () => { read(); S.carveErr = null; render(); };
+  if ($('ccancel')) $('ccancel').onclick = () => { S.carve = null; S.carveErr = null; render(); };
+  if ($('cgo')) $('cgo').onclick = () => { read(); doCarve(); };
+  root.querySelectorAll('[data-mark]').forEach(el => el.onclick = () => {
+    read();
+    S.carve.from = +el.getAttribute('data-mark');
+    render();
+  });
+}
+
+function camBox() {
+  if (S.play && S.play.url) {
+    return '<video id="reel" class="cam" style="object-fit:cover;width:calc(100% - 20px)" ' +
+      'controls playsinline></video>';
+  }
+  if (S.play) {
+    return '<div class="cam">this take has no video</div>';
+  }
+  if (S.media) {
+    return '<video id="cam" class="cam" style="object-fit:cover;width:calc(100% - 20px)" ' +
+      'muted autoplay playsinline></video>';
+  }
+  if (S.mediaNote) return '<div class="cam" style="font-size:10.5px;padding:0 10px;text-align:center">' +
+    esc(S.mediaNote) + '</div>';
+  return '<div class="cam">your camera</div>';
 }
 
 // The teacher's own gesture, standing in for itself. In Record this is the real
@@ -1702,7 +1982,7 @@ function corner() {
     '<div class="lbl">Teacher\'s corner</div>' +
     handOutList() +
     takePanel() +
-    '<div class="cam">your camera</div>' +
+    camBox() +
     media +
     '<div class="lbl">Takes</div>' + takes +
     (S.mode === 'record' ? '' :
