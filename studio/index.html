@@ -1581,7 +1581,8 @@ function deck() {
     return '<div class="deck">' +
       '<button class="btn" id="stopplay">Stop</button>' +
       '<span class="clock" id="clk">0:00</span>' +
-      '<div class="track"><u id="trk" style="width:0"></u></div>' +
+      '<div class="track" id="track" style="cursor:pointer;height:9px" title="Drag to move through the take">' +
+        '<u id="trk" style="width:0;height:9px"></u></div>' +
       '<span style="color:#8B939B">Playing ' + esc(S.play.name) + ' · ' + clock(S.play.total) + '</span>' +
     '</div>';
   }
@@ -1643,6 +1644,9 @@ function takePanel() {
         '<button class="btn" style="flex:1" data-playtake="' + esc(t.id) + '">Play</button>' +
         '<button class="btn" style="flex:1" data-resume="' + esc(t.id) + '">Carry on</button>' +
         '<button class="btn" style="flex:1" data-carve="' + esc(t.id) + '">Carve</button>' +
+        '<button class="btn" data-rmtake="' + esc(t.id) + '"' +
+          (S.confirmTake === t.id ? ' style="background:#6b2e2e;border-color:#8a3d3d"' : '') +
+          '>' + (S.confirmTake === t.id ? 'Sure?' : '\u00d7') + '</button>' +
       '</div>' +
     '</div>').join('');
 
@@ -1671,10 +1675,99 @@ function wireRecord() {
     el.onclick = () => playTake(el.getAttribute('data-playtake')));
   root.querySelectorAll('[data-carve]').forEach(el =>
     el.onclick = () => openCarve(el.getAttribute('data-carve')));
+  root.querySelectorAll('[data-rmtake]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-rmtake');
+    if (S.confirmTake === id) removeTake(id);
+    else { S.confirmTake = id; render(); }
+  });
   wireCarve();
+  wireScrub();
 }
 
 
+
+
+// ── Scrubbing ──────────────────────────────────────────────────────────────
+//
+// Dragging the cursor has to put the LESSON where it was at that moment, not
+// just the video. So every action up to that point is replayed instantly and
+// the ones after it are put back on the queue. State is rebuilt from the take
+// rather than nudged, which is the only version that survives dragging
+// backwards.
+async function seekTo(sec) {
+  if (!S.play) return;
+  const t = Math.max(0, Math.min(sec, S.play.total));
+
+  S.handed = {};
+  S.live = {};
+  S.play.done = 0;
+  let land = null;
+  S.play.seq.forEach(a => {
+    if (a.at > t) return;
+    S.play.done++;
+    if (a.kind === 'handed out' && a.slot) S.handed[a.slot] = true;
+    if (a.slot && a.kind !== 'marked') land = a.slot;
+  });
+  if (land) { S.lookSlot = land; await loadContent(land); }
+
+  // find the clip this moment falls in, and put the video there
+  let i = 0;
+  for (let n = 0; n < S.play.reel.length; n++) {
+    if (t >= S.play.reel[n].offset) i = n;
+  }
+  const r = S.play.reel[i];
+  if (r && r.path) {
+    if (i !== S.play.at) { await cueClip(i); }
+    const v = document.getElementById('reel');
+    if (v) { v.currentTime = Math.max(0, t - r.offset); v.play().catch(() => {}); }
+  } else {
+    // no footage in this stretch — the wall clock stands in, rebased
+    S.play.startedMs = Date.now() - t * 1000;
+  }
+  render();
+}
+
+function wireScrub() {
+  if (!S.play) return;
+  const track = document.getElementById('track');
+  if (!track) return;
+  const at = e => {
+    const b = track.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - b.left;
+    return Math.max(0, Math.min(1, x / b.width)) * S.play.total;
+  };
+  let dragging = false;
+  track.onpointerdown = e => { dragging = true; track.setPointerCapture(e.pointerId); seekTo(at(e)); };
+  track.onpointermove = e => { if (dragging) seekTo(at(e)); };
+  track.onpointerup   = e => { dragging = false; };
+}
+
+// ── Removing a take ────────────────────────────────────────────────────────
+//
+// The footage goes too. 007's closing note says nothing deletes these files and
+// a deleted take is a file paid for forever — this closes that for the one case
+// where the teacher asked. The objects go FIRST: a failed delete then leaves a
+// take that still lists, which is recoverable, rather than a row that is gone
+// and a file nobody can reach.
+async function removeTake(recId) {
+  const { data: clips } = await S.sb.from('clips')
+    .select('media').eq('recording_id', recId).is('deleted_at', null);
+  const paths = (clips || []).map(c => c.media && c.media.path).filter(Boolean);
+  if (paths.length) await S.sb.storage.from(BUCKET).remove(paths);
+
+  await S.sb.from('recordings')
+    .update({ deleted_at: new Date().toISOString() }).eq('id', recId);
+
+  try {
+    const open = JSON.parse(localStorage.getItem(OPEN_TAKE) || 'null');
+    if (open && open.rec === recId) localStorage.removeItem(OPEN_TAKE);
+  } catch (e) {}
+  if (S.take && S.take.id === recId) { stopStream(); S.take = null; stopTick(); }
+
+  S.confirmTake = null;
+  await loadTakes(S.lesson.id);
+  render();
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // Carve
@@ -1992,6 +2085,87 @@ function corner() {
 }
 
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// The door (frame 2) — find something you already have
+//
+// Skipped when the rack was built, because nothing existed to browse. It does
+// now. §11's note still stands: this may turn out to be redundant once the
+// canvas exists, and building it is how we find out.
+//
+// It lands over the stage so the spine and the corner stay either side — you are
+// never taken out of the lesson to add to it. Handout or step is decided here,
+// at the moment of adding, while you still know which you meant.
+// ───────────────────────────────────────────────────────────────────────────
+async function loadLibrary() {
+  if (S.lib) return;
+  // id, name, kind. Never content — FIX-004 and FIX-006 were about exactly this.
+  const { data } = await S.sb.from('activities')
+    .select('id,name,kind,updated_at').is('deleted_at', null)
+    .order('updated_at', { ascending: false }).limit(300);
+  S.lib = data || [];
+
+  // "used in 2 lessons" has to be real rather than decorative (§7).
+  const { data: uses } = await S.sb.from('slots')
+    .select('activity_id,sequence_id').is('deleted_at', null);
+  const seen = {};
+  (uses || []).forEach(u => {
+    if (!u.activity_id) return;
+    (seen[u.activity_id] = seen[u.activity_id] || new Set()).add(u.sequence_id);
+  });
+  S.lib.forEach(a => { a.used = seen[a.id] ? seen[a.id].size : 0; });
+  render();
+}
+
+function doorPanel() {
+  if (!S.lib) { loadLibrary(); return '<p class="why">Reading what you have…</p>'; }
+
+  const q = (S.libQ || '').toLowerCase();
+  const f = S.libKind || 'all';
+  const list = S.lib.filter(a =>
+    (f === 'all' || a.kind === f) && (!q || (a.kind + ' ' + a.name).toLowerCase().indexOf(q) >= 0));
+
+  const kinds = ['all'].concat(Object.keys(S.lib.reduce((m, a) => (m[a.kind] = 1, m), {})).sort());
+
+  return '<input class="inp" id="libq" placeholder="Search what you have" ' +
+      'value="' + esc(S.libQ || '') + '" style="margin-bottom:11px">' +
+    '<div class="filters" style="padding:0 0 12px">' + kinds.map(k =>
+      '<button class="chip' + (f === k ? ' on' : '') + '" data-kind-filter="' + esc(k) + '">' +
+      esc(k === 'all' ? 'Everything' : (KINDS[k] ? KINDS[k].label : k)) + '</button>').join('') + '</div>' +
+    (list.length
+      ? '<div class="kinds">' + list.map(a =>
+          '<button class="kindbtn" data-pickact="' + esc(a.id) + '"' +
+          (S.libPick === a.id ? ' style="border-color:var(--here);background:#F4F8FA"' : '') + '><b>' +
+          esc(a.name) + '</b><span>' + esc(KINDS[a.kind] ? KINDS[a.kind].label : a.kind) +
+          (a.used ? ' · in ' + a.used + (a.used === 1 ? ' lesson' : ' lessons') : ' · never used') +
+          '</span></button>').join('') + '</div>'
+      : '<p class="why">Nothing matches that. The Make tab builds a new one.</p>');
+}
+
+// The same activity in a second lesson is a second SLOT, never a second
+// activity. That is what makes "used in 2 lessons" true, and what §7's linked
+// copies will later be built on top of.
+async function addExisting(register) {
+  if (!S.libPick || !S.lesson) return;
+  let parent = null;
+  if (register === 'handout') {
+    const looking = S.slots.find(s => s.id === S.lookSlot);
+    parent = looking ? (attachedTo(looking) || looking.id) : null;
+  }
+  const last = S.slots.reduce((m, s) => Math.max(m, s.position || 0), 0);
+  const row = { sequence_id: S.lesson.id, activity_id: S.libPick, position: last + 1 };
+  if (S.has006) { row.register = register; row.parent_slot_id = parent; }
+
+  const { data: slot, error } = await S.sb.from('slots').insert(row).select('id').single();
+  if (error) { S.rackErr = error.message; return render(); }
+
+  S.rack = null; S.lib = null; S.libPick = null; S.libQ = '';
+  if (slot) await act('added', slot.id);
+  await openLesson(S.lesson.id);
+  if (slot) { S.lookSlot = slot.id; await loadContent(slot.id); }
+  render();
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // The rack, drawn
 //
@@ -2005,14 +2179,33 @@ function rack() {
   const K = KINDS[S.rack.kind];
 
   if (!K) {
+    const tab = S.rack.tab || 'have';
+    const picked = S.libPick && (S.lib || []).find(a => a.id === S.libPick);
+    const looking = S.slots.find(s => s.id === S.lookSlot);
+    const h = looking ? memberOf(looking).name : null;
+
     return '<div class="scrim"></div><div class="panel">' +
-      '<div class="phead"><span>Add something</span><div style="flex:1"></div>' +
-      '<button class="btn light" id="rclose">Close</button></div>' +
-      '<div class="pbody"><div class="kinds">' +
-        KIND_ORDER.map(k => '<button class="kindbtn" data-kind="' + k + '"><b>' +
-          esc(KINDS[k].label) + '</b><span>' + esc(KINDS[k].hint) + '</span></button>').join('') +
-      '</div></div>' +
-      '<div class="pfoot"><span>Six kinds and no more. Anything bigger gets made on the canvas.</span></div>' +
+      '<div class="phead">' +
+        '<button class="chip' + (tab === 'have' ? ' on' : '') + '" data-tab="have">What you have</button>' +
+        '<button class="chip' + (tab === 'make' ? ' on' : '') + '" data-tab="make">Make one now</button>' +
+        '<div style="flex:1"></div><button class="btn light" id="rclose">Close</button></div>' +
+      '<div class="pbody">' +
+        (tab === 'have' ? doorPanel() :
+          '<div class="kinds">' + KIND_ORDER.map(k =>
+            '<button class="kindbtn" data-kind="' + k + '"><b>' + esc(KINDS[k].label) +
+            '</b><span>' + esc(KINDS[k].hint) + '</span></button>').join('') + '</div>') +
+      '</div>' +
+      '<div class="pfoot">' +
+        (tab === 'make'
+          ? '<span>Six kinds and no more. Anything bigger gets made on the canvas.</span>'
+          : (picked
+              ? '<span>' + esc(picked.name) + '</span><div style="flex:1"></div>' +
+                '<button class="btn light" id="libhand"' + (h && S.has006 ? '' : ' disabled') +
+                  '>Add as a handout</button>' +
+                '<button class="btn light" id="libstep" ' +
+                  'style="background:var(--here);border-color:var(--here);color:#fff">Add as a step</button>'
+              : '<span>Pick something to add it to this lesson.</span>')) +
+      '</div>' +
     '</div>';
   }
 
@@ -2055,6 +2248,26 @@ function wireRack() {
 
   if ($('rclose')) $('rclose').onclick = close;
   if ($('rback')) $('rback').onclick = () => { S.rack = { kind:null }; S.rackErr = null; render(); };
+
+  root.querySelectorAll('[data-tab]').forEach(b => {
+    b.onclick = () => { S.rack.tab = b.getAttribute('data-tab'); render(); };
+  });
+  root.querySelectorAll('[data-kind-filter]').forEach(b => {
+    b.onclick = () => { S.libKind = b.getAttribute('data-kind-filter'); render(); };
+  });
+  root.querySelectorAll('[data-pickact]').forEach(b => {
+    b.onclick = () => { S.libPick = b.getAttribute('data-pickact'); render(); };
+  });
+  const lq = $('libq');
+  if (lq) {
+    lq.oninput = () => { S.libQ = lq.value; };
+    // re-filter on Enter or on leaving, not on every keystroke — a full render
+    // per character would take the cursor with it
+    lq.onchange = () => render();
+    lq.onkeydown = e => { if (e.key === 'Enter') render(); };
+  }
+  if ($('libstep')) $('libstep').onclick = () => addExisting('stage');
+  if ($('libhand')) $('libhand').onclick = () => addExisting('handout');
 
   root.querySelectorAll('[data-kind]').forEach(b => {
     b.onclick = () => {
@@ -2230,7 +2443,11 @@ function wire() {
   });
 
   const add = document.getElementById('add');
-  if (add) add.onclick = () => { S.rack = { kind: null }; S.rackErr = null; render(); };
+  if (add) add.onclick = () => {
+    S.rack = { kind: null, tab: 'have' };
+    S.rackErr = null; S.lib = null; S.libPick = null; S.libQ = ''; S.libKind = 'all';
+    render();
+  };
 
   wireRack();
   wireRecord();
