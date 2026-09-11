@@ -711,7 +711,11 @@ function val(el, name) {
 //               stage. There is no override until there is a column.
 // ───────────────────────────────────────────────────────────────────────────
 function attachedTo(slot) {
-  if (slot.parent_slot_id) return slot.parent_slot_id;      // when the column exists
+  // A parent that has been removed leaves the handout loose rather than hidden.
+  // 006-register.sql says why: that is the failure a teacher can see and fix.
+  if (slot.parent_slot_id && S.slots.some(s => s.id === slot.parent_slot_id)) {
+    return slot.parent_slot_id;
+  }
   const c = slot.condition;
   const t = c && c.show_if && c.show_if.slot;
   return (t && S.slots.some(s => s.id === t)) ? t : null;
@@ -1191,6 +1195,7 @@ function stage() {
   return '<div class="stage">' +
     '<div class="look">' + bar + '</div>' +
     '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' +
+    editBar() +
     rack() +
   '</div>';
 }
@@ -1263,6 +1268,134 @@ function handOutList() {
     '<div class="none">Handing something out does not move anyone on.</div>';
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// Changing what is already there
+//
+// Four operations, all on the slot you are looking at: edit it, move it, change
+// whether it is a step or a handout, take it out.
+//
+// The register control is the one frame 2 promised: "handout or step is decided
+// at the moment of adding... changing it later is one control in the inspector."
+// This is that control. There is no inspector yet, so it lives on the stage.
+// ───────────────────────────────────────────────────────────────────────────
+
+// Positions are rewritten freely; slot ids never are. Everything that points at
+// a slot — attempts, conditions, recorded actions — points at the id, so this
+// renumbering changes where things sit and nothing about what anything means.
+async function renumber(ordered) {
+  for (let i = 0; i < ordered.length; i++) {
+    if (ordered[i].position !== i + 1) {
+      await S.sb.from('slots').update({ position: i + 1 }).eq('id', ordered[i].id);
+    }
+  }
+}
+
+// A step travels with its handouts. Moving one without them would be a move
+// that silently rearranges someone else's lesson.
+function flatWithKids() {
+  const out = [];
+  outline().forEach(r => { out.push(r.slot); r.kids.forEach(k => out.push(k)); });
+  return out;
+}
+
+async function moveStep(slotId, dir) {
+  const rows = outline();
+  const i = rows.findIndex(r => r.slot.id === slotId);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= rows.length) return;
+  const moved = rows.slice();
+  moved.splice(j, 0, moved.splice(i, 1)[0]);
+
+  const flat = [];
+  moved.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
+  await renumber(flat);
+  await openLesson(S.lesson.id);
+  S.lookSlot = slotId;
+  await loadContent(slotId);
+  render();
+}
+
+async function setRegister(slotId, want) {
+  const slot = S.slots.find(s => s.id === slotId);
+  if (!slot) return;
+
+  if (want === 'handout') {
+    // It hangs under the nearest step above it. Without one there is nothing to
+    // be handed out during, so the first thing in a lesson cannot be a handout.
+    const rows = outline();
+    const i = rows.findIndex(r => r.slot.id === slotId);
+    if (i <= 0) { S.error = null; S.note = 'Nothing above this to hand it out during.'; return render(); }
+    await S.sb.from('slots')
+      .update({ register: 'handout', parent_slot_id: rows[i - 1].slot.id }).eq('id', slotId);
+  } else {
+    await S.sb.from('slots')
+      .update({ register: 'stage', parent_slot_id: null }).eq('id', slotId);
+  }
+  await openLesson(S.lesson.id);
+  S.lookSlot = slotId;
+  await loadContent(slotId);
+  render();
+}
+
+// Soft delete, which is what 002-slots-soft-delete.sql is for. The activity
+// itself is untouched — taking something out of one lesson must not destroy it
+// in the others that use it (§7).
+async function removeSlot(slotId) {
+  await S.sb.from('slots').update({ deleted_at: new Date().toISOString() }).eq('id', slotId);
+  await openLesson(S.lesson.id);
+  render();
+}
+
+function editBar() {
+  if (S.mode !== 'build') return '';
+  const slot = S.slots.find(s => s.id === S.lookSlot);
+  if (!slot) return '';
+  const a = S.acts[slot.activity_id] || {};
+  const known = !!KINDS[a.kind];
+  const reg = registerOf(slot, !!attachedTo(slot));
+  const rows = outline();
+  const i = rows.findIndex(r => r.slot.id === S.lookSlot);
+  const isStep = i >= 0;
+
+  return '<div class="look" style="border-top:1px solid var(--line);padding-top:9px">' +
+    '<button class="btn light" id="edit"' + (known ? '' : ' disabled title="The rack did not make this one"') +
+      '>Edit</button>' +
+    (isStep ? '<button class="btn light" id="up"' + (i <= 0 ? ' disabled' : '') + '>Move up</button>' +
+              '<button class="btn light" id="down"' + (i >= rows.length - 1 ? ' disabled' : '') +
+              '>Move down</button>' : '') +
+    '<button class="btn light" id="reg">' +
+      (reg === 'handout' ? 'Make it a step' : 'Make it a handout') + '</button>' +
+    '<div style="flex:1"></div>' +
+    (S.note ? '<span>' + esc(S.note) + '</span>' : '') +
+    '<button class="btn light" id="rm">' + (S.confirmRm === slot.id ? 'Really remove it' : 'Remove') +
+    '</button>' +
+  '</div>';
+}
+
+function wireEdit() {
+  const $ = id => document.getElementById(id);
+  const slot = S.slots.find(s => s.id === S.lookSlot);
+  if (!slot) return;
+
+  if ($('edit')) $('edit').onclick = () => {
+    const a = S.acts[slot.activity_id] || {};
+    S.rack = { kind: a.kind, content: S.content || KINDS[a.kind].blank(), editing: slot.id };
+    S.rackErr = null; S.note = null;
+    render();
+  };
+  if ($('up')) $('up').onclick = () => moveStep(slot.id, -1);
+  if ($('down')) $('down').onclick = () => moveStep(slot.id, 1);
+  if ($('reg')) $('reg').onclick = () => {
+    S.note = null;
+    setRegister(slot.id, attachedTo(slot) ? 'stage' : 'handout');
+  };
+  if ($('rm')) $('rm').onclick = () => {
+    if (S.confirmRm === slot.id) { S.confirmRm = null; removeSlot(slot.id); }
+    else { S.confirmRm = slot.id; render(); }
+  };
+}
+
 function corner() {
   const vids = S.slots.map(s => S.acts[s.activity_id])
     .filter(a => a && (a.kind === 'video' || a.kind === 'audio'));
@@ -1329,23 +1462,29 @@ function rack() {
 
   return '<div class="scrim"></div><div class="panel">' +
     '<div class="phead"><span>New ' + esc(K.label.toLowerCase()) + '</span>' +
-    '<div style="flex:1"></div><button class="btn light" id="rback">Pick another kind</button>' +
+    '<div style="flex:1"></div>' +
+    (S.rack.editing ? '' : '<button class="btn light" id="rback">Pick another kind</button>') +
     '<button class="btn light" id="rclose">Cancel</button></div>' +
     '<div class="pbody"><div class="form" id="rform">' +
       (S.rackErr ? '<p class="err">' + esc(S.rackErr) + '</p>' : '') +
       K.form(S.rack.content) +
     '</div></div>' +
     '<div class="pfoot">' +
-      '<span>' + (host
-        ? 'A handout hangs under <b>' + esc(host) + '</b> and does not move the learner on. A step does.'
-        : 'A step moves the learner on. A handout does not.') + '</span>' +
-      '<div style="flex:1"></div>' +
-      '<button class="btn light" id="ashand"' +
-        (host && S.has006 ? '' : ' disabled') +
-        (!S.has006 ? ' title="Needs 006-register.sql. Run it and reload."' : '') +
-        '>Add as a handout</button>' +
-      '<button class="btn light" id="asstep" style="background:var(--here);border-color:var(--here);color:#fff">' +
-        'Add as a step</button>' +
+      (S.rack.editing
+        ? '<span>Changing this changes it everywhere it is used.</span>' +
+          '<div style="flex:1"></div>' +
+          '<button class="btn light" id="assave" ' +
+            'style="background:var(--here);border-color:var(--here);color:#fff">Save changes</button>'
+        : '<span>' + (host
+            ? 'A handout hangs under <b>' + esc(host) + '</b> and does not move the learner on. A step does.'
+            : 'A step moves the learner on. A handout does not.') + '</span>' +
+          '<div style="flex:1"></div>' +
+          '<button class="btn light" id="ashand"' +
+            (host && S.has006 ? '' : ' disabled') +
+            (!S.has006 ? ' title="Needs 006-register.sql. Run it and reload."' : '') +
+            '>Add as a handout</button>' +
+          '<button class="btn light" id="asstep" ' +
+            'style="background:var(--here);border-color:var(--here);color:#fff">Add as a step</button>') +
     '</div>' +
   '</div>';
 }
@@ -1392,6 +1531,7 @@ function wireRack() {
   };
   wireDrops();
 
+  if ($('assave')) $('assave').onclick = () => saveEdit();
   if ($('asstep')) $('asstep').onclick = () => save('stage');
   if ($('ashand')) $('ashand').onclick = () => save('handout');
 }
@@ -1416,6 +1556,37 @@ function wireDrops() {
 // lesson). Register lives on the slot, never on the activity — the same
 // question is a step in one lesson and a handout in another (006-register.sql).
 // ───────────────────────────────────────────────────────────────────────────
+
+// Editing changes the activity, not the placement. The same activity may sit in
+// several lessons, which is why the footer says so — this is the un-linked half
+// of §7, and the linked-copy machinery is not built.
+async function saveEdit() {
+  if (S.saving || !S.rack || !S.rack.editing) return;
+  const K = KINDS[S.rack.kind];
+  const content = K.read(document.getElementById('rform'));
+  const complaint = K.check(content);
+  if (complaint) { S.rack.content = content; S.rackErr = complaint; render(); return; }
+
+  const slot = S.slots.find(s => s.id === S.rack.editing);
+  if (!slot) { S.rack = null; return render(); }
+
+  let name = String(K.name(content) || '').replace(/\s+/g, ' ').trim();
+  if (name.length > 70) name = name.slice(0, 67) + '…';
+  if (!name) name = K.label;
+
+  S.saving = true;
+  const { error } = await S.sb.from('activities')
+    .update({ name, content }).eq('id', slot.activity_id);
+  S.saving = false;
+  if (error) { S.rack.content = content; S.rackErr = error.message; render(); return; }
+
+  S.rack = null;
+  await openLesson(S.lesson.id);
+  S.lookSlot = slot.id;
+  await loadContent(slot.id);
+  render();
+}
+
 async function save(register) {
   if (S.saving || !S.rack || !S.lesson) return;
   const K = KINDS[S.rack.kind];
@@ -1479,6 +1650,7 @@ function wire() {
     if (S.rack) { el.disabled = true; return; }
     el.onclick = async () => {
       S.lookSlot = el.getAttribute('data-slot');
+      S.note = null; S.confirmRm = null;
       render();
       await loadContent(S.lookSlot);
       render();
@@ -1502,6 +1674,7 @@ function wire() {
 
   wireRack();
   if (S.mode === 'preview') wirePreview();
+  else if (!S.rack) wireEdit();
 }
 </script>
 </body>
