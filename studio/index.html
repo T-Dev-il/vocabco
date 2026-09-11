@@ -346,6 +346,7 @@ const S = {
   att: {},            // slot_id -> latest attempt status, for conditions and gates
   live: {},           // slot_id -> what you have done to it in Preview, unsaved
   handed: {},         // slot_id -> this handout has been given. Preview only.
+  take: null,         // the open take: {id,name,clipId,base,startedMs,actions}
   finished: false,
   error: null
 };
@@ -487,6 +488,12 @@ async function openLesson(id) {
 
   await loadAttempts(id);
   await loadTakes(id);
+
+  // A take left open yesterday is still open. Say so rather than losing it.
+  try {
+    const open = JSON.parse(localStorage.getItem(OPEN_TAKE) || 'null');
+    S.leftOpen = (open && open.lesson === id && S.takes.some(t => t.id === open.rec)) ? open.rec : null;
+  } catch (e) { S.leftOpen = null; }
   if (S.lookSlot) await loadContent(S.lookSlot);
 }
 
@@ -773,7 +780,8 @@ function render() {
     tabs() +
     '<div class="top">' + lessonPicker() + modes() + '</div>' +
     '<div class="body">' + spine() +
-      (S.mode === 'preview' ? previewStage() : stage()) + corner() + '</div>' +
+      (S.mode === 'preview' || S.mode === 'record' ? previewStage() : stage()) +
+      corner() + '</div>' +
     deck();
 
   wire();
@@ -807,7 +815,7 @@ function modes() {
   return '<div class="modes">' +
     m('build', 'Build', S.mode === 'build', false) +
     m('preview', 'Preview', S.mode === 'preview', false, 'Walk your own lesson as yourself.') +
-    m('record', 'Record', S.mode === 'record', true, 'Takes are built after the canvas.') +
+    m('record', 'Record', S.mode === 'record', false, 'Build in front of a clock.') +
     m('review', 'Review', false, true, 'Reserved. Needs a cohort, and sharing does not exist yet.') +
   '</div>';
 }
@@ -1142,6 +1150,7 @@ function wirePreview() {
     const to = rows[i + 1];
     if (!to) return;
     await setProgress(to.slot.id);
+    await act('moved to', to.slot.id);
     S.lookSlot = to.slot.id;
     await loadContent(S.lookSlot);
     render();
@@ -1157,6 +1166,7 @@ function wirePreview() {
   root.querySelectorAll('[data-hand]').forEach(el => el.onclick = async () => {
     const id = el.getAttribute('data-hand');
     S.handed[id] = true;
+    await act('handed out', id);
     render();
   });
 
@@ -1165,6 +1175,7 @@ function wirePreview() {
     const to = rows[Math.max(i - 1, 0)];
     if (!to) return;
     await setProgress(to.slot.id);
+    await act('went back to', to.slot.id);
     S.lookSlot = to.slot.id;
     await loadContent(S.lookSlot);
     render();
@@ -1249,10 +1260,160 @@ function paper(slot) {
 }
 
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// Record
+//
+// §13: recording is not a different activity from building, it is building done
+// in front of a clock. So Record is the same regions, the same live stage, with
+// a take open underneath.
+//
+// A TAKE IS DURABLE (§6). Not a session. Record three minutes, close everything,
+// come back tomorrow and carry on. 003-recordings.sql already supports this and
+// needs no change: a recording is an ordered list of clips, and an action's time
+// is measured from the start of ITS OWN CLIP, not from the recording. Resuming
+// appends a clip. The eighteen-hour gap in between is represented nowhere and
+// does not need to be.
+//
+// THE TAKE'S CLOCK IS THE SUM OF ITS SEGMENTS AND MUST NEVER BE WALL-CLOCK.
+// Hence `base` — seconds banked in earlier clips — plus time in this one.
+// ───────────────────────────────────────────────────────────────────────────
+
+const OPEN_TAKE = 'studioOpenTake';         // which take is still open, per lesson
+
+function clock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+}
+function takeSeconds() {
+  if (!S.take) return 0;
+  return S.take.base + (Date.now() - S.take.startedMs) / 1000;
+}
+
+// Clip duration lives in clips.media as { seconds }. 003 leaves media's shape
+// open; this is the first thing written into it, and the only thing so far.
+function clipSeconds() { return Math.round(takeSeconds() - S.take.base); }
+
+async function startTake() {
+  const name = 'Take ' + (S.takes.length + 1);
+  const { data: rec, error } = await S.sb.from('recordings')
+    .insert({ sequence_id: S.lesson.id, name }).select('id').single();
+  if (error) { S.error = error.message; return render(); }
+  await openClip(rec.id, name, 0);
+}
+
+async function resumeTake(recId) {
+  const rec = S.takes.find(t => t.id === recId);
+  if (!rec) return;
+  // Everything banked so far, read back rather than remembered.
+  const { data: clips } = await S.sb.from('clips')
+    .select('media').eq('recording_id', recId).is('deleted_at', null);
+  const base = (clips || []).reduce((n, c) => n + ((c.media && c.media.seconds) || 0), 0);
+  await openClip(recId, rec.name, base);
+}
+
+async function openClip(recId, name, base) {
+  const { data: clips } = await S.sb.from('clips')
+    .select('position').eq('recording_id', recId).is('deleted_at', null);
+  const pos = (clips || []).reduce((m, c) => Math.max(m, c.position || 0), 0) + 1;
+
+  const { data: clip, error } = await S.sb.from('clips')
+    .insert({ recording_id: recId, position: pos, media: { seconds: 0 }, actions: [] })
+    .select('id').single();
+  if (error) { S.error = error.message; return render(); }
+
+  S.take = { id: recId, name, clipId: clip.id, base, startedMs: Date.now(), actions: [] };
+  try { localStorage.setItem(OPEN_TAKE, JSON.stringify({ lesson: S.lesson.id, rec: recId })); } catch (e) {}
+  S.mode = 'record';
+  tick();
+  render();
+}
+
+// Every action is timed from the start of its own clip and names a slot by id.
+async function act(kind, slotId, extra) {
+  if (!S.take) return;
+  S.take.actions.push({ t: +(takeSeconds() - S.take.base).toFixed(2), kind, slot: slotId || null, ...(extra || {}) });
+  await S.sb.from('clips')
+    .update({ actions: S.take.actions, media: { seconds: clipSeconds() } })
+    .eq('id', S.take.clipId);
+}
+
+async function stopTake() {
+  if (!S.take) return;
+  await S.sb.from('clips')
+    .update({ actions: S.take.actions, media: { seconds: clipSeconds() } })
+    .eq('id', S.take.clipId);
+  S.take = null;
+  try { localStorage.removeItem(OPEN_TAKE); } catch (e) {}
+  stopTick();
+  await loadTakes(S.lesson.id);
+  render();
+}
+
+// The clock updates one element. A whole re-render every second would throw away
+// whatever is half-typed in the rack.
+let TICK = null;
+function tick() {
+  stopTick();
+  TICK = setInterval(() => {
+    const el = document.getElementById('clk');
+    if (el && S.take) el.textContent = clock(takeSeconds());
+  }, 1000);
+}
+function stopTick() { if (TICK) { clearInterval(TICK); TICK = null; } }
+
+function deck() {
+  if (!S.take) return '';
+  return '<div class="deck">' +
+    '<button class="btn" id="stop" style="background:#6b2e2e;border-color:#8a3d3d">Stop</button>' +
+    '<span class="clock" id="clk">' + clock(takeSeconds()) + '</span>' +
+    '<div class="track"><u style="width:100%"></u></div>' +
+    '<button class="btn" id="mark">Mark</button>' +
+    '<span style="color:#8B939B">' + esc(S.take.name) + '</span>' +
+  '</div>';
+}
+
+// While a take is open and you are building rather than teaching, something has
+// to say so (§6). Inside one window the deck does that job; when the canvas is
+// its own window it will need its own strip.
+function takePanel() {
+  if (S.mode !== 'record') return '';
+  if (S.take) {
+    const acts = S.take.actions.slice(-8).reverse();
+    return '<div class="lbl">This take</div>' +
+      (acts.length
+        ? acts.map(a => '<div class="act"><span class="t">' + clock(a.t) + '</span><b>' +
+            esc(a.kind) + '</b>' + esc(a.slot ? memberOf(S.slots.find(s => s.id === a.slot) || {}).name || '' : '') +
+            '</div>').join('')
+        : '<div class="none">Nothing recorded yet.</div>');
+  }
+  const left = S.leftOpen
+    ? '<div class="none" style="color:#C6CCD2">A take was left open here. Carrying on appends to it.</div>'
+    : '';
+  const resumable = S.takes.length
+    ? S.takes.map(t => '<div style="padding:0 10px 7px"><button class="btn wide" data-resume="' +
+        esc(t.id) + '">Carry on with ' + esc(t.name) + '</button></div>').join('')
+    : '';
+  return '<div class="lbl">Takes</div>' + left + resumable +
+    '<div style="padding:0 10px 7px"><button class="btn wide" id="starttake">Start a new take</button></div>' +
+    '<div class="none">A take is not a session. Stop, come back tomorrow, carry on — the clock ' +
+    'is the sum of its parts.</div>';
+}
+
+function wireRecord() {
+  const $ = id => document.getElementById(id);
+  if ($('torecord')) $('torecord').onclick = () => { S.mode = 'record'; render(); };
+  if ($('starttake')) $('starttake').onclick = startTake;
+  if ($('stop')) $('stop').onclick = stopTake;
+  if ($('mark')) $('mark').onclick = () => { act('marked', S.lookSlot); render(); };
+  root.querySelectorAll('[data-resume]').forEach(el =>
+    el.onclick = () => resumeTake(el.getAttribute('data-resume')));
+}
+
 // The teacher's own gesture, standing in for itself. In Record this is the real
 // thing and it lands at a time in the take; here it just reveals the card.
 function handOutList() {
-  if (S.mode !== 'preview' || S.finished) return '';
+  if ((S.mode !== 'preview' && S.mode !== 'record') || S.finished) return '';
   const row = outline().find(r => r.slot.id === S.lookSlot);
   const kids = ((row && row.kids) || []).filter(visible);
   if (!kids.length) return '';
@@ -1416,20 +1577,14 @@ function corner() {
   return '<div class="auto">' +
     '<div class="lbl">Teacher\'s corner</div>' +
     handOutList() +
+    takePanel() +
     '<div class="cam">your camera</div>' +
     media +
     '<div class="lbl">Takes</div>' + takes +
-    '<div class="autofoot"><button class="btn wide" disabled ' +
-      'title="Recording comes after the canvas">Start recording</button></div>' +
+    (S.mode === 'record' ? '' :
+      '<div class="autofoot"><button class="btn wide" id="torecord">' +
+      (S.take ? 'Back to the open take' : 'Record') + '</button></div>') +
   '</div>';
-}
-
-// The deck exists only when there is a clock. At rest there is none.
-function deck() {
-  if (!S.openTake) return '';
-  return '<div class="deck"><button class="btn">Play</button>' +
-    '<span class="clock">0:00</span>' +
-    '<div class="track"><u></u><i></i></div></div>';
 }
 
 
@@ -1629,6 +1784,7 @@ async function save(register) {
   if (e2) { S.rack.content = content; S.rackErr = e2.message; render(); return; }
 
   S.rack = null;
+  if (slot) await act('made', slot.id);
   await openLesson(S.lesson.id);
   if (slot) { S.lookSlot = slot.id; await loadContent(S.lookSlot); }
   render();
@@ -1673,8 +1829,10 @@ function wire() {
   if (add) add.onclick = () => { S.rack = { kind: null }; S.rackErr = null; render(); };
 
   wireRack();
-  if (S.mode === 'preview') wirePreview();
+  wireRecord();
+  if (S.mode === 'preview' || S.mode === 'record') wirePreview();
   else if (!S.rack) wireEdit();
+  if (S.take) tick();
 }
 </script>
 </body>
