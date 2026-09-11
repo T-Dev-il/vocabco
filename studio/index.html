@@ -407,6 +407,11 @@ function loadScript(src) {
       '<p>You are pointed at the <b>' + esc(env.label) + '</b> database.</p>');
   }
 
+  // Does this database have 006-register.sql? Asking once, up front, is better
+  // than finding out halfway through saving something.
+  const probe = await S.sb.from('slots').select('register,parent_slot_id').limit(1);
+  S.has006 = !probe.error;
+
   await loadLessons();
   render();
 })().catch(e => screen('The studio stopped', '<p>' + esc(e && e.message || e) + '</p>'));
@@ -829,10 +834,11 @@ function stage() {
   const away = S.hereSlot && S.lookSlot && S.hereSlot !== S.lookSlot;
 
   let bar = '';
-  if (S.needs006) {
-    bar = '<span><b>006-register.sql is not applied to this database.</b> ' +
-          'Step or handout is being guessed rather than stored.</span>';
-    return '<div class="stage"><div class="look">' + bar + '</div>' +
+  if (S.has006 === false) {
+    return '<div class="stage"><div class="look"><span>' +
+      '<b>006-register.sql has not been run on this database.</b> ' +
+      'Handouts are turned off until it has — everything added lands as a step.' +
+      '</span></div>' +
       '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' + rack() + '</div>';
   }
   if (away) {
@@ -975,7 +981,10 @@ function rack() {
         ? 'A handout hangs under <b>' + esc(host) + '</b> and does not move the learner on. A step does.'
         : 'A step moves the learner on. A handout does not.') + '</span>' +
       '<div style="flex:1"></div>' +
-      '<button class="btn light" id="ashand"' + (host ? '' : ' disabled') + '>Add as a handout</button>' +
+      '<button class="btn light" id="ashand"' +
+        (host && S.has006 ? '' : ' disabled') +
+        (!S.has006 ? ' title="Needs 006-register.sql. Run it and reload."' : '') +
+        '>Add as a handout</button>' +
       '<button class="btn light" id="asstep" style="background:var(--here);border-color:var(--here);color:#fff">' +
         'Add as a step</button>' +
     '</div>' +
@@ -1079,15 +1088,13 @@ async function save(register) {
   const last = S.slots.reduce((m, s) => Math.max(m, s.position || 0), 0);
 
   const row = { sequence_id: S.lesson.id, activity_id: act.id, position: last + 1 };
-  // register and parent_slot_id arrive with 006. Sending them before it is
-  // applied fails the whole insert, so try with, and fall back to without.
-  const withCols = { ...row, register, parent_slot_id: parent };
+  // register and parent_slot_id arrive with 006. Without them a handout has
+  // nowhere to record that it IS one, and saving it anyway makes a step wearing
+  // a handout's name. So the page refuses instead of quietly changing what you
+  // asked for. A step needs neither column and saves either way.
+  if (S.has006) { row.register = register; row.parent_slot_id = parent; }
 
-  let { data: slot, error: e2 } = await S.sb.from('slots').insert(withCols).select('id').single();
-  if (e2 && /register|parent_slot_id|column/i.test(e2.message)) {
-    S.needs006 = true;
-    ({ data: slot, error: e2 } = await S.sb.from('slots').insert(row).select('id').single());
-  }
+  let { data: slot, error: e2 } = await S.sb.from('slots').insert(row).select('id').single();
   S.saving = false;
   if (e2) { S.rack.content = content; S.rackErr = e2.message; render(); return; }
 
