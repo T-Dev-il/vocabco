@@ -6,7 +6,9 @@
 > `005-outcomes.sql`, and rev 6's of `000-baseline.sql`, `001-sequences.sql`,
 > `002-slots-soft-delete.sql`, `003-recordings.sql` and `004-struggles.sql`, stand
 > unchanged and were not re-done. Rev 8 adds the 006 and 007 rows, written by
-> Contractor 07, which is the chat that applied them.
+> Contractor 07, which is the chat that applied them. **Rev 8 also corrects a
+> claim this file has carried since rev 3** — see the correction under *Start
+> here*.
 >
 > **rev 7 · 2026-09-07** · rev 7 added the 005 row, which rev 6 predates. **The
 > 005 entry was written by Contractor 06, which is not the chat that applied it**
@@ -50,6 +52,18 @@ That is the same arrangement `START-HERE.md` §2 records for `build.py` and
 The numbered changes — `001-`, `002-`, `003-` and whatever follows — live in the
 same folder and are applied in order on top of the baseline. Rebuilding dev from
 scratch means running the baseline and then every numbered file in sequence.
+
+> **Correction, 2026-09-12.** The paragraph above says all three files are pushed
+> to GitHub with the site. **Two of them are not in the repository.**
+> `git ls-files schema` returns `001` through `007` and this file, and nothing
+> else — **`000-baseline.sql` and `fingerprint.sql` are absent.** Both are in
+> project knowledge, so a chat can read them; neither is in anyone's git history,
+> so a laptop failure loses them, and the sentence promising otherwise has been
+> load-bearing since rev 3.
+>
+> This is the same failure as the second corollary below, one level up: a file
+> everybody believed was filed, wasn't. Verified by Contractor 07 against the
+> developer's own `git ls-files` output, not inferred.
 
 Neither `.sql` file is run day to day. `fingerprint.sql` is the one you will
 actually reach for; `000-baseline.sql` is there so dev can be recreated without
