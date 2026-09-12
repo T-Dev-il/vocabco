@@ -1,0 +1,887 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Canvas</title>
+
+<!--
+  canvas.html — lives at website/studio/canvas.html
+  Address: https://t-dev-il.github.io/vocabco/studio/canvas.html
+
+  Named the same thing in the website folder, in git, and in project knowledge.
+  Same rule as studio.html, and for the same reason.
+
+  The canvas — studio-design-proposal.md rev 2 §5, frames 4 and 5.
+
+  The teacher's messy space. Free layout, notes among the cards, tabs across
+  the top. Nothing on it is committed, which is what makes it safe to be messy
+  on. It is a SEPARATE WINDOW from the studio (§2): the canvas is where things
+  get made, the studio is where they get run.
+
+  THE GUARD (proposal §1, route.md §4). Like studio.html, this page does not
+  import from surface.html, does not share a file with it, and does not read
+  anything it writes. It shares config.js with the rest of the site and nothing
+  else.
+
+  IT ALSO DOES NOT SHARE CODE WITH studio.html. contractor-07-handoff.md §4:
+  the studio re-renders its whole window on every change, which is already
+  leaking there and would not survive dragging. So the two windows differ on
+  purpose, and this page renders the board once and then MOVES ELEMENTS
+  DIRECTLY while dragging. Do not unify them until both exist and the shared
+  shape has shown itself.
+
+  What is deliberately copied from studio.html, with its reason:
+    - The boot sequence: ../config.js then config.js, the DEV badge, the
+      session the main app already holds. A page with its own copy of the
+      database details is a page that can point somewhere else.
+    - activities.content is never selected in a list query (001-sequences.sql,
+      FIX-004/FIX-006). The board query takes id, name, kind.
+    - Refuse rather than downgrade. Without 008-canvas.sql this page says so
+      and stops, instead of half-working.
+    - The chrome tokens, so the two windows read as one application.
+
+  Written by Contractor 08, 2026-09-12. No fix number: construction, not repair.
+-->
+
+<style>
+  /* ── chrome ────────────────────────────────────────────────────────────
+     Lifted from studio.html unchanged. The canvas and the studio are two
+     windows of one thing and their bars must match exactly. */
+  :root{
+    --chrome:#262A2E; --rail:#EDEEEA; --ink:#1B1E21; --dim:#6B7178;
+    --here:#0F5D8C; --line:#D9DBD5;
+
+    /* ── the felt ───────────────────────────────────────────────────────
+       From FC-list-surface-lab-v1.html, the `drafting` surface: warm ground,
+       board squares, a little tooth. The surface is taken; the fonts are not.
+       That file loads three webfonts and this page loads none — the studio
+       keeps its typography plain on purpose and the two windows sit side by
+       side. */
+    --ground:#F5F1E6; --ground-2:#FCFAF3;
+    --rule:rgba(96,84,58,.16); --rule-fine:rgba(96,84,58,.08);
+
+    /* a card is paper on the board */
+    --paper:#FCFAF6; --paper-edge:rgba(160,146,118,.40); --paper-ink:#23201B;
+    --paper-dim:#6E675C;
+
+    /* a note is NOT a handout. The studio's cream means `handed to you` and
+       that meaning must not leak onto the canvas, where nothing is committed
+       to anything. So notes are yellower and warmer than --hand. */
+    --note:#FBF3D8; --note-edge:#E2CE93; --note-ink:#4A4127;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--rail); color:var(--ink);
+    font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+
+  .apptop{
+    height:38px; flex:0 0 38px; background:#DFE1DB; display:flex;
+    align-items:flex-end; gap:3px; padding:0 10px; border-bottom:1px solid #C8CBC4;
+  }
+  .apptab{
+    font-size:12.5px; padding:6px 14px; border-radius:6px 6px 0 0; color:var(--dim);
+    background:#EAEBE6; border:1px solid #C8CBC4; border-bottom:none;
+    cursor:pointer; font-family:inherit;
+  }
+  .apptab.on{background:#fff; color:var(--ink); font-weight:600; cursor:default}
+
+  .top{
+    height:38px; flex:0 0 38px; background:#fff; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; padding:0 12px; overflow:hidden;
+  }
+  .title{font-weight:650; font-size:13.5px; padding-right:4px}
+
+  /* board tabs — today's group is not the same thing as a shelf of scraps */
+  .boards{display:flex; align-items:center; gap:2px; min-width:0; overflow:hidden}
+  .btab{
+    font-size:12px; color:var(--dim); padding:3px 9px; border-radius:4px;
+    border:0; background:transparent; font-family:inherit; cursor:pointer;
+    white-space:nowrap; max-width:22ch; overflow:hidden; text-overflow:ellipsis;
+  }
+  .btab.on{background:#EDEEEA; color:var(--ink); font-weight:600}
+  .btab.add{color:var(--here)}
+
+  .right{margin-left:auto; display:flex; align-items:center; gap:8px;
+         font-size:11.5px; color:var(--dim); white-space:nowrap}
+
+  .btn{border:1px solid var(--line); background:#fff; border-radius:4px;
+       padding:4px 9px; font-size:11.5px; color:var(--ink); font-family:inherit;
+       cursor:pointer}
+  .btn.dark{background:#31363C; border-color:#4A5158; color:#E8EAEC}
+  .btn[disabled]{opacity:.45; cursor:not-allowed}
+  .btn:focus-visible,.btab:focus-visible,.apptab:focus-visible{
+    outline:2px solid var(--here); outline-offset:2px;
+  }
+  select{font:12.5px inherit; font-family:inherit; padding:2px 4px;
+         border:1px solid var(--line); border-radius:4px; background:#fff;
+         color:var(--ink); max-width:26ch}
+
+  /* ── the board ─────────────────────────────────────────────────────────
+     Free layout. Everything on it is absolutely positioned and stays exactly
+     where it was put. */
+  .feltwrap{flex:1; position:relative; min-height:0; overflow:auto; background:var(--ground)}
+  .felt{
+    position:relative; width:3000px; height:2000px;
+    background-color:var(--ground);
+    background-image:
+      radial-gradient(120% 90% at 22% 8%, var(--ground-2), transparent 60%),
+      repeating-linear-gradient(to right, var(--rule) 0 1px, transparent 1px 104px),
+      repeating-linear-gradient(to bottom, var(--rule) 0 1px, transparent 1px 104px),
+      repeating-linear-gradient(to right, var(--rule-fine) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(to bottom, var(--rule-fine) 0 1px, transparent 1px 26px);
+  }
+  /* tooth — the grain that stops it reading as a screen. No image file. */
+  .felt::before{
+    content:""; position:absolute; inset:0; pointer-events:none; opacity:.16;
+    mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .item{position:absolute; user-select:none}
+  .item.dragging{cursor:grabbing}
+
+  /* a card: something that exists in the library, lying on the board */
+  .card{
+    background:var(--paper); border:1px solid var(--paper-edge); border-radius:4px;
+    box-shadow:0 1px 0 rgba(60,45,25,.10), 0 6px 14px rgba(60,45,25,.09);
+    cursor:grab;
+  }
+  .card .thumb{
+    height:46px; display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--paper-dim); background:rgba(160,146,118,.13);
+    border-bottom:1px solid var(--paper-edge); border-radius:3px 3px 0 0;
+    text-align:center; padding:0 8px; line-height:1.35;
+  }
+  .card .cap{padding:7px 9px 8px; font-size:12px; line-height:1.4; color:var(--paper-ink)}
+  .card .cap .used{display:block; color:var(--paper-dim); font-size:11px; margin-top:3px}
+
+  /* a note: a half-formed thought, costing nothing sitting there */
+  .note{
+    background:var(--note); border:1px solid var(--note-edge); border-radius:3px;
+    box-shadow:0 1px 0 rgba(60,45,25,.10), 0 6px 14px rgba(60,45,25,.09);
+    color:var(--note-ink);
+  }
+  .note .grip{
+    height:14px; cursor:grab; border-bottom:1px solid rgba(200,180,120,.45);
+    background:rgba(255,255,255,.35); border-radius:2px 2px 0 0;
+  }
+  .note .txt{
+    padding:8px 9px 10px; font:13px/1.5 ui-serif,Georgia,"Times New Roman",serif;
+    min-height:44px; outline:0; white-space:pre-wrap; word-break:break-word;
+  }
+  .note .txt:focus{background:rgba(255,255,255,.45)}
+  .note .txt:empty::before{content:"a thought…"; color:#A2946A}
+
+  /* tools appear on hover — the board stays quiet until you reach for it */
+  .tools{
+    position:absolute; left:0; right:0; top:-25px; display:none; gap:4px;
+    align-items:center;
+  }
+  .item:hover .tools,.item:focus-within .tools{display:flex}
+  .tools button{
+    border:1px solid var(--paper-edge); background:#fff; color:var(--paper-ink);
+    border-radius:3px; font:11px inherit; font-family:inherit; padding:2px 6px;
+    cursor:pointer; white-space:nowrap;
+  }
+  .tools button:hover{border-color:var(--here); color:var(--here)}
+  .tools button.x{margin-left:auto; color:#8a2d2d}
+  .tools button.armed{background:#8a2d2d; color:#fff; border-color:#8a2d2d}
+
+  .placed{
+    position:absolute; right:-6px; top:-8px; background:var(--here); color:#fff;
+    font-size:10px; border-radius:9px; padding:1px 6px;
+  }
+
+  /* the two dashed invitations from frame 4 */
+  .invite{
+    position:absolute; border:1px dashed var(--paper-edge); border-radius:4px;
+    background:rgba(255,255,255,.45); color:var(--paper-dim); font-size:11.5px;
+    padding:12px 14px; line-height:1.5; cursor:pointer; font-family:inherit;
+    text-align:left;
+  }
+  .invite:hover{border-color:var(--here); color:var(--here)}
+
+  /* ── the tray ──────────────────────────────────────────────────────────
+     The canvas has no deck: there is no clock here. This is the status line,
+     and it is where the page says what it just did. */
+  .tray{
+    height:34px; flex:0 0 34px; background:#fff; border-top:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; padding:0 12px; font-size:11.5px;
+    color:var(--dim);
+  }
+  .tray b{color:var(--ink); font-weight:600}
+  .tray .err{color:#8a2d2d}
+
+  /* ── the library panel ─────────────────────────────────────────────────
+     The same store the door searches (§2). Not a third place to go. */
+  .scrim{position:fixed; inset:0; background:rgba(24,27,30,.30); z-index:50}
+  .panel{
+    position:fixed; z-index:51; top:56px; bottom:56px; left:50%; width:min(560px,92vw);
+    transform:translateX(-50%); background:#fff; border:1px solid #C3C6BF;
+    border-radius:9px; box-shadow:0 14px 40px rgba(20,24,28,.22);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .phead{display:flex; align-items:center; gap:9px; padding:10px 14px;
+         border-bottom:1px solid var(--line); font-size:13.5px; font-weight:600}
+  .pbody{flex:1; overflow-y:auto; padding:14px}
+  .pfoot{display:flex; align-items:center; gap:8px; padding:10px 14px;
+         border-top:1px solid var(--line); font-size:11.5px; color:var(--dim)}
+  .inp{width:100%; border:1px solid var(--line); border-radius:5px; padding:7px 9px;
+       font:13px/1.5 inherit; font-family:inherit; color:var(--ink); background:#fff}
+  .kinds{display:flex; flex-direction:column; gap:7px; margin-top:11px}
+  .kindbtn{
+    border:1px solid var(--line); border-radius:6px; background:#fff; padding:9px 11px;
+    font-family:inherit; font-size:12.5px; cursor:pointer; text-align:left; color:inherit;
+    line-height:1.45;
+  }
+  .kindbtn b{display:block; font-weight:600; margin-bottom:2px; font-size:13px}
+  .kindbtn span{color:var(--dim); font-size:11.5px}
+  .kindbtn:hover{border-color:var(--here)}
+  .why{font-size:11.5px; color:var(--dim); margin:0 0 12px; line-height:1.55; max-width:58ch}
+
+  /* ── whole-screen states ───────────────────────────────────────────────── */
+  .screen{flex:1; display:grid; place-items:center; padding:40px 24px; background:var(--rail)}
+  .scard{background:#fff; border:1px solid var(--line); border-radius:9px;
+         padding:24px 26px; max-width:54ch; line-height:1.6}
+  .scard h2{font-size:16px; font-weight:650; margin:0 0 8px}
+  .scard p{margin:0 0 12px; color:var(--dim); font-size:13.5px}
+  .scard code{font:12px ui-monospace,Menlo,monospace; background:#F2F3EF; padding:1px 4px;
+              border-radius:3px}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+<div id="root"><div class="screen"><div class="scard"><h2>Opening the canvas</h2>
+<p>Reading what is on the board.</p></div></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+"use strict";
+
+// ───────────────────────────────────────────────────────────────────────────
+// State. One object. Unlike the studio, render() is NOT called for every
+// change — see the note at the top of this file. paintBoard() is called when
+// the SET of items changes; a drag moves one element and writes one row.
+// ───────────────────────────────────────────────────────────────────────────
+const C = {
+  env: 'live', sb: null, has006: false,
+  boards: [], board: null,
+  items: [],           // board_items rows, plus .act for cards
+  uses: {},            // activity_id -> number of lessons using it
+  lessons: [], lessonId: null,
+  lib: null, libQ: '',
+  panel: null,         // 'library' while it is open
+  msg: null, err: null,
+  armed: null          // item id whose × has been pressed once
+};
+
+const root = document.getElementById('root');
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+// The six the rack makes, plus whatever else is already in the library. A kind
+// with no label here still draws — it just shows its own name, which is better
+// than hiding something the teacher owns.
+const KIND_LABEL = {
+  mcq:'Multiple choice', truefalse:'True or false', order:'Put in order',
+  blank:'Fill the blank', video:'Show a video', display:'Something to read'
+};
+const kindLabel = k => KIND_LABEL[k] || k || 'activity';
+
+function screen(title, html) {
+  root.innerHTML = '<div class="screen"><div class="scard"><h2>' + esc(title) + '</h2>' + html + '</div></div>';
+}
+
+function loadScript(src) {
+  return new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = () => no(new Error(src));
+    document.head.appendChild(s);
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Boot — the studio's, deliberately copied. A page with its own copy of the
+// database details is a page that can quietly point at the wrong database.
+// ───────────────────────────────────────────────────────────────────────────
+(async function boot() {
+  try { await loadScript('../config.js'); }
+  catch (e) {
+    try { await loadScript('config.js'); }
+    catch (e2) {
+      return screen('config.js is not where this page looked',
+        '<p>The canvas tried <code>../config.js</code> and <code>config.js</code> and found neither. ' +
+        'It needs the same config the rest of the site uses.</p>');
+    }
+  }
+
+  try { C.env = localStorage.getItem('vocabEnv') || 'live'; } catch (e) {}
+  const env = vocabEnv(C.env);
+  C.env = env.name;
+
+  if (!window.supabase || !supabase.createClient) {
+    return screen('The database library did not load',
+      '<p>This page pulls supabase-js from a CDN, the same way <code>index.html</code> does. ' +
+      'Check the connection, then reload.</p>');
+  }
+
+  C.sb = supabase.createClient(env.url, env.anon, {
+    auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true }
+  });
+  vocabEnvBanner(C.env, () => {});
+
+  const { data: { session } } = await C.sb.auth.getSession();
+  if (!session) {
+    return screen('Sign in on the main app first',
+      '<p>The canvas uses the session the app already holds. Open the app, sign in, ' +
+      'then come back to this page.</p>' +
+      '<p>You are pointed at the <b>' + esc(env.label) + '</b> database.</p>');
+  }
+
+  // Refuse rather than downgrade. Without 008 there is nowhere to keep a
+  // board, and a canvas that forgets everything on reload is worse than one
+  // that says why it cannot open.
+  const probe = await C.sb.from('boards').select('id').limit(1);
+  if (probe.error) {
+    return screen('This database has not had 008-canvas.sql applied',
+      '<p>The canvas keeps its boards in <code>boards</code> and <code>board_items</code>, ' +
+      'and neither is here. Run <code>008-canvas.sql</code> in this project\u2019s SQL editor, ' +
+      'then reload.</p><p>You are pointed at the <b>' + esc(env.label) + '</b> database. ' +
+      'The message from the database was: <code>' + esc(probe.error.message) + '</code></p>');
+  }
+
+  // 006 decides whether a thing can be carried across as a handout at all.
+  const p6 = await C.sb.from('slots').select('register,parent_slot_id').limit(1);
+  C.has006 = !p6.error;
+
+  shell();
+  await loadBoards();
+  await loadLessons();
+  await openBoard(C.board && C.board.id);
+})().catch(e => screen('The canvas stopped', '<p>' + esc(e && e.message || e) + '</p>'));
+
+// ───────────────────────────────────────────────────────────────────────────
+// Loading
+// ───────────────────────────────────────────────────────────────────────────
+async function loadBoards() {
+  const { data, error } = await C.sb.from('boards')
+    .select('id,name,position').is('deleted_at', null)
+    .order('position', { ascending: true });
+  if (error) { C.err = error.message; return; }
+  C.boards = data || [];
+
+  // A canvas with no board is not a state worth drawing. Make one.
+  if (!C.boards.length) {
+    const { data: made, error: e2 } = await C.sb.from('boards')
+      .insert({ name: 'Canvas', position: 0 }).select('id,name,position').single();
+    if (e2) { C.err = e2.message; return; }
+    C.boards = [made];
+  }
+
+  let wanted = null;
+  try { wanted = localStorage.getItem('vocabBoard'); } catch (e) {}
+  C.board = C.boards.find(b => b.id === wanted) || C.boards[0];
+}
+
+async function loadLessons() {
+  // Same query the studio uses, and for the same reasons: no filter on kind,
+  // none on master_id.
+  const { data } = await C.sb.from('sequences')
+    .select('id,name,kind,updated_at').is('deleted_at', null)
+    .order('updated_at', { ascending: false });
+  C.lessons = data || [];
+
+  let wanted = null;
+  try { wanted = localStorage.getItem('vocabLesson'); } catch (e) {}
+  const pick = (wanted && C.lessons.find(l => l.id === wanted)) || C.lessons[0];
+  C.lessonId = pick ? pick.id : null;
+}
+
+async function openBoard(id) {
+  C.board = C.boards.find(b => b.id === id) || C.boards[0];
+  C.items = []; C.armed = null;
+  try { if (C.board) localStorage.setItem('vocabBoard', C.board.id); } catch (e) {}
+  if (!C.board) return paint();
+
+  const { data, error } = await C.sb.from('board_items')
+    .select('id,activity_id,note,x,y,w,z').eq('board_id', C.board.id)
+    .order('z', { ascending: true });
+  if (error) { C.err = error.message; return paint(); }
+  C.items = data || [];
+
+  // id, name, kind. Never content — FIX-004 and FIX-006 were about exactly this.
+  const ids = C.items.filter(i => i.activity_id).map(i => i.activity_id);
+  if (ids.length) {
+    const { data: acts } = await C.sb.from('activities')
+      .select('id,name,kind').in('id', ids);
+    const by = {};
+    (acts || []).forEach(a => by[a.id] = a);
+    C.items.forEach(i => { if (i.activity_id) i.act = by[i.activity_id] || null; });
+  }
+
+  await loadUses();
+  paint();
+}
+
+// "used in 2 lessons" has to be real rather than decorative (§7). Same count
+// the door shows, read the same way.
+async function loadUses() {
+  const { data } = await C.sb.from('slots')
+    .select('activity_id,sequence_id').is('deleted_at', null);
+  const seen = {};
+  (data || []).forEach(u => {
+    if (!u.activity_id) return;
+    (seen[u.activity_id] = seen[u.activity_id] || new Set()).add(u.sequence_id);
+  });
+  C.uses = {};
+  Object.keys(seen).forEach(k => C.uses[k] = seen[k].size);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The shell, drawn once
+// ───────────────────────────────────────────────────────────────────────────
+function shell() {
+  root.innerHTML =
+    '<div class="apptop" id="apptop"></div>' +
+    '<div class="top" id="top"></div>' +
+    '<div class="feltwrap"><div class="felt" id="felt"></div></div>' +
+    '<div class="tray" id="tray"></div>' +
+    '<div id="over"></div>';
+}
+
+function lessonName() {
+  const l = C.lessons.find(x => x.id === C.lessonId);
+  return l ? l.name : null;
+}
+
+function chrome() {
+  const studioHref = 'studio.html' + (C.lessonId ? '?lesson=' + encodeURIComponent(C.lessonId) : '');
+
+  document.getElementById('apptop').innerHTML =
+    '<span class="apptab on">Canvas</span>' +
+    '<button class="apptab" id="tostudio">Studio' +
+      (lessonName() ? ' \u2014 ' + esc(lessonName()) : '') + '</button>';
+
+  document.getElementById('top').innerHTML =
+    '<span class="title">Canvas</span>' +
+    '<div class="boards">' +
+      C.boards.map(b =>
+        '<button class="btab' + (C.board && b.id === C.board.id ? ' on' : '') + '" ' +
+        'data-board="' + esc(b.id) + '" title="Double-click to rename">' + esc(b.name) + '</button>').join('') +
+      '<button class="btab add" id="addboard" title="A new board">+</button>' +
+    '</div>' +
+    '<div class="right">' +
+      '<span>Carrying across into</span>' +
+      '<select id="lesson">' +
+        (C.lessons.length
+          ? C.lessons.map(l => '<option value="' + esc(l.id) + '"' +
+              (l.id === C.lessonId ? ' selected' : '') + '>' + esc(l.name) + '</option>').join('')
+          : '<option value="">no lessons yet</option>') +
+      '</select>' +
+      '<button class="btn" id="openstudio">Open the studio</button>' +
+    '</div>';
+
+  document.getElementById('tostudio').onclick = () => location.href = studioHref;
+  document.getElementById('openstudio').onclick = () => window.open(studioHref, '_blank');
+
+  document.querySelectorAll('[data-board]').forEach(el => {
+    el.onclick = () => { if (!C.board || el.dataset.board !== C.board.id) openBoard(el.dataset.board); };
+    el.ondblclick = () => renameBoard(el.dataset.board);
+  });
+  document.getElementById('addboard').onclick = addBoard;
+
+  const sel = document.getElementById('lesson');
+  if (sel) sel.onchange = e => {
+    C.lessonId = e.target.value || null;
+    try { localStorage.setItem('vocabLesson', C.lessonId || ''); } catch (er) {}
+    chrome(); tray();
+  };
+}
+
+function tray() {
+  const t = document.getElementById('tray');
+  if (!t) return;
+  const cards = C.items.filter(i => i.activity_id).length;
+  const notes = C.items.length - cards;
+  t.innerHTML =
+    (C.err ? '<span class="err">' + esc(C.err) + '</span>' :
+     C.msg ? '<span>' + C.msg + '</span>' :
+     '<span>' + cards + (cards === 1 ? ' card' : ' cards') + ' \u00b7 ' +
+       notes + (notes === 1 ? ' note' : ' notes') +
+       ' \u00b7 nothing here is in a lesson until you carry it across</span>');
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The board, painted. Called when the SET of items changes — never on a drag.
+// ───────────────────────────────────────────────────────────────────────────
+function paint() {
+  chrome();
+  tray();
+  const felt = document.getElementById('felt');
+  if (!felt) return;
+
+  felt.innerHTML =
+    C.items.map(itemHTML).join('') +
+    '<button class="invite" id="inv-lib" style="left:26px;top:' + inviteTop() + 'px;width:214px">' +
+      'pull something from what you have' +
+    '</button>' +
+    '<button class="invite" id="inv-note" style="left:258px;top:' + inviteTop() + 'px;width:170px">' +
+      '\uFF0B a note' +
+    '</button>';
+
+  document.getElementById('inv-lib').onclick = openLibrary;
+  document.getElementById('inv-note').onclick = () => addNote();
+
+  felt.querySelectorAll('.item').forEach(wireItem);
+  overlay();
+}
+
+// The invitations sit below whatever is on the board, so they never land on
+// top of a card. Crude, and correct until the board is scrolled about.
+function inviteTop() {
+  const low = C.items.reduce((m, i) => Math.max(m, (i.y || 0) + 150), 0);
+  return Math.max(low + 24, 40);
+}
+
+function itemHTML(it) {
+  const z = 'z-index:' + (10 + (it.z || 0)) + ';';
+  const pos = 'left:' + (it.x || 0) + 'px;top:' + (it.y || 0) + 'px;width:' + (it.w || 132) + 'px;' + z;
+  const armed = C.armed === it.id;
+
+  if (it.activity_id) {
+    const a = it.act;
+    const used = C.uses[it.activity_id] || 0;
+    return '<div class="item card" data-id="' + esc(it.id) + '" style="' + pos + '">' +
+      tools(it, armed, true) +
+      (used ? '<span class="placed">in ' + used + '</span>' : '') +
+      '<div class="thumb">' + esc(a ? kindLabel(a.kind) : 'missing') + '</div>' +
+      '<div class="cap">' + esc(a ? a.name : 'This activity is no longer in your library') +
+        '<span class="used">' +
+          (used ? 'in ' + used + (used === 1 ? ' lesson' : ' lessons') : 'never used') +
+        '</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  return '<div class="item note" data-id="' + esc(it.id) + '" style="' + pos + '">' +
+    tools(it, armed, false) +
+    '<div class="grip"></div>' +
+    '<div class="txt" contenteditable="true" spellcheck="false">' + esc(it.note || '') + '</div>' +
+  '</div>';
+}
+
+function tools(it, armed, isCard) {
+  return '<div class="tools">' +
+    (isCard
+      ? '<button data-carry="step" title="On the trunk it is a step">\u2192 step</button>' +
+        '<button data-carry="handout" title="Indented under a step it is a handout">\u2192 handout</button>'
+      : '') +
+    '<button class="x' + (armed ? ' armed' : '') + '" data-x>' +
+      (armed ? 'remove?' : '\u00d7') + '</button>' +
+  '</div>';
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Dragging
+//
+// This is the part that must not go through a render. The element moves under
+// the pointer; one row is written on release; the in-memory item is patched by
+// hand. contractor-07-handoff.md §4 is the whole reason this page exists
+// separately from the studio.
+// ───────────────────────────────────────────────────────────────────────────
+function wireItem(el) {
+  const id = el.dataset.id;
+  const it = C.items.find(i => i.id === id);
+  if (!it) return;
+
+  el.querySelectorAll('[data-carry]').forEach(b => {
+    b.onclick = ev => { ev.stopPropagation(); carry(it, b.dataset.carry); };
+  });
+  const x = el.querySelector('[data-x]');
+  if (x) x.onclick = ev => { ev.stopPropagation(); remove(it); };
+
+  const txt = el.querySelector('.txt');
+  if (txt) {
+    // No re-render while typing, and no save per keystroke. The note is
+    // written when you leave it.
+    txt.onblur = async () => {
+      const v = txt.innerText.replace(/\u00a0/g, ' ');
+      if (v === (it.note || '')) return;
+      it.note = v;
+      const { error } = await C.sb.from('board_items').update({ note: v }).eq('id', it.id);
+      if (error) { C.err = error.message; tray(); }
+    };
+  }
+
+  const handle = el.classList.contains('note') ? el.querySelector('.grip') : el;
+  if (!handle) return;
+
+  handle.addEventListener('pointerdown', ev => {
+    if (ev.button !== 0) return;
+    if (ev.target.closest('button') || ev.target.closest('[contenteditable]')) return;
+    ev.preventDefault();
+
+    const startX = ev.clientX, startY = ev.clientY;
+    const ox = it.x || 0, oy = it.y || 0;
+    let moved = false;
+
+    // Bring to front. Free layout means overlap, and the thing you are moving
+    // is the thing you are looking at.
+    const top = C.items.reduce((m, i) => Math.max(m, i.z || 0), 0) + 1;
+    it.z = top;
+    el.style.zIndex = 10 + top;
+    el.classList.add('dragging');
+    el.setPointerCapture(ev.pointerId);
+
+    const move = e => {
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+      moved = true;
+      it.x = Math.max(0, ox + dx);
+      it.y = Math.max(0, oy + dy);
+      el.style.left = it.x + 'px';
+      el.style.top = it.y + 'px';
+    };
+
+    const up = async () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.classList.remove('dragging');
+      if (!moved && it.z === top) { /* a click, not a drag — still worth the z */ }
+      const { error } = await C.sb.from('board_items')
+        .update({ x: it.x, y: it.y, z: it.z }).eq('id', it.id);
+      if (error) { C.err = error.message; tray(); }
+    };
+
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Putting things on the board
+// ───────────────────────────────────────────────────────────────────────────
+
+// Somewhere free-ish. Nothing clever: walk a grid until nothing is near.
+function freeSpot(w) {
+  const step = 26 * 6;
+  for (let row = 0; row < 12; row++) {
+    for (let col = 0; col < 8; col++) {
+      const x = 26 + col * step, y = 22 + row * 130;
+      const clash = C.items.some(i =>
+        Math.abs((i.x || 0) - x) < (w + 20) && Math.abs((i.y || 0) - y) < 120);
+      if (!clash) return { x, y };
+    }
+  }
+  return { x: 26, y: 22 };
+}
+
+async function addNote(text) {
+  const spot = freeSpot(150);
+  const top = C.items.reduce((m, i) => Math.max(m, i.z || 0), 0) + 1;
+  const { data, error } = await C.sb.from('board_items')
+    .insert({ board_id: C.board.id, note: text || '', x: spot.x, y: spot.y, w: 150, z: top })
+    .select('id,activity_id,note,x,y,w,z').single();
+  if (error) { C.err = error.message; return tray(); }
+  C.items.push(data);
+  paint();
+  // Put the cursor in the new note. A note you have to click twice to write in
+  // is a note you do not make.
+  const el = document.querySelector('[data-id="' + data.id + '"] .txt');
+  if (el) el.focus();
+}
+
+async function addCard(activity) {
+  const spot = freeSpot(132);
+  const top = C.items.reduce((m, i) => Math.max(m, i.z || 0), 0) + 1;
+  const { data, error } = await C.sb.from('board_items')
+    .insert({ board_id: C.board.id, activity_id: activity.id, x: spot.x, y: spot.y, w: 132, z: top })
+    .select('id,activity_id,note,x,y,w,z').single();
+  if (error) { C.err = error.message; return tray(); }
+  data.act = { id: activity.id, name: activity.name, kind: activity.kind };
+  C.items.push(data);
+  C.panel = null;
+  paint();
+}
+
+// Removing takes it off the desk. It does NOT touch the activity, which is the
+// half that has to be visible or nobody dares tidy. Two presses, because there
+// is no undo anywhere in this project.
+async function remove(it) {
+  if (C.armed !== it.id) { C.armed = it.id; return paint(); }
+  const { error } = await C.sb.from('board_items').delete().eq('id', it.id);
+  if (error) { C.err = error.message; return tray(); }
+  C.items = C.items.filter(i => i.id !== it.id);
+  C.armed = null;
+  C.msg = it.activity_id
+    ? 'Off the board. It is still in your library.'
+    : 'Note gone.';
+  paint();
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Carrying across (§5)
+//
+// The moment something stops being loose. A row is written to `slots`; the
+// card stays where it is, because putting something in a lesson does not take
+// it off your desk.
+//
+// The designed gesture is a drag onto the studio's spine — on the trunk it is
+// a step, indented under one it is a handout. Two buttons say the same two
+// things without the studio having to accept a drop, which it cannot yet do.
+// ───────────────────────────────────────────────────────────────────────────
+async function carry(it, register) {
+  if (!it.activity_id) return;
+  if (!C.lessonId) {
+    C.err = 'There is no lesson to carry it into. Make one in the studio first.';
+    return tray();
+  }
+  if (register === 'handout' && !C.has006) {
+    C.err = 'This database has no 006-register.sql, so a handout has nowhere to record that it is one.';
+    return tray();
+  }
+
+  const { data: slots, error } = await C.sb.from('slots')
+    .select('id,position,register,parent_slot_id').eq('sequence_id', C.lessonId)
+    .is('deleted_at', null).order('position', { ascending: true });
+  if (error) { C.err = error.message; return tray(); }
+
+  // A handout hangs under the last thing that is a step. A handout on a
+  // handout is not a shape the design has, and a handout under nothing at all
+  // is a step wearing the wrong name — so refuse rather than downgrade.
+  let parent = null;
+  if (register === 'handout') {
+    const steps = (slots || []).filter(s => (s.register || 'stage') !== 'handout' && !s.parent_slot_id);
+    const last = steps[steps.length - 1];
+    if (!last) {
+      C.err = 'Nothing to hang it under yet \u2014 carry a step across first.';
+      return tray();
+    }
+    parent = last.id;
+  }
+
+  const pos = (slots || []).reduce((m, s) => Math.max(m, s.position || 0), 0) + 1;
+  const row = { sequence_id: C.lessonId, activity_id: it.activity_id, position: pos };
+  if (C.has006) { row.register = register; row.parent_slot_id = parent; }
+
+  const { error: e2 } = await C.sb.from('slots').insert(row);
+  if (e2) { C.err = e2.message; return tray(); }
+
+  // The count is read from slots, so re-read it rather than guessing.
+  await loadUses();
+  C.err = null;
+  C.msg = '<b>' + esc(it.act ? it.act.name : 'It') + '</b> is now ' +
+    (register === 'handout' ? 'a handout' : 'step ' + pos) +
+    ' in <b>' + esc(lessonName()) + '</b>. The studio shows it on its next open.';
+  paint();
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Boards
+// ───────────────────────────────────────────────────────────────────────────
+async function addBoard() {
+  const name = (prompt('Name this board \u2014 a group, a date, or whatever you like:', '') || '').trim();
+  if (!name) return;
+  const pos = C.boards.reduce((m, b) => Math.max(m, b.position || 0), 0) + 1;
+  const { data, error } = await C.sb.from('boards')
+    .insert({ name, position: pos }).select('id,name,position').single();
+  if (error) { C.err = error.message; return tray(); }
+  C.boards.push(data);
+  await openBoard(data.id);
+}
+
+async function renameBoard(id) {
+  const b = C.boards.find(x => x.id === id);
+  if (!b) return;
+  const name = (prompt('Rename this board:', b.name) || '').trim();
+  if (!name || name === b.name) return;
+  const { error } = await C.sb.from('boards').update({ name }).eq('id', id);
+  if (error) { C.err = error.message; return tray(); }
+  b.name = name;
+  chrome();
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// The library panel — the same store the door searches. Not a third place.
+// ───────────────────────────────────────────────────────────────────────────
+async function openLibrary() {
+  C.panel = 'library';
+  overlay();
+  if (!C.lib) {
+    const { data } = await C.sb.from('activities')
+      .select('id,name,kind,updated_at').is('deleted_at', null)
+      .order('updated_at', { ascending: false }).limit(300);
+    C.lib = data || [];
+    overlay();
+  }
+}
+
+function overlay() {
+  const over = document.getElementById('over');
+  if (!over) return;
+  if (C.panel !== 'library') { over.innerHTML = ''; return; }
+
+  const q = (C.libQ || '').toLowerCase();
+  const list = (C.lib || []).filter(a =>
+    !q || (kindLabel(a.kind) + ' ' + a.name).toLowerCase().indexOf(q) >= 0);
+
+  over.innerHTML =
+    '<div class="scrim" id="scrim"></div>' +
+    '<div class="panel">' +
+      '<div class="phead">What you have<div style="flex:1"></div>' +
+        '<button class="btn" id="pclose">Close</button></div>' +
+      '<div class="pbody">' +
+        '<p class="why">Everything you own. Putting one on the board commits it to nothing \u2014 ' +
+          'it is the same activity, lying somewhere you can see it.</p>' +
+        '<input class="inp" id="libq" placeholder="Search what you have" value="' + esc(C.libQ || '') + '">' +
+        (!C.lib ? '<p class="why" style="margin-top:12px">Reading what you have\u2026</p>' :
+          list.length
+            ? '<div class="kinds">' + list.map(a =>
+                '<button class="kindbtn" data-add="' + esc(a.id) + '"><b>' + esc(a.name) + '</b>' +
+                '<span>' + esc(kindLabel(a.kind)) +
+                  (C.uses[a.id] ? ' \u00b7 in ' + C.uses[a.id] + (C.uses[a.id] === 1 ? ' lesson' : ' lessons')
+                                : ' \u00b7 never used') +
+                '</span></button>').join('') + '</div>'
+            : '<p class="why" style="margin-top:12px">Nothing matches that.</p>') +
+      '</div>' +
+      '<div class="pfoot">Full editors live over the canvas (\u00a76) and are not built yet. ' +
+        'The quick rack, in the studio, is what makes activities today.</div>' +
+    '</div>';
+
+  document.getElementById('scrim').onclick = () => { C.panel = null; overlay(); };
+  document.getElementById('pclose').onclick = () => { C.panel = null; overlay(); };
+
+  const box = document.getElementById('libq');
+  if (box) {
+    // Per keystroke, and it stays per keystroke, because this panel is the
+    // only thing that redraws. The door cannot do this and that is the whole
+    // difference between the two pages.
+    box.oninput = e => { C.libQ = e.target.value; overlay(); document.getElementById('libq').focus(); };
+    if (document.activeElement !== box && C.libQ) {
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    }
+  }
+
+  over.querySelectorAll('[data-add]').forEach(b => {
+    b.onclick = () => {
+      const a = (C.lib || []).find(x => x.id === b.dataset.add);
+      if (a) addCard(a);
+    };
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (C.panel) { C.panel = null; overlay(); }
+    else if (C.armed) { C.armed = null; paint(); }
+  }
+});
+</script>
+</body>
+</html>
