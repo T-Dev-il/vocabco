@@ -120,6 +120,26 @@
          border:1px solid var(--line); border-radius:4px; background:#fff;
          color:var(--ink); max-width:26ch}
 
+  /* ── the open-take strip (§6) ──────────────────────────────────────────
+     A take is durable: record three minutes, close everything, carry on
+     tomorrow. So the teacher can be building here with a recording open in
+     the other window, and must not be allowed to forget it. Dark, because it
+     belongs to the studio and is the studio reaching across.
+
+     Absent from the DOM when there is no take, the same way the studio's deck
+     is absent when there is no clock. An empty strip is a strip you learn to
+     stop reading. */
+  .strip{
+    flex:0 0 32px; height:32px; background:var(--chrome); color:#E8EAEC;
+    display:flex; align-items:center; gap:10px; padding:0 12px; font-size:12px;
+  }
+  .strip .dot{
+    width:7px; height:7px; border-radius:50%; background:#C25B5B; flex:0 0 7px;
+  }
+  .strip b{font-weight:600}
+  .strip .clock{font-variant-numeric:tabular-nums; color:#AEB6BE}
+  .strip .btn{margin-left:auto}
+
   /* ── the board ─────────────────────────────────────────────────────────
      Free layout. Everything on it is absolutely positioned and stays exactly
      where it was put. */
@@ -274,6 +294,7 @@ const C = {
   items: [],           // board_items rows, plus .act for cards
   uses: {},            // activity_id -> number of lessons using it
   lessons: [], lessonId: null,
+  take: null,          // {recId, name, lesson, lessonName, banked} while one is open
   lib: null, libQ: '',
   panel: null,         // 'library' while it is open
   msg: null, err: null,
@@ -362,7 +383,9 @@ function loadScript(src) {
   shell();
   await loadBoards();
   await loadLessons();
+  await loadOpenTake();   // after loadLessons, so the strip can name the lesson
   await openBoard(C.board && C.board.id);
+  strip();
 })().catch(e => screen('The canvas stopped', '<p>' + esc(e && e.message || e) + '</p>'));
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -443,12 +466,91 @@ async function loadUses() {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// The open take (§6)
+//
+// The studio writes `studioOpenTake` when a clip opens and removes it when the
+// take is stopped or discarded. localStorage is shared across windows on one
+// origin, so the canvas can read it without the two pages talking — and the
+// `storage` event fires HERE when the other window writes it, which is how the
+// strip appears and disappears without a reload.
+//
+// The key is the studio's. This page reads it and never writes it. If the
+// canvas cleared it, stopping a take would have two owners and neither would
+// be right.
+// ───────────────────────────────────────────────────────────────────────────
+const OPEN_TAKE = 'studioOpenTake';
+
+async function loadOpenTake() {
+  let open = null;
+  try { open = JSON.parse(localStorage.getItem(OPEN_TAKE) || 'null'); } catch (e) {}
+  if (!open || !open.rec) { C.take = null; return; }
+  if (C.take && C.take.recId === open.rec) return;   // already showing this one
+
+  const { data: rec } = await C.sb.from('recordings')
+    .select('id,name,sequence_id').eq('id', open.rec).is('deleted_at', null).maybeSingle();
+  if (!rec) { C.take = null; return; }   // stale key — the studio's to clear, not ours
+
+  // A take's clock is the sum of its clips and must never be wall-clock (§6).
+  // An eighteen-hour gap in the middle is not represented anywhere.
+  const { data: clips } = await C.sb.from('clips')
+    .select('media').eq('recording_id', rec.id).is('deleted_at', null);
+  const banked = (clips || []).reduce((n, c) => n + ((c.media && c.media.seconds) || 0), 0);
+
+  const l = C.lessons.find(x => x.id === rec.sequence_id);
+  C.take = {
+    recId: rec.id, name: rec.name, lesson: rec.sequence_id,
+    lessonName: l ? l.name : null, banked
+  };
+}
+
+function clock(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+}
+
+function strip() {
+  const host = document.getElementById('striphost');
+  if (!host) return;
+  if (!C.take) { host.innerHTML = ''; return; }   // absent, not empty
+
+  const t = C.take;
+  host.innerHTML =
+    '<div class="strip"><span class="dot"></span>' +
+      '<span><b>' + esc(t.name) + '</b>' +
+        (t.lessonName ? ' \u2014 ' + esc(t.lessonName) : '') + '</span>' +
+      '<span class="clock">paused at ' + clock(t.banked) + '</span>' +
+      '<button class="btn dark" id="totake">Back to the take</button>' +
+    '</div>';
+
+  document.getElementById('totake').onclick = () => {
+    location.href = 'studio.html?lesson=' + encodeURIComponent(t.lesson);
+  };
+}
+
+// The other window opening or stopping a take fires this one. No polling.
+window.addEventListener('storage', async e => {
+  if (e.key && e.key !== OPEN_TAKE) return;
+  await loadOpenTake();
+  strip();
+});
+
+// `storage` does not fire in the window that wrote it, and it does not fire if
+// the studio was closed while this page was hidden. Coming back to this window
+// is the other moment worth re-reading on.
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !C.sb) return;
+  await loadOpenTake();
+  strip();
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // The shell, drawn once
 // ───────────────────────────────────────────────────────────────────────────
 function shell() {
   root.innerHTML =
     '<div class="apptop" id="apptop"></div>' +
     '<div class="top" id="top"></div>' +
+    '<div id="striphost"></div>' +
     '<div class="feltwrap"><div class="felt" id="felt"></div></div>' +
     '<div class="tray" id="tray"></div>' +
     '<div id="over"></div>';
