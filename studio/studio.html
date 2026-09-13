@@ -436,6 +436,11 @@ function loadScript(src) {
       '<p>You are pointed at the <b>' + esc(env.label) + '</b> database.</p>');
   }
 
+  // Kept for one purpose only: the write on the way out (FIX-008). A page being
+  // closed cannot wait for the client library's promise, so that one write goes
+  // out as a keep-alive request by hand and needs these three things.
+  S.rest = { url: env.url, anon: env.anon, tok: session.access_token };
+
   // Does this database have 006-register.sql? Asking once, up front, is better
   // than finding out halfway through saving something.
   const probe = await S.sb.from('slots').select('register,parent_slot_id').limit(1);
@@ -1409,6 +1414,7 @@ async function stopTake() {
     .eq('id', clipId);
   S.take = null;
   try { localStorage.removeItem(OPEN_TAKE); } catch (e) {}
+  clearLive();
   stopTick();
   await loadTakes(S.lesson.id);
   render();
@@ -1416,29 +1422,99 @@ async function stopTake() {
 
 // The clock updates one element. A whole re-render every second would throw away
 // whatever is half-typed in the rack.
+// ───────────────────────────────────────────────────────────────────────────
+// Saying, out loud, that a take is open — and that it is still running
+//
+// FIX-008 and the canvas's strip (§6) between them need two different facts:
+//
+//   studioOpenTake  a take is open. Written when a clip opens, removed when it
+//                   is stopped or discarded. It SURVIVES this window closing,
+//                   because closing a window does not stop a take (§6) — come
+//                   back tomorrow and carry on.
+//   studioTakeLive  a window is recording it RIGHT NOW. Refreshed every few
+//                   seconds while the clock runs, and cleared on the way out.
+//
+// Without the second one the canvas has to guess, and it guessed wrong in both
+// directions: it said `paused` while the take was running, and went on saying
+// it after the studio was closed, because closing a tab changes nothing in
+// storage and so tells the other window nothing.
+//
+// Writing to localStorage fires a `storage` event in every OTHER window on this
+// origin. That is the whole transport. The two pages never talk directly and
+// neither polls the database.
+// ───────────────────────────────────────────────────────────────────────────
+const TAKE_LIVE = 'studioTakeLive';
+
+function markLive() {
+  if (!S.take) return;
+  try {
+    localStorage.setItem(TAKE_LIVE, JSON.stringify({
+      rec: S.take.id, at: Date.now(), seconds: Math.round(takeSeconds())
+    }));
+  } catch (e) {}
+}
+function clearLive() { try { localStorage.removeItem(TAKE_LIVE); } catch (e) {} }
+
+// The write on the way out. The client library's promise cannot finish inside a
+// page that is being destroyed, so this one goes by hand with `keepalive`, which
+// the browser is obliged to let complete. Same row, same shape as act().
+function flushClip() {
+  if (!S.take || !S.rest) return;
+  try {
+    fetch(S.rest.url + '/rest/v1/clips?id=eq.' + S.take.clipId, {
+      method: 'PATCH',
+      keepalive: true,
+      headers: {
+        'apikey': S.rest.anon,
+        'Authorization': 'Bearer ' + S.rest.tok,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ media: { seconds: clipSeconds() } })
+    });
+  } catch (e) {}
+}
+
+// Closing the window, or navigating out of it, ends the stretch being recorded:
+// the clock lives in this page and this page is going. So bank the seconds and
+// stop claiming to be live. The take itself stays open — studioOpenTake is not
+// touched here, and that is the difference between leaving a take and stopping
+// one.
+//
+// pagehide rather than beforeunload: beforeunload does not fire reliably on a
+// discarded tab or on mobile, and its dialog asks a question without saving
+// anything.
+window.addEventListener('pagehide', () => {
+  if (!S.take) return;
+  clearLive();
+  flushClip();
+});
+
 let TICK = null;
 function tick() {
   stopTick();
-  let banked = 0;
+  let n = 0;
+  markLive();
   TICK = setInterval(() => {
     const el = document.getElementById('clk');
     if (el && S.take) el.textContent = clock(takeSeconds());
+    if (!S.take) return;
+    n++;
+
+    // Every five seconds: still here, still running. Cheap, local, no network.
+    if (n % 5 === 0) markLive();
 
     // FIX-008. The clip's seconds were written only when an ACTION fired, and
     // the elapsed time since the last one lived in memory. A take that ran four
-    // minutes while the teacher thought, and was then left by closing the
-    // window, came back showing whatever the last action had banked — often
-    // nothing. The canvas's open-take strip (canvas.html, §6) reads that number
-    // from the database and so showed the same lie back.
+    // minutes while the teacher thought, and was then lost to a crash, came
+    // back showing whatever the last action had banked — often nothing.
     //
-    // Every ten seconds, not every one: a clip row written 60 times a minute
-    // for the length of a lesson is the kind of volume FIX-004 was about.
-    // Ten seconds is the most a crash can now cost.
-    //
-    // `media: { seconds }` and nothing else, matching act() exactly. The path
-    // and mime arrive at stopTake() when the file does, so there is nothing
-    // here to overwrite.
-    if (S.take && ++banked % 10 === 0) {
+    // The ordinary exit is handled above, on the way out. This is the backstop
+    // for the exits that get no warning: a crash, a discarded tab, a flat
+    // battery. Ten seconds rather than one, because a clip row rewritten sixty
+    // times a minute for the length of a lesson is the kind of volume FIX-004
+    // was about. Ten seconds is the most an unannounced death can now cost.
+    if (n % 10 === 0) {
       S.sb.from('clips').update({ media: { seconds: clipSeconds() } })
         .eq('id', S.take.clipId);
     }
@@ -1813,6 +1889,7 @@ async function removeTake(recId) {
   try {
     const open = JSON.parse(localStorage.getItem(OPEN_TAKE) || 'null');
     if (open && open.rec === recId) localStorage.removeItem(OPEN_TAKE);
+    clearLive();
   } catch (e) {}
   if (S.take && S.take.id === recId) { stopStream(); S.take = null; stopTick(); }
 
