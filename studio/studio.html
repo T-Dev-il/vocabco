@@ -249,6 +249,9 @@
   .auto .t{font-variant-numeric:tabular-nums; color:#7E868E; min-width:34px}
   .auto .none{font-size:11px; color:#7E868E; padding:0 10px 8px; line-height:1.5}
   .autofoot{margin-top:auto; padding:10px}
+  .autohead{display:flex; justify-content:flex-end; padding:7px 7px 0}
+  .auto.shut{flex:0 0 30px; align-items:center; padding-top:7px}
+  .auto.shut .btn{padding:3px 5px}
 
   .btn{border:1px solid #4A5158; background:#31363C; border-radius:4px;
        padding:4px 9px; font-size:11.5px; color:#E8EAEC; font-family:inherit;
@@ -463,6 +466,7 @@ function loadScript(src) {
   // the DEV badge, from config.js — forgetting which database you are in is
   // exactly the failure it exists to prevent
   vocabEnvBanner(S.env, () => {});
+  try { S.cornerShut = localStorage.getItem('studioCornerShut') === '1'; } catch (e) {}
   tameEnvBadge();
 
   const { data: { session } } = await S.sb.auth.getSession();
@@ -1543,7 +1547,11 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 12';
+function saveCorner() {
+  try { localStorage.setItem('studioCornerShut', S.cornerShut ? '1' : '0'); } catch (e) {}
+}
+
+const BUILD = 'studio 13';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -1626,6 +1634,7 @@ const AD_CEILING = 300;                  // the developer's rule, as in surface.
 let stPlayer = null, stReady = false, stCurrent = null, stState = -1;
 let stMaxDur = 0;
 let stLastGood = 0;                      // the last clock reading that was the lesson
+let stPos = 0, stAdFrom = 0, stSeekAt = 0;  // for the position-went-backwards test                      // the last clock reading that was the lesson
 
 // Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
 // Deliberately identical to surface.html's, so the same address works in both.
@@ -1690,21 +1699,44 @@ function stMediaState() {
   const d = stDur();
   if (d > stMaxDur) stMaxDur = d;
 
-  // IDENTITY FIRST, LENGTH SECOND. Corrected 2026-09-13 against a screenshot:
-  // with a Peek-Cloppenburg pre-roll visibly on screen and the player showing
-  // "Sponsored 1 of 2", the deck read "following the video · now 803s, lesson
-  // 803s". The player reported the LESSON's duration throughout the advert, so
-  // the length test that surface.html leans on said nothing was wrong.
+  // THREE SIGNALS, BECAUSE ONE OF THEM DEMONSTRABLY IS NOT ENOUGH.
   //
-  // So the length test is not the test. Asking WHO is playing is: getVideoData()
-  // returns the advert's own id while the advert runs. That is a fact about
-  // identity, and unlike length it cannot be defeated by an advert that happens
-  // to match the lesson.
+  // Checked against surface.html line by line on 2026-09-13: the transfer here
+  // is faithful, surface has this one test and nothing else, and therefore
+  // surface has the same hole. Evidence: a screenshot with a pre-roll visibly on
+  // screen, the player showing "Sponsored 1 of 2", and the deck reading
+  // "following the video · now 803s, lesson 803s". getDuration() reported the
+  // LESSON's length right through the advert, so the length test had nothing to
+  // see. It is not misfiring; it is being told the advert is the lesson.
   //
-  // The length test stays underneath it. It costs nothing, it catches the case
-  // where the id is unavailable, and surface.html has been living on it.
+  // So all three are asked, and the badge says which one answered, because one
+  // more blind round is worth more than any of these guesses.
+  //
+  //   1. POSITION WENT BACKWARDS. This is the signal the original fix was
+  //      actually chasing — "the walkthrough restarted every time a break began"
+  //      is getCurrentTime() dropping to zero for the advert. A seek we made
+  //      ourselves is excluded, because that is the one legitimate way back.
+  //   2. IDENTITY. getVideoData() may name the advert rather than the lesson.
+  //      Undocumented, so it may equally return nothing useful.
+  //   3. LENGTH. surface.html's test, kept because it costs nothing and it has
+  //      been carrying this until now.
+  //
+  // Note what none of them catches: a PRE-ROLL, where there is no earlier
+  // position to fall back from and the reported length is already the lesson's.
+  // Only identity could, which is the argument for keeping it.
+  const t = stTime();
+  const seeking = stSeekAt && (Date.now() - stSeekAt) < 1500;
+  if (seeking) { stPos = t; stAdFrom = 0; }
+  else if (stAdFrom) {
+    if (t >= stAdFrom - 2) { stAdFrom = 0; stPos = t; }
+    else return { kind: 'ad', why: 'position went back' };
+  } else if (t < stPos - 2) {
+    stAdFrom = stPos;
+    return { kind: 'ad', why: 'position went back' };
+  } else if (t > stPos) stPos = t;
+
   const playing = stVideoId();
-  if (playing && playing !== w.id) return { kind: 'ad', why: 'a different video is playing' };
+  if (playing && playing !== w.id) return { kind: 'ad', why: 'a different video' };
 
   const known = stKnownDur(w);
   if (d > 0) {
@@ -1752,8 +1784,8 @@ function stBadge() {
   const ms = stMediaState();
   const txt = ms.kind === 'none'      ? ''
             : ms.kind === 'loading'   ? 'video loading \u2014 clock holding'
-            : ms.kind === 'ad'        ? (ms.unsure ? 'advert? \u2014 clock holding'
-                                                   : 'advert \u2014 clock holding')
+            : ms.kind === 'ad'        ? 'advert \u2014 clock holding (' +
+                                        (ms.why || 'shorter than the lesson') + ')'
             : ms.kind === 'buffering' ? 'buffering \u2014 clock holding'
             : ms.kind === 'paused'    ? 'paused'
             : 'following the video';
@@ -1835,6 +1867,7 @@ function stMount(videoId, startAt) {
 function stKill() {
   try { if (stPlayer && stPlayer.destroy) stPlayer.destroy(); } catch {}
   stPlayer = null; stReady = false; stCurrent = null; stState = -1; stMaxDur = 0;
+  stPos = 0; stAdFrom = 0; stSeekAt = 0;
   const p = document.getElementById('st-panel');
   if (p) p.remove();
 }
@@ -2365,6 +2398,8 @@ function wireRecord() {
   if (cam && S.media && cam.srcObject !== S.media.stream) cam.srcObject = S.media.stream;
 
   if ($('torecord')) $('torecord').onclick = () => { S.mode = 'record'; render(); };
+  if ($('cornercl')) $('cornercl').onclick = () => { S.cornerShut = true; saveCorner(); render(); };
+  if ($('cornerop')) $('cornerop').onclick = () => { S.cornerShut = false; saveCorner(); render(); };
   if ($('starttake')) $('starttake').onclick = armNew;
   if ($('go')) $('go').onclick = startArmed;
   if ($('unarm')) $('unarm').onclick = () => { S.arming = null; render(); };
@@ -2429,6 +2464,7 @@ async function seekTo(sec) {
     // driving the other. Both write the same number, so neither can drift.
     if (i !== S.play.at) { S.play.at = i; }
     stLastGood = t;
+    stSeekAt = Date.now();   // ours, so the jump that follows is not an advert
     try {
       if (stPlayer && stReady) { stPlayer.seekTo((r.in_s || 0) + (t - r.offset), true); }
     } catch (e) {}
@@ -2993,33 +3029,33 @@ function wireEdit() {
   };
 }
 
+// ── The right-hand panel ──────────────────────────────────────────────────
+//
+// Stripped 2026-09-13 on the developer's instruction, and worth recording WHY
+// so it is not helpfully refilled. It used to carry six things. Two of them do
+// work: handing out, which is the teacher's own gesture and has nowhere else to
+// live, and the takes, which belong to recording.
+//
+// The other four were removed rather than rearranged:
+//   the "Teacher's corner" heading, which named a container rather than a job;
+//   the camera box, because the platform stores no video of its own and the
+//     camera was standing there implying that it does;
+//   the list of video and audio activities, which was the spine told twice;
+//   a second list of takes under the first, showing clip counts because lengths
+//     were not trustworthy — a readout excusing itself in the space it took up.
+//
+// It collapses now. It is not a mode and does not deserve to be one; it is a
+// drawer. Where it was left is remembered.
 function corner() {
-  const vids = S.slots.map(s => S.acts[s.activity_id])
-    .filter(a => a && (a.kind === 'video' || a.kind === 'audio'));
-
-  const media = vids.length
-    ? vids.map(v => '<div class="box">' + esc(v.name) + '<br><span style="color:#8B939B">' +
-        esc(v.kind) + '</span></div>').join('')
-    : '<div class="none">No media in this lesson.</div>';
-
-  const takes = S.takes.length
-    ? S.takes.map(t => '<div class="act"><span class="t">' + t.clips + '</span><b>' +
-        esc(t.name) + '</b></div>').join('') +
-      '<div class="none">Clip counts, not lengths. A take\'s clock is the sum of its ' +
-      'clips and must never be wall-clock — the lengths live in each clip\'s media, ' +
-      'whose shape is not settled.</div>'
-    : '<div class="none">No takes yet.</div>';
-
+  if (S.cornerShut) {
+    return '<div class="auto shut"><button class="btn" id="cornerop" ' +
+      'title="Bring the panel back">\u00ab</button></div>';
+  }
   return '<div class="auto">' +
-    '<div class="lbl">Teacher\'s corner</div>' +
+    '<div class="autohead"><button class="btn" id="cornercl" ' +
+      'title="Push the panel away">\u00bb</button></div>' +
     handOutList() +
     takePanel() +
-    camBox() +
-    media +
-    '<div class="lbl">Takes</div>' + takes +
-    (S.mode === 'record' ? '' :
-      '<div class="autofoot"><button class="btn wide" id="torecord">' +
-      (S.take ? 'Back to the open take' : 'Record') + '</button></div>') +
   '</div>';
 }
 
