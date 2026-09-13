@@ -72,6 +72,13 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
+
+  /* Everything is rendered inside #root, so the column that pins the bars has
+     to be HERE and not on body. It was on body, which made .feltwrap{flex:1}
+     inert: the board's own height set the page height and the tray sat two
+     thousand pixels below the fold, unreachable because body clips. The bar
+     was never missing. It was off the bottom of the world. */
+  #root{height:100%; display:flex; flex-direction:column; overflow:hidden; min-height:0}
   body{
     margin:0; background:var(--rail); color:var(--ink);
     font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
@@ -373,7 +380,7 @@
 // Bumped by hand every time this file is handed over. It exists because a
 // browser serving a cached copy is indistinguishable from a fix that did not
 // work, and we lost a round to exactly that.
-const BUILD = 'canvas 7';
+const BUILD = 'canvas 8';
 
 const C = {
   env: 'live', sb: null, has006: false,
