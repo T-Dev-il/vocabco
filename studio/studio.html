@@ -1539,7 +1539,7 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 10';
+const BUILD = 'studio 11';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -1719,6 +1719,7 @@ async function rememberDuration(w, d) {
 function stBadge() {
   const el = document.getElementById('vidbadge');
   if (!el) return;
+  const w = stWanted();
   const ms = stMediaState();
   const txt = ms.kind === 'none'      ? ''
             : ms.kind === 'loading'   ? 'video loading \u2014 clock holding'
@@ -1727,10 +1728,19 @@ function stBadge() {
             : ms.kind === 'buffering' ? 'buffering \u2014 clock holding'
             : ms.kind === 'paused'    ? 'paused'
             : 'following the video';
+  // The numbers the guess is made from, said out loud. The whole heuristic turns
+  // on comparing what the player reports NOW against how long the lesson really
+  // is, and with both hidden a working advert-hold and a broken one look exactly
+  // the same from a chair. If this line disagrees with what is on screen, the
+  // line is the evidence and the guess is what needs changing.
+  const nums = (w && stPlayer && stReady)
+    ? ' · now ' + Math.round(stDur()) + 's, lesson ' +
+      (stKnownDur(w) ? stKnownDur(w) + 's' : 'not learnt yet')
+    : '';
   const wantBtn = ms.kind === 'ad' && !!ms.unsure;
-  if (el.getAttribute('data-txt') === txt + (wantBtn ? '+b' : '')) return;
-  el.setAttribute('data-txt', txt + (wantBtn ? '+b' : ''));
-  el.innerHTML = esc(txt) + (wantBtn
+  if (el.getAttribute('data-txt') === txt + nums + (wantBtn ? '+b' : '')) return;
+  el.setAttribute('data-txt', txt + nums + (wantBtn ? '+b' : ''));
+  el.innerHTML = esc(txt + nums) + (wantBtn
     ? ' <button class="btn" id="notad" style="padding:1px 6px;font-size:11px">' +
       'It\u2019s the video</button>' : '');
   const b = document.getElementById('notad');
@@ -2125,7 +2135,12 @@ async function playTake(recId) {
   const first = seq.find(a => a.slot);
   const rows = steps();
   const from = (first && first.slot) || (rows[0] && rows[0].slot.id) || null;
-  if (from) { S.lookSlot = from; await loadContent(from); }
+  // BOTH pointers. The studio keeps two ideas of where you are — hereSlot, your
+  // place, and lookSlot, what is on screen — and a replay used to move only the
+  // second. The stage showed step 7 while the bar above it said "Looking back.
+  // Your place has not moved", because from the studio's side that was true.
+  // Watching yourself teach IS your place moving; it is not looking something up.
+  if (from) { S.hereSlot = from; S.lookSlot = from; await loadContent(from); }
   playTick();
   render();
 }
@@ -2183,7 +2198,7 @@ function playTick() {
       const a = S.play.seq[S.play.done++];
       if (a.kind === 'handed out' && a.slot) { S.handed[a.slot] = true; moved = true; }
       if ((a.kind === 'moved to' || a.kind === 'went back to' || a.kind === 'made') && a.slot) {
-        S.lookSlot = a.slot; await loadContent(a.slot); moved = true;
+        S.hereSlot = a.slot; S.lookSlot = a.slot; await loadContent(a.slot); moved = true;
       }
     }
     if (moved) render();
@@ -2213,6 +2228,7 @@ function deck() {
       '<div class="track" id="track" style="cursor:pointer;height:9px" title="Drag to move through the take">' +
         '<u id="trk" style="width:0;height:9px"></u></div>' +
       '<span style="color:#8B939B">Playing ' + esc(S.play.name) + ' · ' + clock(S.play.total) + '</span>' +
+      '<span id="vidbadge" style="color:#8B939B"></span>' +
     '</div>';
   }
 
@@ -2342,7 +2358,7 @@ async function seekTo(sec) {
     if (a.kind === 'handed out' && a.slot) S.handed[a.slot] = true;
     if (a.slot && a.kind !== 'marked') land = a.slot;
   });
-  if (land) { S.lookSlot = land; await loadContent(land); }
+  if (land) { S.hereSlot = land; S.lookSlot = land; await loadContent(land); }
 
   // find the clip this moment falls in, and put the video there
   let i = 0;
@@ -2350,7 +2366,16 @@ async function seekTo(sec) {
     if (t >= S.play.reel[n].offset) i = n;
   }
   const r = S.play.reel[i];
-  if (r && r.path) {
+  if (r && ytId(r.ref)) {
+    // The other direction. The video could already move the timeline; this is
+    // the timeline moving the video, so the two are one control rather than one
+    // driving the other. Both write the same number, so neither can drift.
+    if (i !== S.play.at) { S.play.at = i; }
+    stLastGood = t;
+    try {
+      if (stPlayer && stReady) { stPlayer.seekTo((r.in_s || 0) + (t - r.offset), true); }
+    } catch (e) {}
+  } else if (r && r.path) {
     if (i !== S.play.at) { await cueClip(i); }
     const v = document.getElementById('reel');
     if (v) { v.currentTime = Math.max(0, t - r.offset); v.play().catch(() => {}); }
