@@ -249,6 +249,26 @@
   .auto .t{font-variant-numeric:tabular-nums; color:#7E868E; min-width:34px}
   .auto .none{font-size:11px; color:#7E868E; padding:0 10px 8px; line-height:1.5}
   .autofoot{margin-top:auto; padding:10px}
+
+  /* ── joined: the trail, the walker, and the drop marks ──────────────────
+     The trail is a rule down the left of the spine with a figure on it. The
+     spine scrolls, so both live INSIDE it and are measured from it, rather
+     than being a sibling that would slide out of step with what it points at. */
+  .spine.trail{position:relative; padding-left:30px}
+  .spine.trail::before{content:""; position:absolute; left:12px; top:6px; bottom:6px;
+                       width:2px; background:var(--line); border-radius:1px}
+  .walker{position:absolute; left:3px; width:22px; height:22px; z-index:3;
+          display:flex; align-items:center; justify-content:center;
+          background:var(--here); color:#fff; border-radius:50%;
+          font-size:13px; line-height:1; cursor:grab; user-select:none;
+          box-shadow:0 1px 4px rgba(0,0,0,.28); transition:top .12s ease}
+  .walker.walking{cursor:grabbing; transition:none; transform:scale(1.12)}
+  .spine.trail .walkto{outline:2px solid var(--here); outline-offset:1px}
+  .spine.trail .dragging{opacity:.4}
+  .spine.trail .dropbefore{box-shadow:inset 0 3px 0 var(--here)}
+  .spine.trail .dropafter{box-shadow:inset 0 -3px 0 var(--here)}
+  .spine.trail .dropinto{outline:2px dashed var(--here); outline-offset:-2px}
+  .spine.trail [data-slot]{cursor:grab}
   .autohead{display:flex; justify-content:flex-end; padding:7px 7px 0}
   .auto.shut{flex:0 0 30px; align-items:center; padding-top:7px}
   .auto.shut .btn{padding:3px 5px}
@@ -851,7 +871,7 @@ function render() {
   // It is an approximation and says so on screen. The learner's real renderer
   // is surface.html, which this project does not touch (§1), so this can show
   // the shape of the walk and must never be mistaken for the finished article.
-  if (S.solo && S.mode === 'preview') {
+  if (S.solo && (S.mode === 'preview' || S.mode === 'joined')) {
     root.innerHTML =
       '<div class="top" style="justify-content:space-between">' +
         '<span style="font-size:11.5px;color:var(--dim)">' +
@@ -869,9 +889,13 @@ function render() {
 
   root.innerHTML =
     tabs() +
-    '<div class="top">' + lessonPicker() + modes() + '</div>' +
-    '<div class="body">' + spine() +
-      (S.mode === 'preview' || S.mode === 'record' ? previewStage() : stage()) +
+    '<div class="top">' + lessonPicker() + modes() +
+      (S.mode === 'joined'
+        ? '<div style="flex:1"></div><button class="btn light" id="solo">See it as a learner</button>'
+        : '') + '</div>' +
+    '<div class="body">' + (S.mode === 'joined' ? joinedSpine() : spine()) +
+      (S.mode === 'preview' || S.mode === 'record' || S.mode === 'joined'
+        ? previewStage() : stage()) +
       (S.mode === 'build' ? '' : corner()) + '</div>' +
     deck();
 
@@ -926,6 +950,8 @@ function modes() {
     m('build', 'Build', S.mode === 'build', false) +
     m('preview', 'Preview', S.mode === 'preview', false, 'Walk your own lesson as yourself.') +
     m('record', 'Record', S.mode === 'record', false, 'Build in front of a clock.') +
+    m('joined', 'Joined', S.mode === 'joined', false,
+      'The experiment: build, preview and record as one screen.') +
     m('review', 'Review', false, true, 'Reserved. Needs a cohort, and sharing does not exist yet.') +
   '</div>';
 }
@@ -1088,6 +1114,13 @@ function previewStage() {
   kids.filter(k => visible(k) && S.handed[k.id]).forEach(k => { body += liveOne(k, true); });
 
   const held = gateHolds(cur);
+  // In joined, walking is the walker's job and these belong to the slide.
+  if (S.mode === 'joined') {
+    return '<div class="stage"><div class="look">' + bar + '</div>' +
+      '<div class="paper"><div class="learner">' + body + '</div></div>' +
+      editBar() + ruleBar() + rack() +
+      carvePanel() + attachPanel() + '</div>';
+  }
   const foot = away ? ''
     : '<div class="look">' +
         '<button class="btn light" id="prev"' + (i <= 0 ? ' disabled' : '') + '>Back</button>' +
@@ -1547,11 +1580,239 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
+// ───────────────────────────────────────────────────────────────────────────
+// Joined — one screen instead of three modes
+//
+// Build, Preview and Record are three modes because each owns a few controls,
+// not because a teacher does three different jobs. This is the experiment that
+// collapses them, and it is deliberately a FOURTH tab rather than a rewrite of
+// the other three: they stay exactly as they were until this has earned its
+// place, and then they go.
+//
+// What each mode was actually for, and where it went:
+//
+//   BUILD owned Edit, Move up, Move down, Make it a handout, Remove, and the
+//   two rule editors. Move up and down are now DRAGGING a slot in the spine.
+//   Make it a handout is DROPPING a slot onto another one, and dragging it back
+//   out to a gap makes it a step again — the same gesture read two ways, which
+//   is why there is no button for either. Everything else moved onto the stage
+//   with the slide it belongs to, because those are facts about one activity
+//   and had no business being a mode.
+//
+//   PREVIEW owned Back, Next and "See it as a learner". Back and Next are the
+//   walker: a figure on the trail beside the spine that you drag from step to
+//   step. "See it as a learner" is a button in the top bar, because it is a way
+//   of looking rather than a way of working.
+//
+//   RECORD owned the takes. Those are in the drawer on the right, which opens
+//   and shuts. A drawer, not a mode.
+//
+// Nothing here is new machinery. setProgress, renumber, setRegister's rules,
+// editBar and ruleBar are all the existing ones; this rearranges who can reach
+// them and when.
+
+function joinedSpine() {
+  const rows = outline();
+  const body = rows.length
+    ? rows.map(r => stepRow(r) + (r.kids.length
+        ? '<div class="kids">' + r.kids.map(k => stepRow({ slot: k, attached: true })).join('') + '</div>'
+        : '')).join('')
+    : '<p class="cond">This lesson has no slots yet. Add something to it in the app and reload.</p>';
+
+  return '<div class="pane">' +
+    '<div class="lbl">The lesson \u2014 drag a step to move it, drop it on another to hand it out</div>' +
+    '<div class="spine trail" id="spine">' +
+      '<div class="walker" id="walker" title="Drag to walk the lesson">\u265F</div>' +
+      body +
+    '</div>' +
+    '<div class="panefoot"><button class="btn light wide" id="add">Add something</button></div>' +
+  '</div>';
+}
+
+// The walker sits beside whichever step is your place. Measured after every
+// render rather than stored, because the spine reflows whenever anything moves.
+function placeWalker() {
+  const w = document.getElementById('walker');
+  const sp = document.getElementById('spine');
+  if (!w || !sp) return;
+  const el = sp.querySelector('[data-slot="' + S.hereSlot + '"]');
+  if (!el) { w.style.display = 'none'; return; }
+  w.style.display = 'block';
+  w.style.top = (el.offsetTop + el.offsetHeight / 2 - 11) + 'px';
+}
+
+// ── Dragging ──────────────────────────────────────────────────────────────
+//
+// Two gestures on one control, told apart by WHERE in the row you let go:
+// the top or bottom of a row means "put it there", the middle means "put it
+// inside that one". That is the whole grammar, and it is why the buttons could
+// go — a button for each would be three buttons describing one motion.
+//
+// Marks are written straight onto the elements, never through render(). This
+// window rebuilds itself completely on every render and a drag cannot survive
+// having the thing under the pointer replaced.
+function clearDropMarks() {
+  document.querySelectorAll('.dropbefore,.dropafter,.dropinto,.dragging')
+    .forEach(el => el.classList.remove('dropbefore', 'dropafter', 'dropinto', 'dragging'));
+}
+
+function wireJoined() {
+  const sp = document.getElementById('spine');
+  if (!sp) return;
+
+  let dragId = null, dropAt = null, how = null;
+
+  sp.querySelectorAll('[data-slot]').forEach(el => {
+    el.setAttribute('draggable', 'true');
+
+    el.ondragstart = e => {
+      dragId = el.getAttribute('data-slot');
+      el.classList.add('dragging');
+      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (x) {}
+    };
+    el.ondragend = () => { clearDropMarks(); dragId = null; };
+
+    el.ondragover = e => {
+      const id = el.getAttribute('data-slot');
+      if (!dragId || id === dragId) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const p = (e.clientY - r.top) / (r.height || 1);
+      clearDropMarks();
+      document.querySelector('[data-slot="' + dragId + '"]').classList.add('dragging');
+      dropAt = id;
+      how = p < 0.3 ? 'before' : p > 0.7 ? 'after' : 'into';
+      el.classList.add(how === 'into' ? 'dropinto' : how === 'before' ? 'dropbefore' : 'dropafter');
+    };
+
+    el.ondrop = async e => {
+      e.preventDefault();
+      const id = dragId, target = dropAt, m = how;
+      clearDropMarks(); dragId = null;
+      if (!id || !target || id === target) return;
+      if (m === 'into') await handOutUnder(id, target);
+      else await placeStep(id, target, m);
+    };
+  });
+
+  // The walker. Pointer events rather than HTML5 dragging, because it is one
+  // small object being pointed at a row and the row it lands on has to be
+  // visible the whole way down.
+  const w = document.getElementById('walker');
+  if (!w) return;
+  let walking = false;
+  const rowAt = y => {
+    let hit = null;
+    sp.querySelectorAll('.step[data-slot]').forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) hit = el;
+    });
+    return hit;
+  };
+  w.onpointerdown = e => {
+    walking = true;
+    w.setPointerCapture(e.pointerId);
+    w.classList.add('walking');
+    e.preventDefault();
+  };
+  w.onpointermove = e => {
+    if (!walking) return;
+    w.style.top = (e.clientY - sp.getBoundingClientRect().top + sp.scrollTop - 11) + 'px';
+    sp.querySelectorAll('.walkto').forEach(el => el.classList.remove('walkto'));
+    const el = rowAt(e.clientY);
+    if (el) el.classList.add('walkto');
+  };
+  w.onpointerup = async e => {
+    if (!walking) return;
+    walking = false;
+    w.classList.remove('walking');
+    const el = rowAt(e.clientY);
+    sp.querySelectorAll('.walkto').forEach(x => x.classList.remove('walkto'));
+    if (!el) { placeWalker(); return; }
+    const id = el.getAttribute('data-slot');
+    // Walking is your place moving, so it writes progress exactly as Next did.
+    await setProgress(id);
+    S.lookSlot = id;
+    await loadContent(id);
+    render();
+  };
+}
+
+// Dropped in a gap: it is a step, and it goes there.
+async function placeStep(id, targetId, where) {
+  const rows = outline();
+  const moved = S.slots.find(s => s.id === id);
+  if (!moved) return;
+  const myRow = rows.find(r => r.slot.id === id);
+  const kids = myRow ? myRow.kids : [];
+
+  // Taken out of wherever it was, as a step and as somebody's handout both.
+  const order = rows
+    .filter(r => r.slot.id !== id)
+    .map(r => ({ slot: r.slot, kids: r.kids.filter(k => k.id !== id) }));
+
+  let ti = order.findIndex(r => r.slot.id === targetId);
+  if (ti < 0) {
+    // Dropped beside a handout. Its parent step is what was meant.
+    const pr = order.find(r => r.kids.some(k => k.id === targetId));
+    ti = pr ? order.indexOf(pr) : order.length - 1;
+  }
+  order.splice(where === 'before' ? ti : ti + 1, 0, { slot: moved, kids });
+
+  const flat = [];
+  order.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
+
+  await S.sb.from('slots').update({ register: 'stage', parent_slot_id: null }).eq('id', id);
+  await renumber(flat);
+  await openLesson(S.lesson.id);
+  S.lookSlot = id;
+  await loadContent(id);
+  render();
+}
+
+// Dropped onto a step: it becomes that step's handout.
+async function handOutUnder(id, targetId) {
+  const rows = outline();
+  let parent = rows.find(r => r.slot.id === targetId);
+  if (!parent) parent = rows.find(r => r.kids.some(k => k.id === targetId));
+  if (!parent || parent.slot.id === id) return;
+
+  // One level only. A handout hanging off a handout is a shape nothing else in
+  // this project reads, so it is refused here rather than written and found
+  // later by whoever tries to walk it.
+  const myRow = rows.find(r => r.slot.id === id);
+  if (myRow && myRow.kids.length) {
+    S.note = 'Take its handouts off it first \u2014 a handout cannot carry its own.';
+    return render();
+  }
+
+  const moved = S.slots.find(s => s.id === id);
+  if (!moved) return;
+
+  const order = rows
+    .filter(r => r.slot.id !== id)
+    .map(r => ({ slot: r.slot, kids: r.kids.filter(k => k.id !== id) }));
+  const pr = order.find(r => r.slot.id === parent.slot.id);
+  if (!pr) return;
+  pr.kids.push(moved);
+
+  const flat = [];
+  order.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
+
+  await S.sb.from('slots')
+    .update({ register: 'handout', parent_slot_id: parent.slot.id }).eq('id', id);
+  await renumber(flat);
+  await openLesson(S.lesson.id);
+  S.lookSlot = id;
+  await loadContent(id);
+  render();
+}
+
 function saveCorner() {
   try { localStorage.setItem('studioCornerShut', S.cornerShut ? '1' : '0'); } catch (e) {}
 }
 
-const BUILD = 'studio 13';
+const BUILD = 'studio 14';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -2398,6 +2659,7 @@ function wireRecord() {
   if (cam && S.media && cam.srcObject !== S.media.stream) cam.srcObject = S.media.stream;
 
   if ($('torecord')) $('torecord').onclick = () => { S.mode = 'record'; render(); };
+  if (S.mode === 'joined') { wireJoined(); placeWalker(); }
   if ($('cornercl')) $('cornercl').onclick = () => { S.cornerShut = true; saveCorner(); render(); };
   if ($('cornerop')) $('cornerop').onclick = () => { S.cornerShut = false; saveCorner(); render(); };
   if ($('starttake')) $('starttake').onclick = armNew;
@@ -2900,7 +3162,7 @@ function answerable(slot) {
 }
 
 function ruleBar() {
-  if (S.mode !== 'build') return '';
+  if (S.mode !== 'build' && S.mode !== 'joined') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return '';
 
@@ -2980,7 +3242,7 @@ async function setGate(slotId, v) {
 }
 
 function editBar() {
-  if (S.mode !== 'build') return '';
+  if (S.mode !== 'build' && S.mode !== 'joined') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return '';
   const a = S.acts[slot.activity_id] || {};
@@ -2993,11 +3255,12 @@ function editBar() {
   return '<div class="look" style="border-top:1px solid var(--line);padding-top:9px">' +
     '<button class="btn light" id="edit"' + (known ? '' : ' disabled title="The rack did not make this one"') +
       '>Edit</button>' +
-    (isStep ? '<button class="btn light" id="up"' + (i <= 0 ? ' disabled' : '') + '>Move up</button>' +
-              '<button class="btn light" id="down"' + (i >= rows.length - 1 ? ' disabled' : '') +
-              '>Move down</button>' : '') +
-    '<button class="btn light" id="reg">' +
-      (reg === 'handout' ? 'Make it a step' : 'Make it a handout') + '</button>' +
+    (S.mode === 'joined' ? '' :
+      (isStep ? '<button class="btn light" id="up"' + (i <= 0 ? ' disabled' : '') + '>Move up</button>' +
+                '<button class="btn light" id="down"' + (i >= rows.length - 1 ? ' disabled' : '') +
+                '>Move down</button>' : '') +
+      '<button class="btn light" id="reg">' +
+        (reg === 'handout' ? 'Make it a step' : 'Make it a handout') + '</button>') +
     '<div style="flex:1"></div>' +
     (S.note ? '<span>' + esc(S.note) + '</span>' : '') +
     '<button class="btn light" id="rm">' + (S.confirmRm === slot.id ? 'Really remove it' : 'Remove') +
@@ -3444,7 +3707,10 @@ function wire() {
 
   wireRack();
   wireRecord();
-  if (S.mode === 'preview' || S.mode === 'record') wirePreview();
+  // Joined is both at once, which is the point of it: the stage is live and
+  // answerable AND the slide carries its own editing controls.
+  if (S.mode === 'joined') { wirePreview(); if (!S.rack) wireEdit(); }
+  else if (S.mode === 'preview' || S.mode === 'record') wirePreview();
   else if (!S.rack) wireEdit();
   if (S.take && !S.play) tick();
 }
