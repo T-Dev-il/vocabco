@@ -88,6 +88,11 @@
     cursor:pointer; font-family:inherit;
   }
   .apptab.on{background:#fff; color:var(--ink); font-weight:600; cursor:default}
+  .apptab.undock{
+    padding:6px 9px; border-radius:6px 6px 0 0; font-size:13px; line-height:1;
+    background:transparent; border-color:transparent; color:#8a9089;
+  }
+  .apptab.undock:hover{background:#EAEBE6; border-color:#C8CBC4; color:var(--ink)}
 
   .top{
     height:38px; flex:0 0 38px; background:#fff; border-bottom:1px solid var(--line);
@@ -419,10 +424,17 @@ async function loadLessons() {
     .order('updated_at', { ascending: false });
   C.lessons = data || [];
 
-  let wanted = null;
-  try { wanted = localStorage.getItem('vocabLesson'); } catch (e) {}
+  // The lesson can arrive three ways, in this order: the address (the studio
+  // hands it over when you flip windows), then what you last chose here, then
+  // whichever was touched most recently. The address wins, because it is the
+  // one that was just deliberate.
+  let wanted = new URLSearchParams(location.search).get('lesson');
+  if (!wanted || !C.lessons.some(l => l.id === wanted)) {
+    try { wanted = localStorage.getItem('vocabLesson'); } catch (e) {}
+  }
   const pick = (wanted && C.lessons.find(l => l.id === wanted)) || C.lessons[0];
   C.lessonId = pick ? pick.id : null;
+  try { if (C.lessonId) localStorage.setItem('vocabLesson', C.lessonId); } catch (e) {}
 }
 
 async function openBoard(id) {
@@ -567,7 +579,9 @@ function chrome() {
   document.getElementById('apptop').innerHTML =
     '<span class="apptab on">Canvas</span>' +
     '<button class="apptab" id="tostudio">Studio' +
-      (lessonName() ? ' \u2014 ' + esc(lessonName()) : '') + '</button>';
+      (lessonName() ? ' \u2014 ' + esc(lessonName()) : '') + '</button>' +
+    '<button class="apptab undock" id="undock" ' +
+      'title="Open the studio in its own window, beside this one">\u29c9</button>';
 
   document.getElementById('top').innerHTML =
     '<span class="title">Canvas</span>' +
@@ -589,7 +603,13 @@ function chrome() {
     '</div>';
 
   document.getElementById('tostudio').onclick = () => location.href = studioHref;
-  document.getElementById('openstudio').onclick = () => window.open(studioHref, '_blank');
+  // The same named window every time, so a second press brings the studio
+  // forward rather than opening a third one.
+  const und = document.getElementById('undock');
+  if (und) und.onclick = () => { const w = window.open(studioHref, 'vocabStudio'); if (w) w.focus(); };
+  document.getElementById('openstudio').onclick = () => {
+    const w = window.open(studioHref, 'vocabStudio'); if (w) w.focus();
+  };
 
   document.querySelectorAll('[data-board]').forEach(el => {
     el.onclick = () => { if (!C.board || el.dataset.board !== C.board.id) openBoard(el.dataset.board); };

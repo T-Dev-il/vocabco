@@ -16,6 +16,11 @@
 
   The studio — studio-design-proposal.md rev 2. Frames 1, 2, 3 and Record.
 
+  Contractor 08, 2026-09-12: FIX-008 (a clip's seconds are banked on the tick,
+  not only when an action fires), and the Canvas tab is live — it flips this
+  window to canvas.html, and the ⧉ beside it opens the canvas in its own
+  window. See fix-log.md FIX-008 and contractor-08-handoff.md.
+
   Spine left, stage centre, teacher's corner right, deck below. Reads a real
   lesson from the database. No editing.
 
@@ -68,6 +73,11 @@
   }
   .apptab.on{background:#fff; color:var(--ink); font-weight:600; cursor:default}
   .apptab[disabled]{opacity:.5; cursor:not-allowed}
+  .apptab.undock{
+    padding:6px 9px; border-radius:6px 6px 0 0; font-size:13px; line-height:1;
+    background:transparent; border-color:transparent; color:#8a9089;
+  }
+  .apptab.undock:hover{background:#EAEBE6; border-color:#C8CBC4; color:var(--ink)}
 
   .top{
     height:38px; flex:0 0 38px; background:#fff; border-bottom:1px solid var(--line);
@@ -799,10 +809,24 @@ function render() {
   wire();
 }
 
+// The two windows of §2. The tab flips this window over to the canvas; the
+// undock control opens it beside this one instead, in a window of its own and
+// always the same one, so a second press brings that window forward rather
+// than making a third canvas.
+//
+// The lesson travels in the address either way. The canvas needs to know which
+// lesson it is carrying things across into, and making the teacher choose it
+// twice would be a decision the machine already knows the answer to.
+function canvasHref() {
+  return 'canvas.html' + (S.lesson ? '?lesson=' + encodeURIComponent(S.lesson.id) : '');
+}
+
 function tabs() {
   return '<div class="apptop">' +
-    '<button class="apptab" disabled title="The canvas is its own window and is not built yet">Canvas</button>' +
+    '<button class="apptab" id="tocanvas" title="The canvas \u2014 where things get made">Canvas</button>' +
     '<span class="apptab on">Studio — ' + esc(S.lesson ? S.lesson.name : '') + '</span>' +
+    '<button class="apptab undock" id="undock" ' +
+      'title="Open the canvas in its own window, beside this one">\u29c9</button>' +
   '</div>';
 }
 
@@ -1395,9 +1419,29 @@ async function stopTake() {
 let TICK = null;
 function tick() {
   stopTick();
+  let banked = 0;
   TICK = setInterval(() => {
     const el = document.getElementById('clk');
     if (el && S.take) el.textContent = clock(takeSeconds());
+
+    // FIX-008. The clip's seconds were written only when an ACTION fired, and
+    // the elapsed time since the last one lived in memory. A take that ran four
+    // minutes while the teacher thought, and was then left by closing the
+    // window, came back showing whatever the last action had banked — often
+    // nothing. The canvas's open-take strip (canvas.html, §6) reads that number
+    // from the database and so showed the same lie back.
+    //
+    // Every ten seconds, not every one: a clip row written 60 times a minute
+    // for the length of a lesson is the kind of volume FIX-004 was about.
+    // Ten seconds is the most a crash can now cost.
+    //
+    // `media: { seconds }` and nothing else, matching act() exactly. The path
+    // and mime arrive at stopTake() when the file does, so there is nothing
+    // here to overwrite.
+    if (S.take && ++banked % 10 === 0) {
+      S.sb.from('clips').update({ media: { seconds: clipSeconds() } })
+        .eq('id', S.take.clipId);
+    }
   }, 1000);
 }
 function stopTick() { if (TICK) { clearInterval(TICK); TICK = null; } }
@@ -2416,6 +2460,18 @@ async function save(register) {
 }
 
 function wire() {
+  // The canvas. Nothing is unsaved in this window at the moment of leaving —
+  // the rack writes on save and a take writes as it goes — so this navigates
+  // without asking.
+  const toc = document.getElementById('tocanvas');
+  if (toc) toc.onclick = () => location.href = canvasHref();
+
+  const und = document.getElementById('undock');
+  if (und) und.onclick = () => {
+    const w = window.open(canvasHref(), 'vocabCanvas');
+    if (w) w.focus();
+  };
+
   const pick = document.getElementById('pick');
   if (pick) pick.onchange = async e => {
     const id = e.target.value;
