@@ -1251,6 +1251,7 @@ function stage() {
     '<div class="look">' + bar + '</div>' +
     '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' +
     editBar() +
+    ruleBar() +
     rack() + carvePanel() +
   '</div>';
 }
@@ -1449,7 +1450,7 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 3';
+const BUILD = 'studio 4';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The canvas has changed this lesson
@@ -2188,6 +2189,121 @@ async function removeSlot(slotId) {
   render();
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// Who sees it, and what holds them — authoring conditions and gates
+//
+// Both columns were read from the first day and written by nobody: a condition
+// hid a slot in Preview, a gate held Next, and the only way to set either was
+// by hand in the database. build-log §5 recorded that; this is it.
+//
+// The shapes are the ones already being read, unchanged:
+//   condition  { show_if: { slot: <id>, is: 'passed' | 'failed' } }
+//   gate       { blocks: true, satisfied_when: 'passed' }
+//
+// TWO THINGS THIS EDITOR REFUSES, both so a lesson cannot trap a learner:
+//
+//   1. A gate on something with no answer. A reader or a video never produces
+//      an attempt, so `satisfied_when` could never be met and Next would never
+//      release. §10 says the editor should refuse it and explain why, rather
+//      than letting it be authored and failing at the learner.
+//   2. A gate satisfied by `pending`. Work a person has to mark sits pending
+//      for as long as the person takes, and a learner cannot wait inside a
+//      lesson for that. gateHolds() already treats pending as open; not
+//      offering it means the teacher never authors the contradiction.
+//
+// A condition points at a slot ABOVE this one only. Pointing down would mean
+// showing something on the outcome of a thing not yet reached, which is not a
+// state the walk can be in.
+// ───────────────────────────────────────────────────────────────────────────
+
+const ANSWERABLE = ['mcq', 'truefalse', 'order', 'blank'];
+
+function answerable(slot) {
+  const a = S.acts[slot.activity_id] || {};
+  return ANSWERABLE.indexOf(a.kind) >= 0;
+}
+
+function ruleBar() {
+  if (S.mode !== 'build') return '';
+  const slot = S.slots.find(s => s.id === S.lookSlot);
+  if (!slot) return '';
+
+  const flat = flatWithKids();
+  const me = flat.findIndex(x => x.id === slot.id);
+  const above = me > 0 ? flat.slice(0, me) : [];
+
+  const c = (slot.condition && slot.condition.show_if) || null;
+  const now = c && c.slot ? c.slot + ':' + (c.is || 'passed') : '';
+
+  const opts = ['<option value="">Everyone sees it</option>'];
+  above.forEach(s2 => {
+    if (!answerable(s2)) return;      // nothing to have gone right or wrong
+    const n = memberOf(s2).name;
+    ['passed', 'failed'].forEach(st => {
+      const v = s2.id + ':' + st;
+      opts.push('<option value="' + esc(v) + '"' + (v === now ? ' selected' : '') + '>' +
+        'Only if they got \u201c' + esc(n) + '\u201d ' + (st === 'passed' ? 'right' : 'wrong') +
+        '</option>');
+    });
+  });
+
+  const g = slot.gate && slot.gate.blocks ? (slot.gate.satisfied_when || 'passed') : '';
+  const canGate = answerable(slot);
+
+  return '<div class="look" style="border-top:1px solid var(--line);padding-top:9px;' +
+    'flex-wrap:wrap;gap:8px">' +
+    '<label style="font-size:11.5px;color:var(--dim)">Shown to</label>' +
+    '<select id="cond"' + (opts.length === 1 ? ' disabled title="Nothing above this has an answer to depend on"' : '') + '>' +
+      opts.join('') + '</select>' +
+    '<label style="font-size:11.5px;color:var(--dim);margin-left:8px">Before moving on</label>' +
+    '<select id="gate"' + (canGate ? '' :
+      ' disabled title="This has no answer, so a hold here could never be satisfied"') + '>' +
+      '<option value=""' + (g ? '' : ' selected') + '>They can carry on</option>' +
+      (canGate ? '<option value="passed"' + (g === 'passed' ? ' selected' : '') +
+        '>Hold until they get it right</option>' : '') +
+    '</select>' +
+    (S.ruleNote ? '<span style="font-size:11.5px;color:var(--dim)">' + esc(S.ruleNote) + '</span>' : '') +
+  '</div>';
+}
+
+function wireRules() {
+  const $ = id => document.getElementById(id);
+  const slot = S.slots.find(s => s.id === S.lookSlot);
+  if (!slot) return;
+
+  if ($('cond')) $('cond').onchange = e => setCondition(slot.id, e.target.value);
+  if ($('gate')) $('gate').onchange = e => setGate(slot.id, e.target.value);
+}
+
+async function setCondition(slotId, v) {
+  const condition = v
+    ? { show_if: { slot: v.split(':')[0], is: v.split(':')[1] } }
+    : null;
+  const { error } = await S.sb.from('slots').update({ condition }).eq('id', slotId);
+  if (error) { S.error = error.message; return render(); }
+  // A condition hangs the slot off the one it depends on — that is what the
+  // spine already draws, and is why nothing else has to change here.
+  S.ruleNote = condition ? 'Saved. It hangs off the step it depends on.'
+                         : 'Saved. Everyone sees it again.';
+  await openLesson(S.lesson.id);
+  S.lookSlot = slotId;
+  await loadContent(slotId);
+  render();
+}
+
+async function setGate(slotId, v) {
+  const gate = v ? { blocks: true, satisfied_when: v } : null;
+  const { error } = await S.sb.from('slots').update({ gate }).eq('id', slotId);
+  if (error) { S.error = error.message; return render(); }
+  S.ruleNote = gate ? 'Saved. Next will not release until it is right.'
+                    : 'Saved. Nothing holds them here.';
+  await openLesson(S.lesson.id);
+  S.lookSlot = slotId;
+  await loadContent(slotId);
+  render();
+}
+
 function editBar() {
   if (S.mode !== 'build') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
@@ -2215,6 +2331,7 @@ function editBar() {
 }
 
 function wireEdit() {
+  wireRules();
   const $ = id => document.getElementById(id);
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return;
@@ -2618,7 +2735,7 @@ function wire() {
     if (S.rack) { el.disabled = true; return; }
     el.onclick = async () => {
       S.lookSlot = el.getAttribute('data-slot');
-      S.note = null; S.confirmRm = null;
+      S.note = null; S.confirmRm = null; S.ruleNote = null;
       render();
       await loadContent(S.lookSlot);
       render();
