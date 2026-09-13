@@ -55,6 +55,15 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
+
+  /* FIX-009. Everything is rendered into #root, so the column that gives each
+     pane its own scrolling has to be HERE, not on body. It was on body, which
+     made .body{flex:1}, .spine{overflow-y:auto} and the stage's scroll all
+     inert: the panes grew to fit their content, the page grew past the window,
+     and body clipped it with no way to scroll. A long lesson put Next off the
+     bottom of the screen and stranded you there. The same fault was in
+     canvas.html and is the same one line. */
+  #root{height:100%; display:flex; flex-direction:column; overflow:hidden; min-height:0}
   body{
     margin:0; background:var(--rail); color:var(--ink);
     font:15px/1.55 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
@@ -832,6 +841,9 @@ function tabs() {
     '<span class="apptab on">Studio — ' + esc(S.lesson ? S.lesson.name : '') + '</span>' +
     '<span style="font-size:10.5px;color:#9b9e96;align-self:center;padding:0 4px" ' +
       'title="Which build is loaded">' + BUILD + '</span>' +
+    '<div style="flex:1"></div>' +
+    '<button class="apptab undock" id="tosweep" ' +
+      'title="Footage left behind by deleted takes">\u2298</button>' +
     '<button class="apptab undock" id="undock" ' +
       'title="Open the canvas in its own window, beside this one">\u29c9</button>' +
   '</div>';
@@ -1450,7 +1462,7 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 4';
+const BUILD = 'studio 5';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The canvas has changed this lesson
@@ -2713,6 +2725,9 @@ function wire() {
   // without asking.
   const toc = document.getElementById('tocanvas');
   if (toc) toc.onclick = () => location.href = canvasHref();
+
+  const sw = document.getElementById('tosweep');
+  if (sw) sw.onclick = () => location.href = 'sweep.html';
 
   const und = document.getElementById('undock');
   if (und) und.onclick = () => {
