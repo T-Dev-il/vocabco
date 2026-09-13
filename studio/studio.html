@@ -231,8 +231,12 @@
            margin:0 0 10px; max-width:60ch}
 
   /* ── the teacher's corner ──────────────────────────────────────────────── */
+  /* min-height:0 is what lets a flex child actually scroll. Without it the
+     column grows to fit its contents and the foot of it goes off the bottom of
+     the window with nothing able to reach it — the same fault as FIX-009, in a
+     smaller box. It showed up in Record, which is where the corner holds most. */
   .auto{flex:0 0 214px; background:var(--chrome); color:#E8EAEC; display:flex;
-        flex-direction:column; overflow-y:auto}
+        flex-direction:column; overflow-y:auto; min-height:0}
   .auto .lbl{color:#8B939B}
   .auto .box{margin:0 10px 8px; background:#31363C; border:1px solid #3E444B;
              border-radius:5px; padding:7px 9px; font-size:11.5px; color:#C6CCD2;
@@ -864,7 +868,7 @@ function render() {
     '<div class="top">' + lessonPicker() + modes() + '</div>' +
     '<div class="body">' + spine() +
       (S.mode === 'preview' || S.mode === 'record' ? previewStage() : stage()) +
-      corner() + '</div>' +
+      (S.mode === 'build' ? '' : corner()) + '</div>' +
     deck();
 
   wire();
@@ -1539,7 +1543,7 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 11';
+const BUILD = 'studio 12';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -1647,6 +1651,15 @@ function videoBlock(ref) {
          '</div>';
 }
 
+// Who the player says it is playing RIGHT NOW. During an advert this is the
+// advert's id, not the lesson's.
+function stVideoId() {
+  try {
+    const d = stPlayer && stPlayer.getVideoData ? stPlayer.getVideoData() : null;
+    return (d && d.video_id) ? d.video_id : null;
+  } catch (e) { return null; }
+}
+
 function stDur() {
   try { return stPlayer && stPlayer.getDuration ? stPlayer.getDuration() : 0; } catch { return 0; }
 }
@@ -1676,6 +1689,22 @@ function stMediaState() {
   if (!stPlayer || !stReady) return { kind: 'loading' };
   const d = stDur();
   if (d > stMaxDur) stMaxDur = d;
+
+  // IDENTITY FIRST, LENGTH SECOND. Corrected 2026-09-13 against a screenshot:
+  // with a Peek-Cloppenburg pre-roll visibly on screen and the player showing
+  // "Sponsored 1 of 2", the deck read "following the video · now 803s, lesson
+  // 803s". The player reported the LESSON's duration throughout the advert, so
+  // the length test that surface.html leans on said nothing was wrong.
+  //
+  // So the length test is not the test. Asking WHO is playing is: getVideoData()
+  // returns the advert's own id while the advert runs. That is a fact about
+  // identity, and unlike length it cannot be defeated by an advert that happens
+  // to match the lesson.
+  //
+  // The length test stays underneath it. It costs nothing, it catches the case
+  // where the id is unavailable, and surface.html has been living on it.
+  const playing = stVideoId();
+  if (playing && playing !== w.id) return { kind: 'ad', why: 'a different video is playing' };
 
   const known = stKnownDur(w);
   if (d > 0) {
@@ -1733,9 +1762,11 @@ function stBadge() {
   // is, and with both hidden a working advert-hold and a broken one look exactly
   // the same from a chair. If this line disagrees with what is on screen, the
   // line is the evidence and the guess is what needs changing.
+  const playing = stVideoId();
   const nums = (w && stPlayer && stReady)
     ? ' · now ' + Math.round(stDur()) + 's, lesson ' +
-      (stKnownDur(w) ? stKnownDur(w) + 's' : 'not learnt yet')
+      (stKnownDur(w) ? stKnownDur(w) + 's' : 'not learnt yet') +
+      (playing && playing !== w.id ? ' · playing ' + playing : '')
     : '';
   const wantBtn = ms.kind === 'ad' && !!ms.unsure;
   if (el.getAttribute('data-txt') === txt + nums + (wantBtn ? '+b' : '')) return;
@@ -2164,6 +2195,9 @@ async function cueClip(i) {
 
 function playElapsed() {
   if (!S.play) return 0;
+  // Paused is paused whatever the take is made of — a video, a camera file, or
+  // nothing but a clock. One held number rather than three ways to stand still.
+  if (S.play.paused) return S.play.heldAt || 0;
   const r = S.play.reel[S.play.at];
 
   // A clip that followed a YouTube video is replayed against that video, on the
@@ -2212,6 +2246,26 @@ function playTick() {
   }, 250);
 }
 
+// Stop threw the replay away; there was no way to simply stand still in it.
+function togglePlayPause() {
+  if (!S.play) return;
+  const r = S.play.reel[S.play.at];
+  const v = document.getElementById('reel');
+  if (S.play.paused) {
+    const t = S.play.heldAt || 0;
+    S.play.paused = false;
+    S.play.startedMs = Date.now() - t * 1000;   // rebase the fallback clock
+    if (r && ytId(r.ref)) { try { if (stPlayer) stPlayer.playVideo(); } catch (e) {} }
+    if (v) v.play().catch(() => {});
+  } else {
+    S.play.heldAt = playElapsed();
+    S.play.paused = true;
+    if (r && ytId(r.ref)) { try { if (stPlayer) stPlayer.pauseVideo(); } catch (e) {} }
+    if (v) v.pause();
+  }
+  render();
+}
+
 function stopPlay() {
   S.play = null;
   stopTick();
@@ -2223,6 +2277,7 @@ function stopPlay() {
 function deck() {
   if (S.play) {
     return '<div class="deck">' +
+      '<button class="btn" id="playpause">' + (S.play.paused ? 'Play' : 'Pause') + '</button>' +
       '<button class="btn" id="stopplay">Stop</button>' +
       '<span class="clock" id="clk">0:00</span>' +
       '<div class="track" id="track" style="cursor:pointer;height:9px" title="Drag to move through the take">' +
@@ -2315,6 +2370,7 @@ function wireRecord() {
   if ($('unarm')) $('unarm').onclick = () => { S.arming = null; render(); };
   if ($('stop')) $('stop').onclick = stopTake;
   if ($('stopplay')) $('stopplay').onclick = stopPlay;
+  if ($('playpause')) $('playpause').onclick = togglePlayPause;
   if ($('mark')) $('mark').onclick = () => { act('marked', S.lookSlot); render(); };
   root.querySelectorAll('[data-resume]').forEach(el =>
     el.onclick = () => armResume(el.getAttribute('data-resume')));
@@ -2347,6 +2403,7 @@ function wireRecord() {
 async function seekTo(sec) {
   if (!S.play) return;
   const t = Math.max(0, Math.min(sec, S.play.total));
+  if (S.play.paused) S.play.heldAt = t;
 
   S.handed = {};
   S.live = {};
