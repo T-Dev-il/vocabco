@@ -1744,6 +1744,13 @@ function openSlotMenu(slotId, x, y) {
     }
   });
 
+  // The menu shuts on a pointerdown anywhere. A pointerdown ON THE MENU is
+  // anywhere too, so it was removing the button from the page in the gap
+  // between pressing it and the click landing — and a click on an element that
+  // is no longer there never happens. Edit and Remove did nothing, silently,
+  // and there was no error to find because nothing had gone wrong.
+  m.onpointerdown = e => e.stopPropagation();
+
   setTimeout(() => {
     document.addEventListener('pointerdown', shutSlotMenu, { once: true });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') shutSlotMenu(); }, { once: true });
@@ -1891,13 +1898,18 @@ async function placeStep(id, targetId, where) {
   // the database is going to tell us, so there is nothing to wait for before
   // showing it. The write follows; a failure re-reads and puts it back.
   moved.register = 'stage'; moved.parent_slot_id = null;
-  flat.forEach((sl, n) => { sl.position = n + 1; });
+  const jobs = planNumbers(flat);
+  // The spine is drawn by walking S.slots in ARRAY order, not by reading each
+  // slot's position — so setting the positions changed what would be saved and
+  // nothing at all about what was on screen. Reordering redrew identically
+  // whatever you dropped where. Sorting the array is what actually moves it.
+  S.slots.sort((a, b) => (a.position || 0) - (b.position || 0));
   S.lookSlot = id;
   render();
 
   const { error } = await S.sb.from('slots')
     .update({ register: 'stage', parent_slot_id: null }).eq('id', id);
-  await renumber(flat);
+  await pushNumbers(jobs);
   if (error) { S.error = error.message; await openLesson(S.lesson.id); }
   await loadContent(id);
   render();
@@ -1933,13 +1945,18 @@ async function handOutUnder(id, targetId) {
   order.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
 
   moved.register = 'handout'; moved.parent_slot_id = parent.slot.id;
-  flat.forEach((sl, n) => { sl.position = n + 1; });
+  const jobs = planNumbers(flat);
+  // The spine is drawn by walking S.slots in ARRAY order, not by reading each
+  // slot's position — so setting the positions changed what would be saved and
+  // nothing at all about what was on screen. Reordering redrew identically
+  // whatever you dropped where. Sorting the array is what actually moves it.
+  S.slots.sort((a, b) => (a.position || 0) - (b.position || 0));
   S.lookSlot = id;
   render();
 
   const { error } = await S.sb.from('slots')
     .update({ register: 'handout', parent_slot_id: parent.slot.id }).eq('id', id);
-  await renumber(flat);
+  await pushNumbers(jobs);
   if (error) { S.error = error.message; await openLesson(S.lesson.id); }
   await loadContent(id);
   render();
@@ -1949,7 +1966,7 @@ function saveCorner() {
   try { localStorage.setItem('studioCornerShut', S.cornerShut ? '1' : '0'); } catch (e) {}
 }
 
-const BUILD = 'studio 17';
+const BUILD = 'studio 18';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -3292,16 +3309,33 @@ function handOutList() {
 // before anything happened on screen, which is the two to three seconds the
 // drag felt like. They do not depend on each other, so they go together and the
 // wait is one trip instead of twelve.
-async function renumber(ordered) {
+// Split in two because putting them together broke it. The drop handlers wanted
+// to show the new order before waiting for the database, so they set the
+// positions themselves and THEN called this — which compares each slot's
+// position against where it now sits, found them already equal, and sent
+// nothing. Every reorder redrew correctly and saved absolutely nothing.
+//
+// So: plan first, which decides the moves and applies them in memory; push
+// second, which is the part worth not waiting for. Handouts kept working
+// throughout because their real change is a register write, not a position.
+function planNumbers(ordered) {
   const jobs = [];
-  for (let i = 0; i < ordered.length; i++) {
-    if (ordered[i].position !== i + 1) {
-      ordered[i].position = i + 1;          // locally true straight away
-      jobs.push(S.sb.from('slots').update({ position: i + 1 }).eq('id', ordered[i].id));
+  ordered.forEach((sl, i) => {
+    if (sl.position !== i + 1) {
+      jobs.push({ id: sl.id, position: i + 1 });
+      sl.position = i + 1;
     }
-  }
-  await Promise.all(jobs);
+  });
+  return jobs;
 }
+
+async function pushNumbers(jobs) {
+  // Independent of each other, so one wait rather than one per slot.
+  await Promise.all(jobs.map(j =>
+    S.sb.from('slots').update({ position: j.position }).eq('id', j.id)));
+}
+
+async function renumber(ordered) { await pushNumbers(planNumbers(ordered)); }
 
 // A step travels with its handouts. Moving one without them would be a move
 // that silently rearranges someone else's lesson.
