@@ -459,6 +459,7 @@ function loadScript(src) {
   // the DEV badge, from config.js — forgetting which database you are in is
   // exactly the failure it exists to prevent
   vocabEnvBanner(S.env, () => {});
+  tameEnvBadge();
 
   const { data: { session } } = await S.sb.auth.getSession();
   if (!session) {
@@ -1090,7 +1091,7 @@ function previewStage() {
 
   return '<div class="stage"><div class="look">' + bar + '</div>' +
     '<div class="paper"><div class="learner">' + body + '</div></div>' + foot +
-    carvePanel() + '</div>';
+    carvePanel() + attachPanel() + '</div>';
 }
 
 
@@ -1314,7 +1315,7 @@ function stage() {
     '<div class="paper"><div class="learner">' + paper(looking) + '</div></div>' +
     editBar() +
     ruleBar() +
-    rack() + carvePanel() +
+    rack() + carvePanel() + attachPanel() +
   '</div>';
 }
 
@@ -1392,23 +1393,18 @@ function clock(sec) {
   sec = Math.max(0, Math.floor(sec));
   return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
 }
-// The video is the clock when the take follows one. An action recorded at 4:12
-// is four minutes twelve into the VIDEO, so the walk and the video cannot come
-// apart. Without a video this is the stopwatch it has always been, and a take
-// with no media records exactly as it did before.
+// RECORDING IS A STOPWATCH, AND ONLY A STOPWATCH.
 //
-// An advert, a stall, or a player still loading must NOT move the clock. Holding
-// the last good reading is the whole point: it is what stops a break for an
-// advert being recorded as the teacher jumping back to the start of the lesson.
+// It was briefly the video's clock, which was the wrong model: when a teacher
+// records a take, the video of that lesson does not exist yet — they are
+// teaching it. The platform stores no video of its own and is not going to.
+// The video arrives afterwards, from wherever it was actually made, and is
+// linked to a timeline that already exists. See attachPanel().
+//
+// The video-as-clock rule still applies, but on the PLAYBACK side, where the
+// video does exist. That is in playElapsed().
 function takeSeconds() {
   if (!S.take) return 0;
-  const m = S.take.media || {};
-  if (ytId(m.ref)) {
-    const ms = stMediaState();
-    if (ms.kind === 'ad' || ms.kind === 'loading' || ms.kind === 'buffering') return stLastGood;
-    stLastGood = S.take.base + Math.max(0, stTime() - (m.in_s || 0));
-    return stLastGood;
-  }
   return S.take.base + (Date.now() - S.take.startedMs) / 1000;
 }
 
@@ -1417,15 +1413,7 @@ function takeSeconds() {
 // which would now erase the address, the in point and the learned length every
 // time an action fired. A partial write is how the clock loses its video.
 function takeMedia(extra) {
-  const m = (S.take && S.take.media) || {};
-  let sec = clipSeconds();
-  // With a stopwatch, seconds only ever goes up. With a video it is wherever the
-  // video is, and a teacher who scrubs back to re-explain something would
-  // otherwise SHRINK the take — and the next clip would then resume from the
-  // wrong place, because base is the sum of these. So keep the furthest point
-  // reached, which is what "how much of this take exists" has always meant.
-  if (ytId(m.ref)) { S.take.maxSec = Math.max(S.take.maxSec || 0, sec); sec = S.take.maxSec; }
-  return { ...m, seconds: sec, ...(extra || {}) };
+  return { ...((S.take && S.take.media) || {}), seconds: clipSeconds(), ...(extra || {}) };
 }
 
 // Clip duration lives in clips.media as { seconds }. 003 leaves media's shape
@@ -1436,7 +1424,7 @@ function clipSeconds() { return Math.round(takeSeconds() - S.take.base); }
 // began the instant you reached for it would have you in it before you were
 // ready, and a take is the thing you keep.
 function armNew() {
-  S.arming = { recId: null, name: 'Take ' + (S.takes.length + 1), base: 0, ref: '' };
+  S.arming = { recId: null, name: 'Take ' + (S.takes.length + 1), base: 0 };
   S.mode = 'record';
   render();
 }
@@ -1448,10 +1436,7 @@ async function armResume(recId) {
   const { data: clips } = await S.sb.from('clips')
     .select('media').eq('recording_id', recId).is('deleted_at', null);
   const base = (clips || []).reduce((n, c) => n + ((c.media && c.media.seconds) || 0), 0);
-  // Carrying the video across too. Resuming a take that followed a video and
-  // then following nothing would put the second half on a different clock.
-  const prev = (clips || []).map(c => (c.media || {}).ref).filter(Boolean).pop() || '';
-  S.arming = { recId, name: rec.name, base, ref: prev };
+  S.arming = { recId, name: rec.name, base };
   S.mode = 'record';
   render();
 }
@@ -1459,15 +1444,6 @@ async function armResume(recId) {
 async function startArmed() {
   if (!S.arming) return;
   const a = S.arming;
-  // Read from the box at the moment Start is pressed. Nothing re-renders while
-  // arming, but reading it here means nothing has to be true about that.
-  const box = document.getElementById('takeref');
-  if (box) a.ref = box.value.trim();
-  if (a.ref && !ytId(a.ref)) {
-    S.error = 'That is not a YouTube address. Only YouTube plays here today — ' +
-              'clear the box to record with a stopwatch instead.';
-    return render();
-  }
   let recId = a.recId;
   if (!recId) {
     const { data: rec, error } = await S.sb.from('recordings')
@@ -1478,19 +1454,19 @@ async function startArmed() {
   S.arming = null;
   S.mediaNote = null;
   await startCapture();
-  await openClip(recId, a.name, a.base, a.ref);
+  await openClip(recId, a.name, a.base);
 }
 
-async function openClip(recId, name, base, ref) {
+async function openClip(recId, name, base) {
   const { data: clips } = await S.sb.from('clips')
     .select('position').eq('recording_id', recId).is('deleted_at', null);
   const pos = (clips || []).reduce((m, c) => Math.max(m, c.position || 0), 0) + 1;
 
-  // media's shape is left open by 003. { seconds } was the first thing in it;
-  // ref and in_s are the next, and they are the same two keys surface.html
-  // already reads, so a take recorded here can be replayed there.
+  // media's shape is left open by 003. { seconds } is what recording writes.
+  // ref and in_s arrive later, from the panel that links a video to a take that
+  // already exists — see attachPanel(). Nothing is asked for up front, because
+  // when a take is recorded the video of that lesson does not exist yet.
   const media = { seconds: 0 };
-  if (ytId(ref)) { media.ref = String(ref).trim(); media.in_s = 0; }
 
   const { data: clip, error } = await S.sb.from('clips')
     .insert({ recording_id: recId, position: pos, media, actions: [] })
@@ -1529,8 +1505,6 @@ async function stopTake() {
     .update({ actions: S.take.actions, media: takeMedia({ seconds, ...(file || {}) }) })
     .eq('id', clipId);
   S.take = null;
-  // The video belonged to the take. Stopping the take stops it.
-  stKill();
   try { localStorage.removeItem(OPEN_TAKE); } catch (e) {}
   clearLive();
   stopTick();
@@ -1565,7 +1539,55 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 9';
+const BUILD = 'studio 10';
+
+// The DEV DATABASE badge sits bottom-left over the deck, which is where the
+// take controls are, and it was covering them. It belongs to config.js, which
+// is shared with the extension and the website and installs in two places, so
+// it is left alone and tamed here instead: smaller, and draggable to wherever
+// it is not in the way. Where it was put is remembered.
+function tameEnvBadge() {
+  const b = document.getElementById('vocab-env-badge');
+  if (!b || b.dataset.tamed) return;
+  b.dataset.tamed = '1';
+  b.textContent = 'DEV';
+  b.style.padding = '3px 6px';
+  b.style.fontSize = '9px';
+  b.style.opacity = '0.75';
+
+  try {
+    const at = JSON.parse(localStorage.getItem('studioEnvBadgeAt') || 'null');
+    if (at) { b.style.left = at.x + 'px'; b.style.top = at.y + 'px'; b.style.bottom = 'auto'; }
+  } catch (e) {}
+
+  let down = null, moved = false;
+  b.addEventListener('pointerdown', e => {
+    const r = b.getBoundingClientRect();
+    down = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    moved = false;
+    b.setPointerCapture(e.pointerId);
+  });
+  b.addEventListener('pointermove', e => {
+    if (!down) return;
+    if (Math.abs(e.movementX) + Math.abs(e.movementY) > 0) moved = true;
+    const x = Math.max(0, Math.min(innerWidth - 40, e.clientX - down.dx));
+    const y = Math.max(0, Math.min(innerHeight - 20, e.clientY - down.dy));
+    b.style.left = x + 'px'; b.style.top = y + 'px'; b.style.bottom = 'auto';
+  });
+  b.addEventListener('pointerup', e => {
+    if (!down) return;
+    down = null;
+    if (moved) {
+      try {
+        localStorage.setItem('studioEnvBadgeAt',
+          JSON.stringify({ x: parseFloat(b.style.left), y: parseFloat(b.style.top) }));
+      } catch (err) {}
+    }
+  });
+  // A drag must not also count as a click, or moving it out of the way would
+  // open the database picker every time.
+  b.addEventListener('click', e => { if (moved) { e.stopPropagation(); e.preventDefault(); } }, true);
+}
 
 // ───────────────────────────────────────────────────────────────────────────
 // The lesson video, and the clock that reads from it
@@ -1674,7 +1696,6 @@ function stMediaState() {
 // not settled. Guessing at that now would be a meaning to live with later.
 const stSessionDur = {};
 function stKnownDur(w) {
-  if (w.owner === 'take') return (S.take.media || {}).dur || 0;
   if (w.owner === 'play') { const r = S.play.reel[S.play.at]; return (r && r.dur) || 0; }
   return stSessionDur[w.id] || 0;
 }
@@ -1683,13 +1704,13 @@ let _durSaving = false;
 async function rememberDuration(w, d) {
   const dur = Math.round(d);
   if (w.owner === 'activity') { stSessionDur[w.id] = dur; return; }
-  if (w.owner === 'play') { const r = S.play.reel[S.play.at]; if (r) r.dur = dur; return; }
-  if (_durSaving || !S.take || (S.take.media || {}).dur) return;
+  const r = S.play && S.play.reel[S.play.at];
+  if (!r) return;
+  if (r.dur || _durSaving || !r.clipId) { r.dur = r.dur || dur; return; }
   _durSaving = true;
-  S.take.media = { ...(S.take.media || {}), dur };
-  // Not a trim and not a fork: this records what the video is, not what the
-  // teacher chose. Written once per clip, the first time the real length shows.
-  await S.sb.from('clips').update({ media: takeMedia() }).eq('id', S.take.clipId);
+  r.dur = dur;
+  // Written once per clip, the first time the video's real length shows itself.
+  await S.sb.from('clips').update({ media: { ...(r.media || {}), dur } }).eq('id', r.clipId);
   _durSaving = false;
 }
 
@@ -1788,8 +1809,7 @@ function stHide() {
 
 // Who the player belongs to at this instant, in priority order.
 function stWanted() {
-  if (S.take && ytId((S.take.media || {}).ref))
-    return { id: ytId(S.take.media.ref), owner: 'take', in_s: (S.take.media.in_s || 0) };
+  // Recording owns no player: there is nothing to play yet. Playback does.
   if (S.play) {
     const r = S.play.reel[S.play.at];
     if (r && ytId(r.ref)) return { id: ytId(r.ref), owner: 'play', in_s: r.in_s || 0 };
@@ -2077,7 +2097,7 @@ async function clipUrl(path) {
 async function playTake(recId) {
   const rec = S.takes.find(t => t.id === recId);
   const { data: clips } = await S.sb.from('clips')
-    .select('position,media,actions').eq('recording_id', recId)
+    .select('id,position,media,actions').eq('recording_id', recId)
     .is('deleted_at', null).order('position', { ascending: true });
 
   let base = 0;
@@ -2087,7 +2107,7 @@ async function playTake(recId) {
     (c.actions || []).forEach(a => seq.push({ ...a, at: base + (a.t || 0) }));
     const sec = (c.media && c.media.seconds) || 0;
     const md = c.media || {};
-    reel.push({ offset: base, seconds: sec, path: md.path,
+    reel.push({ offset: base, seconds: sec, path: md.path, clipId: c.id, media: md,
                 ref: md.ref, in_s: md.in_s || 0, dur: md.dur || 0 });
     base += sec;
   });
@@ -2232,17 +2252,7 @@ function takePanel() {
   if (S.arming) {
     return '<div class="lbl">Ready</div>' +
       '<div class="none">' + esc(S.arming.name) + ' is set up. Press Start on the deck below ' +
-      'when you are ready.</div>' +
-      // Asked here rather than after Start, because the clock has to know what it
-      // is reading from before the first action lands on it.
-      '<div style="padding:0 10px 8px">' +
-        '<div class="field"><label>Video this take follows (optional)</label>' +
-          '<input id="takeref" class="inp" type="text" placeholder="Paste a YouTube address" value="' +
-            esc(S.arming.ref || '') + '"></div>' +
-        '<div class="none" style="padding:0">Leave it empty and the take is timed by a ' +
-        'stopwatch, as before. Put a video in and the video becomes the clock, so ' +
-        'pausing it pauses the take.</div>' +
-      '</div>';
+      'when you are ready.</div>';
   }
   if (S.take) {
     const acts = S.take.actions.slice(-8).reverse();
@@ -2264,6 +2274,7 @@ function takePanel() {
         '<button class="btn" style="flex:1" data-playtake="' + esc(t.id) + '">Play</button>' +
         '<button class="btn" style="flex:1" data-resume="' + esc(t.id) + '">Carry on</button>' +
         '<button class="btn" style="flex:1" data-carve="' + esc(t.id) + '">Carve</button>' +
+        '<button class="btn" style="flex:1" data-vid="' + esc(t.id) + '">Video</button>' +
         '<button class="btn" data-rmtake="' + esc(t.id) + '"' +
           (S.confirmTake === t.id ? ' style="background:#6b2e2e;border-color:#8a3d3d"' : '') +
           '>' + (S.confirmTake === t.id ? 'Sure?' : '\u00d7') + '</button>' +
@@ -2295,12 +2306,15 @@ function wireRecord() {
     el.onclick = () => playTake(el.getAttribute('data-playtake')));
   root.querySelectorAll('[data-carve]').forEach(el =>
     el.onclick = () => openCarve(el.getAttribute('data-carve')));
+  root.querySelectorAll('[data-vid]').forEach(el =>
+    el.onclick = () => openAttach(el.getAttribute('data-vid')));
   root.querySelectorAll('[data-rmtake]').forEach(el => el.onclick = () => {
     const id = el.getAttribute('data-rmtake');
     if (S.confirmTake === id) removeTake(id);
     else { S.confirmTake = id; render(); }
   });
   wireCarve();
+  wireAttach();
   wireScrub();
 }
 
@@ -2410,7 +2424,7 @@ async function removeTake(recId) {
 async function openCarve(recId) {
   const rec = S.takes.find(t => t.id === recId);
   const { data: clips } = await S.sb.from('clips')
-    .select('position,media,actions').eq('recording_id', recId)
+    .select('id,position,media,actions').eq('recording_id', recId)
     .is('deleted_at', null).order('position', { ascending: true });
 
   let base = 0;
@@ -2451,6 +2465,108 @@ async function doCarve() {
   S.carve = null; S.carveErr = null;
   await loadTakes(S.lesson.id);
   render();
+}
+
+// ── Linking a video to a take that already exists ─────────────────────────
+//
+// The model, which took a wrong turn first and is written down so it does not
+// take it again: THE PLATFORM STORES NO LESSON VIDEO AND IS NOT GOING TO. The
+// teacher teaches, and the studio records what they DID — the stage moving,
+// handouts landing — on a stopwatch. The video of that lesson is made somewhere
+// else entirely: YouTube, Zoom, a phone on a shelf. It arrives afterwards.
+//
+// So the only question this panel asks is the one that actually needs
+// answering: WHERE IN THE VIDEO does this take begin? Everything else follows.
+// An action recorded at 4:12 of the take is at (start + 4:12) of the video.
+//
+// It is asked per clip, not per take, because a take that was left and carried
+// on is several stretches and they may sit at different places in the video —
+// or in different videos. A take with one clip, which is most of them, asks the
+// question once.
+async function openAttach(recId) {
+  const rec = S.takes.find(t => t.id === recId);
+  const { data: clips, error } = await S.sb.from('clips')
+    .select('id,position,media').eq('recording_id', recId)
+    .is('deleted_at', null).order('position', { ascending: true });
+  if (error) { S.error = error.message; return render(); }
+  S.attach = { recId, name: rec ? rec.name : 'Take', clips: clips || [], err: null };
+  render();
+}
+
+function attachPanel() {
+  const v = S.attach;
+  if (!v) return '';
+
+  let base = 0;
+  const rows = v.clips.map((c, i) => {
+    const m = c.media || {};
+    const from = base;
+    base += m.seconds || 0;
+    return '<div class="field" style="border-top:1px solid var(--line);padding-top:12px">' +
+      '<label>' + (v.clips.length > 1
+        ? 'Stretch ' + (i + 1) + ' \u2014 ' + clock(from) + ' to ' + clock(base) + ' of the take'
+        : 'The video of this lesson') + '</label>' +
+      '<input class="inp" data-vref="' + esc(c.id) + '" placeholder="Paste a YouTube address" ' +
+        'value="' + esc(m.ref || '') + '" style="margin-bottom:6px">' +
+      '<label>Where this ' + (v.clips.length > 1 ? 'stretch' : 'take') +
+        ' begins in that video</label>' +
+      '<input class="inp" data-vin="' + esc(c.id) + '" value="' + clock(m.in_s || 0) + '" ' +
+        'style="width:110px">' +
+    '</div>';
+  }).join('');
+
+  return '<div class="scrim"></div><div class="panel">' +
+    '<div class="phead"><span>The video behind ' + esc(v.name) + '</span>' +
+    '<div style="flex:1"></div><button class="btn light" id="vcancel">Cancel</button></div>' +
+    '<div class="pbody"><div class="form">' +
+      (v.err ? '<p class="err">' + esc(v.err) + '</p>' : '') +
+      '<p class="why">This take is a recording of what you <b>did</b>, timed from zero. ' +
+      'The video of the lesson itself lives wherever you put it \u2014 nothing is stored here. ' +
+      'Point at it, say where in it this take starts, and playing the take will follow it: ' +
+      'an advert or a stall holds the replay rather than running on without you.</p>' +
+      rows +
+      '<p class="why">Only YouTube today. Clearing the address unlinks the video and the ' +
+      'take goes back to replaying on its own clock.</p>' +
+    '</div></div>' +
+    '<div class="pfoot"><div style="flex:1"></div>' +
+      '<button class="btn light" id="vgo" style="background:var(--here);border-color:var(--here);' +
+      'color:#fff">Link it</button></div>' +
+  '</div>';
+}
+
+async function saveAttach() {
+  const v = S.attach;
+  if (!v) return;
+  const writes = [];
+  for (const c of v.clips) {
+    const refEl = document.querySelector('[data-vref="' + c.id + '"]');
+    const inEl  = document.querySelector('[data-vin="' + c.id + '"]');
+    if (!refEl) continue;
+    const ref = refEl.value.trim();
+    if (ref && !ytId(ref)) {
+      v.err = 'That is not a YouTube address: ' + ref.slice(0, 60);
+      return render();
+    }
+    // A merge, never a replacement. seconds, path and the rest of media belong
+    // to the recording and must survive being pointed at a video.
+    const m = { ...(c.media || {}) };
+    if (ref) { m.ref = ref; m.in_s = readClock(inEl ? inEl.value : 0); }
+    else { delete m.ref; delete m.in_s; delete m.dur; }
+    writes.push({ id: c.id, media: m });
+  }
+  for (const w of writes) {
+    const { error } = await S.sb.from('clips').update({ media: w.media }).eq('id', w.id);
+    if (error) { v.err = error.message; return render(); }
+  }
+  S.attach = null;
+  await loadTakes(S.lesson.id);
+  render();
+}
+
+function wireAttach() {
+  const $ = id => document.getElementById(id);
+  if ($('vcancel')) $('vcancel').onclick = () => { S.attach = null; render(); };
+  if ($('vgo')) $('vgo').onclick = saveAttach;
 }
 
 function carvePanel() {
