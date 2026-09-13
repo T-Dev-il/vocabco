@@ -269,6 +269,30 @@
   .spine.trail .dropafter{box-shadow:inset 0 -3px 0 var(--here)}
   .spine.trail .dropinto{outline:2px dashed var(--here); outline-offset:-2px}
   .spine.trail [data-slot]{cursor:grab}
+  .takelist{margin:0 10px 7px; border:1px solid #3E444B; border-radius:5px; overflow:hidden}
+  .takerow{display:flex; gap:7px; align-items:center; width:100%; text-align:left;
+           border:0; border-bottom:1px solid #3E444B; background:#31363C;
+           color:#C6CCD2; font:11.5px/1.5 inherit; padding:6px 8px; cursor:pointer}
+  .takerow:last-child{border-bottom:0}
+  .takerow:hover{background:#3A4046}
+  .takerow.on{background:var(--here); color:#fff}
+  .takerow .t{opacity:.7; min-width:14px}
+  .takebar{display:flex; gap:5px; padding:0 10px}
+  .takebar .btn{flex:1; padding:4px 2px; font-size:11px}
+  .takebar .btn:last-child{flex:0 0 26px}
+  .takebar .btn:disabled{opacity:.4; cursor:default}
+  .slotmenu{position:fixed; z-index:60; min-width:150px; background:#fff;
+            border:1px solid var(--line); border-radius:6px; padding:4px;
+            box-shadow:0 6px 22px rgba(20,22,18,.22)}
+  .slotmenu .mh{font-size:11px; color:var(--dim); padding:5px 8px 6px;
+                border-bottom:1px solid var(--line); margin-bottom:4px;
+                overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .slotmenu button{display:block; width:100%; text-align:left; border:0;
+                   background:transparent; font:13px/1.5 inherit; color:var(--ink);
+                   padding:6px 8px; border-radius:4px; cursor:pointer}
+  .slotmenu button:hover:not(:disabled){background:var(--rail)}
+  .slotmenu button:disabled{color:var(--dim); cursor:default}
+  .slotmenu button.danger{color:#8a3d3d}
   .autohead{display:flex; justify-content:flex-end; padding:7px 7px 0}
   .auto.shut{flex:0 0 30px; align-items:center; padding-top:7px}
   .auto.shut .btn{padding:3px 5px}
@@ -983,7 +1007,11 @@ function stepRow(r) {
   const num = r.attached ? '' : '<span class="n">' + r.number + '</span>';
   const cond = r.attached ? '<span class="kind">' + conditionLine(s) + '</span>'
                           : '<span class="kind">' + esc(m.kind) + '</span>';
-  return '<button class="' + cls.join(' ') + '" data-slot="' + esc(s.id) + '">' +
+  // Set here rather than by hand after rendering: a row that is re-rendered
+  // mid-gesture used to come back without it, which is the drag that sometimes
+  // did not react at all.
+  const drag = S.mode === 'joined' ? ' draggable="true"' : '';
+  return '<button class="' + cls.join(' ') + '"' + drag + ' data-slot="' + esc(s.id) + '">' +
     num + '<span class="nm">' + esc(m.name) + '</span>' + cond + '</button>';
 }
 
@@ -1651,6 +1679,59 @@ function placeWalker() {
 // Marks are written straight onto the elements, never through render(). This
 // window rebuilds itself completely on every render and a drag cannot survive
 // having the thing under the pointer replaced.
+// ── The slot menu ─────────────────────────────────────────────────────────
+//
+// On <body>, not in the spine: this window rebuilds itself completely on every
+// render, and a menu inside the thing it is a menu for would be swept away by
+// the first thing it did.
+function shutSlotMenu() {
+  const m = document.getElementById('slotmenu');
+  if (m) m.remove();
+}
+
+function openSlotMenu(slotId, x, y) {
+  shutSlotMenu();
+  const slot = S.slots.find(s => s.id === slotId);
+  if (!slot) return;
+  const a = S.acts[slot.activity_id] || {};
+  const known = !!KINDS[a.kind];
+
+  const m = document.createElement('div');
+  m.id = 'slotmenu';
+  m.className = 'slotmenu';
+  m.innerHTML =
+    '<div class="mh">' + esc(memberOf(slot).name || 'This slot') + '</div>' +
+    '<button data-act="edit"' + (known ? '' : ' disabled title="The rack did not make this one"') +
+      '>Edit</button>' +
+    '<button data-act="rm" class="danger">Remove</button>';
+  document.body.appendChild(m);
+
+  // Kept on screen: a menu opened near the bottom edge that runs off it is a
+  // menu with items nobody can reach.
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, innerWidth - r.width - 6) + 'px';
+  m.style.top  = Math.min(y, innerHeight - r.height - 6) + 'px';
+
+  m.querySelectorAll('button').forEach(b => b.onclick = async () => {
+    const what = b.getAttribute('data-act');
+    shutSlotMenu();
+    if (what === 'edit') {
+      S.lookSlot = slotId;
+      await loadContent(slotId);
+      const act = S.acts[slot.activity_id] || {};
+      S.rack = { kind: act.kind, content: S.content || KINDS[act.kind].blank(), editing: slotId };
+      render();
+    } else if (what === 'rm') {
+      await removeSlot(slotId);
+    }
+  });
+
+  setTimeout(() => {
+    document.addEventListener('pointerdown', shutSlotMenu, { once: true });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') shutSlotMenu(); }, { once: true });
+  }, 0);
+}
+
 function clearDropMarks() {
   document.querySelectorAll('.dropbefore,.dropafter,.dropinto,.dragging')
     .forEach(el => el.classList.remove('dropbefore', 'dropafter', 'dropinto', 'dragging'));
@@ -1662,15 +1743,24 @@ function wireJoined() {
 
   let dragId = null, dropAt = null, how = null;
 
-  sp.querySelectorAll('[data-slot]').forEach(el => {
-    el.setAttribute('draggable', 'true');
+  let marked = null;
+  const unmark = () => {
+    if (marked) marked.classList.remove('dropbefore', 'dropafter', 'dropinto');
+    marked = null;
+  };
 
+  sp.querySelectorAll('[data-slot]').forEach(el => {
     el.ondragstart = e => {
       dragId = el.getAttribute('data-slot');
       el.classList.add('dragging');
       try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragId); } catch (x) {}
     };
-    el.ondragend = () => { clearDropMarks(); dragId = null; };
+    el.ondragend = () => { clearDropMarks(); unmark(); dragId = null; };
+
+    el.oncontextmenu = e => {
+      e.preventDefault();
+      openSlotMenu(el.getAttribute('data-slot'), e.clientX, e.clientY);
+    };
 
     el.ondragover = e => {
       const id = el.getAttribute('data-slot');
@@ -1678,11 +1768,11 @@ function wireJoined() {
       e.preventDefault();
       const r = el.getBoundingClientRect();
       const p = (e.clientY - r.top) / (r.height || 1);
-      clearDropMarks();
-      document.querySelector('[data-slot="' + dragId + '"]').classList.add('dragging');
-      dropAt = id;
-      how = p < 0.3 ? 'before' : p > 0.7 ? 'after' : 'into';
-      el.classList.add(how === 'into' ? 'dropinto' : how === 'before' ? 'dropbefore' : 'dropafter');
+      const want = p < 0.3 ? 'before' : p > 0.7 ? 'after' : 'into';
+      if (marked === el && how === want) return;   // nothing changed, touch nothing
+      unmark();
+      marked = el; dropAt = id; how = want;
+      el.classList.add(want === 'into' ? 'dropinto' : want === 'before' ? 'dropbefore' : 'dropafter');
     };
 
     el.ondrop = async e => {
@@ -1730,10 +1820,15 @@ function wireJoined() {
     sp.querySelectorAll('.walkto').forEach(x => x.classList.remove('walkto'));
     if (!el) { placeWalker(); return; }
     const id = el.getAttribute('data-slot');
-    // Walking is your place moving, so it writes progress exactly as Next did.
+    if (id === S.hereSlot) { placeWalker(); return; }
+    // Walking is your place moving, so it writes progress exactly as Next did —
+    // and if a take is running it is recorded, exactly as Next was. A walk the
+    // take cannot see would replay as a lesson that never moved.
+    const back = stepAt(id).i < stepAt(S.hereSlot).i;
     await setProgress(id);
     S.lookSlot = id;
     await loadContent(id);
+    if (S.take) await act(back ? 'went back to' : 'moved to', id);
     render();
   };
 }
@@ -1762,10 +1857,18 @@ async function placeStep(id, targetId, where) {
   const flat = [];
   order.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
 
-  await S.sb.from('slots').update({ register: 'stage', parent_slot_id: null }).eq('id', id);
-  await renumber(flat);
-  await openLesson(S.lesson.id);
+  // On screen first. Every one of these values is one we are choosing, not one
+  // the database is going to tell us, so there is nothing to wait for before
+  // showing it. The write follows; a failure re-reads and puts it back.
+  moved.register = 'stage'; moved.parent_slot_id = null;
+  flat.forEach((sl, n) => { sl.position = n + 1; });
   S.lookSlot = id;
+  render();
+
+  const { error } = await S.sb.from('slots')
+    .update({ register: 'stage', parent_slot_id: null }).eq('id', id);
+  await renumber(flat);
+  if (error) { S.error = error.message; await openLesson(S.lesson.id); }
   await loadContent(id);
   render();
 }
@@ -1799,11 +1902,15 @@ async function handOutUnder(id, targetId) {
   const flat = [];
   order.forEach(r => { flat.push(r.slot); r.kids.forEach(k => flat.push(k)); });
 
-  await S.sb.from('slots')
+  moved.register = 'handout'; moved.parent_slot_id = parent.slot.id;
+  flat.forEach((sl, n) => { sl.position = n + 1; });
+  S.lookSlot = id;
+  render();
+
+  const { error } = await S.sb.from('slots')
     .update({ register: 'handout', parent_slot_id: parent.slot.id }).eq('id', id);
   await renumber(flat);
-  await openLesson(S.lesson.id);
-  S.lookSlot = id;
+  if (error) { S.error = error.message; await openLesson(S.lesson.id); }
   await loadContent(id);
   render();
 }
@@ -1812,7 +1919,7 @@ function saveCorner() {
   try { localStorage.setItem('studioCornerShut', S.cornerShut ? '1' : '0'); } catch (e) {}
 }
 
-const BUILD = 'studio 14';
+const BUILD = 'studio 15';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -2609,7 +2716,7 @@ function deck() {
 // to say so (§6). Inside one window the deck does that job; when the canvas is
 // its own window it will need its own strip.
 function takePanel() {
-  if (S.mode !== 'record') return '';
+  if (S.mode !== 'record' && S.mode !== 'joined') return '';
   if (S.play) {
     return '<div class="lbl">Playing back</div>' +
       '<div class="none">Following ' + esc(S.play.name) + '. Nothing here is being recorded.</div>';
@@ -2631,26 +2738,40 @@ function takePanel() {
   const left = S.leftOpen
     ? '<div class="none" style="color:#C6CCD2">A take was left open here. Carrying on appends to it.</div>'
     : '';
-  const resumable = S.takes.map(t =>
-    '<div style="padding:0 10px 7px">' +
-      '<div class="act" style="padding:0 0 4px"><span class="t">' + t.clips + '</span><b>' +
-        esc(t.name) + '</b></div>' +
-      '<div style="display:flex;gap:5px">' +
-        '<button class="btn" style="flex:1" data-playtake="' + esc(t.id) + '">Play</button>' +
-        '<button class="btn" style="flex:1" data-resume="' + esc(t.id) + '">Carry on</button>' +
-        '<button class="btn" style="flex:1" data-carve="' + esc(t.id) + '">Carve</button>' +
-        '<button class="btn" style="flex:1" data-vid="' + esc(t.id) + '">Video</button>' +
-        '<button class="btn" data-rmtake="' + esc(t.id) + '"' +
-          (S.confirmTake === t.id ? ' style="background:#6b2e2e;border-color:#8a3d3d"' : '') +
-          '>' + (S.confirmTake === t.id ? 'Sure?' : '\u00d7') + '</button>' +
-      '</div>' +
-    '</div>').join('');
+  // FIVE BUTTONS PER TAKE BECAME FIVE BUTTONS. With four takes that panel was
+  // twenty controls, nineteen of which were wrong for whatever the teacher was
+  // about to do. The list is a list; the buttons sit once underneath and act on
+  // whichever take is picked. Nothing is chosen for you — with none picked the
+  // buttons are simply off, which is honest about needing to be told.
+  if (S.pickTake && !S.takes.some(t => t.id === S.pickTake)) S.pickTake = null;
+  const sel = S.takes.find(t => t.id === S.pickTake) || null;
 
-  return '<div class="lbl">Takes</div>' + left + resumable +
-    '<div style="padding:0 10px 7px"><button class="btn wide" id="starttake">Start a new take</button></div>' +
-    '<div class="none">Playing a take replays what you did — the stage moves and handouts arrive ' +
-    'at the times they originally did. There is no video yet, so there is nothing to watch, only ' +
-    'to follow.</div>';
+  const list = S.takes.length
+    ? S.takes.map(t =>
+        '<button class="takerow' + (t.id === S.pickTake ? ' on' : '') + '" data-pick="' +
+          esc(t.id) + '">' +
+          '<span class="t">' + t.clips + '</span><b>' + esc(t.name) + '</b>' +
+        '</button>').join('')
+    : '<div class="none">No takes yet.</div>';
+
+  const off = sel ? '' : ' disabled';
+  const bar = '<div class="takebar">' +
+      '<button class="btn" data-playtake="' + esc(S.pickTake || '') + '"' + off + '>Play</button>' +
+      '<button class="btn" data-resume="' + esc(S.pickTake || '') + '"' + off + '>Carry on</button>' +
+      '<button class="btn" data-carve="' + esc(S.pickTake || '') + '"' + off + '>Carve</button>' +
+      '<button class="btn" data-vid="' + esc(S.pickTake || '') + '"' + off + '>Video</button>' +
+      '<button class="btn" data-rmtake="' + esc(S.pickTake || '') + '"' + off +
+        (S.confirmTake && S.confirmTake === S.pickTake
+          ? ' style="background:#6b2e2e;border-color:#8a3d3d"' : '') + '>' +
+        (S.confirmTake && S.confirmTake === S.pickTake ? 'Sure?' : '\u00d7') + '</button>' +
+    '</div>';
+
+  return '<div class="lbl">Takes</div>' + left +
+    '<div class="takelist">' + list + '</div>' + bar +
+    '<div style="padding:7px 10px"><button class="btn wide" id="starttake">Start a new take</button></div>' +
+    '<div class="none">' + (sel ? esc(sel.name) + ' is picked.' : 'Pick a take to act on it.') +
+    ' Playing one replays what you did — the stage moves and handouts arrive at the times ' +
+    'they originally did.</div>';
 }
 
 function wireRecord() {
@@ -2675,6 +2796,12 @@ function wireRecord() {
     el.onclick = () => playTake(el.getAttribute('data-playtake')));
   root.querySelectorAll('[data-carve]').forEach(el =>
     el.onclick = () => openCarve(el.getAttribute('data-carve')));
+  root.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
+    const id = el.getAttribute('data-pick');
+    S.pickTake = S.pickTake === id ? null : id;   // picking it again puts it down
+    S.confirmTake = null;
+    render();
+  });
   root.querySelectorAll('[data-vid]').forEach(el =>
     el.onclick = () => openAttach(el.getAttribute('data-vid')));
   root.querySelectorAll('[data-rmtake]').forEach(el => el.onclick = () => {
@@ -3062,12 +3189,20 @@ function handOutList() {
 // Positions are rewritten freely; slot ids never are. Everything that points at
 // a slot — attempts, conditions, recorded actions — points at the id, so this
 // renumbering changes where things sit and nothing about what anything means.
+// Was a loop of awaits: one round trip per slot that moved, one after the
+// other. Reordering a twelve-step lesson meant twelve trips to Berlin and back
+// before anything happened on screen, which is the two to three seconds the
+// drag felt like. They do not depend on each other, so they go together and the
+// wait is one trip instead of twelve.
 async function renumber(ordered) {
+  const jobs = [];
   for (let i = 0; i < ordered.length; i++) {
     if (ordered[i].position !== i + 1) {
-      await S.sb.from('slots').update({ position: i + 1 }).eq('id', ordered[i].id);
+      ordered[i].position = i + 1;          // locally true straight away
+      jobs.push(S.sb.from('slots').update({ position: i + 1 }).eq('id', ordered[i].id));
     }
   }
+  await Promise.all(jobs);
 }
 
 // A step travels with its handouts. Moving one without them would be a move
@@ -3165,6 +3300,10 @@ function ruleBar() {
   if (S.mode !== 'build' && S.mode !== 'joined') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return '';
+  // Who sees it and what holds them are things you decide WHILE writing the
+  // activity, not while walking past it. So in joined they appear with the
+  // editor and go away with it.
+  if (S.mode === 'joined' && !(S.rack && S.rack.editing === slot.id)) return '';
 
   const flat = flatWithKids();
   const me = flat.findIndex(x => x.id === slot.id);
@@ -3242,7 +3381,11 @@ async function setGate(slotId, v) {
 }
 
 function editBar() {
-  if (S.mode !== 'build' && S.mode !== 'joined') return '';
+  // In joined there is no bar of buttons under the slide at all. Edit and
+  // Remove are on the slot's own right-click menu, where they are one gesture
+  // away from the thing they act on instead of a row of words under it.
+  if (S.mode === 'joined') return '';
+  if (S.mode !== 'build') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return '';
   const a = S.acts[slot.activity_id] || {};
