@@ -812,6 +812,30 @@ function render() {
       '<p>You are on the <b>' + esc(vocabEnv(S.env).label) + '</b> database.</p>');
   }
 
+  // Walking it the way a learner would, with the spine and the corner out of
+  // the way. Everything under it is the SAME preview — same judging, same real
+  // attempts, same conditions and gates — only without the furniture of the
+  // person who built it.
+  //
+  // It is an approximation and says so on screen. The learner's real renderer
+  // is surface.html, which this project does not touch (§1), so this can show
+  // the shape of the walk and must never be mistaken for the finished article.
+  if (S.solo && S.mode === 'preview') {
+    root.innerHTML =
+      '<div class="top" style="justify-content:space-between">' +
+        '<span style="font-size:11.5px;color:var(--dim)">' +
+          'Roughly what a learner meets. Not the finished learner\u2019s app.</span>' +
+        '<button class="btn light" id="unsolo">Back to the studio</button>' +
+      '</div>' +
+      '<div class="body" style="justify-content:center;background:var(--rail)">' +
+        '<div style="flex:0 1 760px;display:flex;min-width:0">' + previewStage() + '</div>' +
+      '</div>';
+    wire();
+    const un = document.getElementById('unsolo');
+    if (un) un.onclick = () => { S.solo = false; render(); };
+    return;
+  }
+
   root.innerHTML =
     tabs() +
     '<div class="top">' + lessonPicker() + modes() + '</div>' +
@@ -1017,7 +1041,11 @@ function previewStage() {
   const bar = away
     ? '<span>Looking back. Your place has not moved.</span>' +
       '<button class="btn light" id="back">Go back to where you are</button>'
-    : '<span>Step ' + (i + 1) + ' of ' + rows.length + '.</span>';
+    : '<span>Step ' + (i + 1) + ' of ' + rows.length + '.</span>' +
+      (S.mode === 'preview' && !S.solo
+        ? '<div style="flex:1"></div><button class="btn light" id="solo">' +
+          'See it as a learner</button>'
+        : '');
 
   // the step itself, then anything handed out while you stay on it
   // A handout reveals itself at the moment it is given. Until then it is not on
@@ -1462,7 +1490,7 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 6';
+const BUILD = 'studio 7';
 
 // ───────────────────────────────────────────────────────────────────────────
 // The canvas has changed this lesson
@@ -2757,6 +2785,9 @@ function wire() {
     };
   });
 
+  const solo = document.getElementById('solo');
+  if (solo) solo.onclick = () => { S.solo = true; render(); };
+
   const back = document.getElementById('back');
   if (back) back.onclick = async () => {
     S.lookSlot = S.hereSlot;
@@ -2766,7 +2797,7 @@ function wire() {
   };
 
   root.querySelectorAll('[data-mode]').forEach(el => {
-    el.onclick = () => { S.mode = el.getAttribute('data-mode'); render(); };
+    el.onclick = () => { S.mode = el.getAttribute('data-mode'); S.solo = false; render(); };
   });
 
   const add = document.getElementById('add');

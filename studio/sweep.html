@@ -85,11 +85,11 @@
 <script>
 "use strict";
 
-const BUILD = 'sweep 2';
+const BUILD = 'sweep 3';
 const BUCKET = 'takes';
 
 const S = { sb: null, env: 'live', uid: null, found: null, keep: 0, busy: false,
-            err: null, done: null, log: [] };
+            err: null, done: null, at: null };
 
 const root = document.getElementById('root');
 const esc = s => String(s == null ? '' : s)
@@ -180,13 +180,17 @@ function draw() {
           '<button class="btn danger" id="go"' + (S.busy ? ' disabled' : '') + '>' +
             (S.busy ? 'Deleting\u2026' : 'Delete these ' + S.found.length) + '</button>' +
           '<button class="btn" id="again">Look again</button>' +
+          (S.at ? '<span style="font-size:12px;color:var(--dim)">Looked at ' +
+            esc(S.at) + '</span>' : '') +
           (S.done ? '<span>' + esc(S.done) + '</span>' : '') +
           (S.err ? '<span class="err">' + esc(S.err) + '</span>' : '') +
         '</div>'
       : '<p>Every video you have still belongs to a take. Nothing is going to waste. ' +
         '<span class="keep">' + S.keep + ' video' + (S.keep === 1 ? '' : 's') + ' checked.</span></p>' +
         (S.done ? '<p>' + esc(S.done) + '</p>' : '') +
-        '<div class="row"><button class="btn" id="again">Look again</button></div>'));
+        '<div class="row"><button class="btn" id="again">Look again</button>' +
+        (S.at ? '<span style="font-size:12px;color:var(--dim)">Looked at ' +
+          esc(S.at) + '</span>' : '') + '</div>'));
 
   wire();
 }
@@ -254,6 +258,9 @@ async function sweep() {
     S.found = S.found || null;
   }
   S.busy = false;
+  // Looking again and finding the same thing looks exactly like the button not
+  // working. The time it last looked is the evidence that it did.
+  S.at = new Date().toLocaleTimeString();
   draw();
 }
 
