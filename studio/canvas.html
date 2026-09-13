@@ -462,6 +462,7 @@ function loadScript(src) {
   // 006 decides whether a thing can be carried across as a handout at all.
   const p6 = await C.sb.from('slots').select('register,parent_slot_id').limit(1);
   C.has006 = !p6.error;
+  rec('booted', { env: C.env, has006: C.has006, user: session.user && session.user.id });
 
   shell();
   await loadBoards();
@@ -513,6 +514,7 @@ async function loadLessons() {
   const pick = (wanted && C.lessons.find(l => l.id === wanted)) || C.lessons[0];
   C.lessonId = pick ? pick.id : null;
   try { if (C.lessonId) localStorage.setItem('vocabLesson', C.lessonId); } catch (e) {}
+  rec('lessons read', { count: C.lessons.length, chosen: C.lessonId, name: pick && pick.name });
 }
 
 async function openBoard(id) {
@@ -553,6 +555,53 @@ async function loadUses() {
   });
   C.uses = {};
   Object.keys(seen).forEach(k => C.uses[k] = seen[k].size);
+}
+
+
+// ───────────────────────────────────────────────────────────────────────────
+// The record (debugging-method.md)
+//
+// Do not fix what you have not seen. Carrying across crosses two windows, a
+// jsonb column and row level security, and every one of those can fail
+// silently — an RLS refusal in particular comes back as success with nothing
+// inserted. So every attempt records what was TRUE at each step, including the
+// absences, and the whole record copies to the clipboard in one press.
+//
+// Kept in memory only. It is a record of this session, not a history.
+// ───────────────────────────────────────────────────────────────────────────
+const LOG = [];
+const T0 = Date.now();
+
+function rec(line, detail) {
+  const t = ((Date.now() - T0) / 1000).toFixed(2);
+  LOG.push('[' + t + '] ' + line + (detail === undefined ? '' :
+    ' ' + (typeof detail === 'string' ? detail : JSON.stringify(detail))));
+  if (LOG.length > 400) LOG.shift();
+}
+
+function showLog() {
+  const over = document.getElementById('over');
+  if (!over) return;
+  C.panel = 'log';
+  over.innerHTML =
+    '<div class="scrim" id="lgscrim"></div>' +
+    '<div class="panel">' +
+      '<div class="phead">What actually happened<div style="flex:1"></div>' +
+        '<button class="btn" id="lgcopy">Copy</button>' +
+        '<button class="btn" id="lgclose">Close</button></div>' +
+      '<div class="pbody"><pre style="font:11.5px/1.5 ui-monospace,Menlo,monospace;' +
+        'white-space:pre-wrap; word-break:break-word; margin:0">' +
+        esc(LOG.join('\n') || 'Nothing recorded yet.') + '</pre></div>' +
+      '<div class="pfoot">Press Copy and paste the whole thing back. Record what was ' +
+        'true, including the absences.</div>' +
+    '</div>';
+  document.getElementById('lgscrim').onclick = () => { C.panel = null; overlay(); };
+  document.getElementById('lgclose').onclick = () => { C.panel = null; overlay(); };
+  document.getElementById('lgcopy').onclick = async () => {
+    const btn = document.getElementById('lgcopy');
+    try { await navigator.clipboard.writeText(LOG.join('\n')); btn.textContent = 'Copied'; }
+    catch (e) { btn.textContent = 'Select it by hand'; }
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -767,7 +816,10 @@ function tray() {
      C.msg ? '<span>' + C.msg + '</span>' :
      '<span>' + cards + (cards === 1 ? ' card' : ' cards') + ' \u00b7 ' +
        notes + (notes === 1 ? ' note' : ' notes') +
-       ' \u00b7 nothing here is in a lesson until you carry it across</span>');
+       ' \u00b7 nothing here is in a lesson until you carry it across</span>') +
+    '<button class="btn" id="whathappened" style="margin-left:auto">What happened</button>';
+  const wh = document.getElementById('whathappened');
+  if (wh) wh.onclick = showLog;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1002,30 +1054,44 @@ async function remove(it) {
 // things without the studio having to accept a drop, which it cannot yet do.
 // ───────────────────────────────────────────────────────────────────────────
 async function carry(it, register) {
-  if (!it.activity_id) return;
+  // 'stage' or 'handout'. NOT 'step' — 006-register.sql says the two values
+  // written are stage and handout, and the studio writes exactly those. The
+  // column has no check constraint, so the wrong word inserted happily and
+  // only the meaning was wrong. Contractor 08, corrected the same day.
+  const reg = register === 'handout' ? 'handout' : 'stage';
+
+  rec('CARRY requested', { register: reg, activity: it.activity_id, lesson: C.lessonId,
+                           has006: C.has006, lessonName: lessonName() });
+
+  if (!it.activity_id) { rec('CARRY abandoned — the thing has no activity_id'); return; }
   if (!C.lessonId) {
     C.err = 'There is no lesson to carry it into. Make one in the studio first.';
+    rec('CARRY refused — no lesson is chosen');
     return tray();
   }
-  if (register === 'handout' && !C.has006) {
+  if (reg === 'handout' && !C.has006) {
     C.err = 'This database has no 006-register.sql, so a handout has nowhere to record that it is one.';
+    rec('CARRY refused — 006 is not applied here');
     return tray();
   }
 
   const { data: slots, error } = await C.sb.from('slots')
     .select('id,position,register,parent_slot_id').eq('sequence_id', C.lessonId)
     .is('deleted_at', null).order('position', { ascending: true });
-  if (error) { C.err = error.message; return tray(); }
+  if (error) {
+    C.err = error.message;
+    rec('CARRY failed reading the lesson', { message: error.message, code: error.code });
+    return tray();
+  }
+  rec('read the lesson', { slotsLive: (slots || []).length });
 
-  // A handout hangs under the last thing that is a step. A handout on a
-  // handout is not a shape the design has, and a handout under nothing at all
-  // is a step wearing the wrong name — so refuse rather than downgrade.
   let parent = null;
-  if (register === 'handout') {
+  if (reg === 'handout') {
     const steps = (slots || []).filter(s => (s.register || 'stage') !== 'handout' && !s.parent_slot_id);
     const last = steps[steps.length - 1];
     if (!last) {
       C.err = 'Nothing to hang it under yet \u2014 carry a step across first.';
+      rec('CARRY refused — nothing to hang a handout under', { steps: steps.length });
       return tray();
     }
     parent = last.id;
@@ -1033,17 +1099,39 @@ async function carry(it, register) {
 
   const pos = (slots || []).reduce((m, s) => Math.max(m, s.position || 0), 0) + 1;
   const row = { sequence_id: C.lessonId, activity_id: it.activity_id, position: pos };
-  if (C.has006) { row.register = register; row.parent_slot_id = parent; }
+  if (C.has006) { row.register = reg; row.parent_slot_id = parent; }
+  rec('inserting', row);
 
-  const { error: e2 } = await C.sb.from('slots').insert(row);
-  if (e2) { C.err = e2.message; return tray(); }
+  // .select() on the insert, deliberately. Row level security refuses by
+  // returning success with nothing inserted; without reading the row back,
+  // that is indistinguishable from working.
+  const { data: made, error: e2 } = await C.sb.from('slots').insert(row)
+    .select('id,position,register,parent_slot_id,sequence_id,activity_id');
+  if (e2) {
+    C.err = e2.message;
+    rec('INSERT REFUSED', { message: e2.message, code: e2.code,
+                            details: e2.details, hint: e2.hint });
+    return tray();
+  }
+  if (!made || !made.length) {
+    C.err = 'The database accepted it and returned nothing \u2014 see What happened.';
+    rec('INSERT RETURNED NOTHING — no error, no row. This is what a silent refusal looks like.');
+    return tray();
+  }
+  rec('inserted', made[0]);
 
-  // The count is read from slots, so re-read it rather than guessing.
+  // Read it back independently. The row the insert returned is the row the
+  // insert made; this asks the table what is actually in the lesson now.
+  const { data: after } = await C.sb.from('slots')
+    .select('id,position,register').eq('sequence_id', C.lessonId).is('deleted_at', null);
+  rec('the lesson now holds', { slotsLive: (after || []).length,
+                                positions: (after || []).map(x => x.position).sort((a, b) => a - b) });
+
   await loadUses();
   C.err = null;
   C.msg = '<b>' + esc(it.act ? it.act.name : 'It') + '</b> is now ' +
-    (register === 'handout' ? 'a handout' : 'step ' + pos) +
-    ' in <b>' + esc(lessonName()) + '</b>. The studio shows it on its next open.';
+    (reg === 'handout' ? 'a handout' : 'step ' + pos) +
+    ' in <b>' + esc(lessonName()) + '</b>. Reload the studio to see it.';
   paint();
 }
 
@@ -1394,7 +1482,8 @@ async function saveReader(then) {
     e.saved = 'Saved, and left on the canvas.';
   }
   if (then === 'lesson') {
-    await carry({ activity_id: id, act: { name } }, 'step');
+    rec('reader saved, carrying it across', { activity: id, name });
+    await carry({ activity_id: id, act: { name } }, 'stage');
     e.saved = 'Saved, and put in the lesson.';
   }
 
@@ -1421,6 +1510,7 @@ function overlay() {
     wireEditor();
     return;
   }
+  if (C.panel === 'log') { showLog(); return; }
   if (C.panel !== 'library') { over.innerHTML = ''; return; }
 
   const q = (C.libQ || '').toLowerCase();
