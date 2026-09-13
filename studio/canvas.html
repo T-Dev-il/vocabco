@@ -270,6 +270,81 @@
   .kindbtn:hover{border-color:var(--here)}
   .why{font-size:11.5px; color:var(--dim); margin:0 0 12px; line-height:1.55; max-width:58ch}
 
+
+  /* ── the full editor (§2, frame 6) ─────────────────────────────────────
+     Over the CANVAS, never over the studio. An earlier draft opened it over
+     the studio and frame 6 supersedes it: the canvas is where things get
+     made, the studio is where they get run. A builder overlaying a running
+     lesson is the wrong shape. */
+  .edit{
+    position:fixed; z-index:51; inset:34px; background:#fff;
+    border:1px solid #C3C6BF; border-radius:9px;
+    box-shadow:0 14px 40px rgba(20,24,28,.22);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .ehead{display:flex; align-items:center; gap:10px; padding:9px 12px;
+         border-bottom:1px solid var(--line)}
+  .etitle{
+    border:1px solid transparent; border-radius:4px; padding:4px 7px; min-width:26ch;
+    font:600 15px inherit; font-family:inherit; color:var(--ink); background:#fff;
+  }
+  .etitle:hover{border-color:var(--line)}
+  .etitle:focus{border-color:var(--here); outline:0}
+  .etabs{display:flex; gap:2px}
+  .etab{border:0; background:transparent; font:12.5px inherit; font-family:inherit;
+        color:var(--dim); padding:4px 10px; border-radius:4px; cursor:pointer}
+  .etab.on{background:#EDEEEA; color:var(--ink); font-weight:600}
+  .ebody{flex:1; display:flex; min-height:0}
+  .ewrite{flex:1; min-width:0; display:flex; flex-direction:column; padding:14px 16px;
+          border-right:1px solid var(--line)}
+  .ewords{flex:0 0 288px; display:flex; flex-direction:column; background:#FBFAF6}
+  .efoot{display:flex; align-items:center; gap:8px; padding:9px 12px;
+         border-top:1px solid var(--line); font-size:11.5px; color:var(--dim)}
+
+  /* The passage is written in the learner\'s typography, not the editor\'s.
+     The same rule the studio\'s stage follows (§3): otherwise the teacher
+     designs against a lie and finds out at publication. */
+  .learner{
+    --vc-accent-bg:#edffdf; --vc-accent-line:#a8cf8e;
+    color:#1a1c19; font:16px/1.7 ui-serif,Georgia,"Times New Roman",serif; max-width:62ch;
+  }
+  .learner p{margin:0 0 12px}
+  .learner .mark{background:var(--vc-accent-bg); border-bottom:2px solid var(--vc-accent-line);
+                 padding:0 2px}
+  textarea.passage{
+    flex:1; width:100%; resize:none; border:1px solid var(--line); border-radius:6px;
+    padding:16px 18px; background:#fff; color:#1a1c19;
+    font:16px/1.7 ui-serif,Georgia,"Times New Roman",serif;
+  }
+  textarea.passage:focus{outline:0; border-color:var(--here)}
+  .look{flex:1; overflow:auto; border:1px solid var(--line); border-radius:6px;
+        padding:16px 18px; background:#fff}
+  .etools{display:flex; align-items:center; gap:8px; margin-top:10px; font-size:11.5px;
+          color:var(--dim)}
+
+  .whead{padding:11px 13px 8px; font-size:12px; font-weight:650;
+         border-bottom:1px solid var(--line)}
+  .wlist{flex:1; overflow-y:auto; padding:9px 11px}
+  .wrow{display:flex; gap:6px; align-items:center; margin-bottom:6px}
+  .wrow .w{
+    flex:0 0 40%; font:13px/1.4 ui-serif,Georgia,serif; background:var(--vc-accent-bg,#edffdf);
+    border-bottom:2px solid #a8cf8e; padding:4px 5px; border-radius:3px 3px 0 0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .wrow input{
+    flex:1; min-width:0; border:1px solid var(--line); border-radius:4px; padding:4px 6px;
+    font:12.5px inherit; font-family:inherit; color:var(--ink);
+  }
+  .wrow .drop{border:0; background:transparent; color:var(--dim); cursor:pointer;
+              font-size:14px; padding:0 3px; line-height:1}
+  .wrow .drop:hover{color:#8a2d2d}
+  .wnone{font-size:11.5px; color:var(--dim); line-height:1.55; padding:4px 2px}
+  .wfoot{border-top:1px solid var(--line); padding:10px 12px; font-size:11.5px;
+         color:var(--dim); line-height:1.55}
+  .coverage{border-top:1px solid var(--line); padding:10px 12px; font-size:11.5px;
+            color:var(--dim); line-height:1.55; background:#fff}
+  .coverage b{color:var(--ink); font-weight:600}
+
   /* ── whole-screen states ───────────────────────────────────────────────── */
   .screen{flex:1; display:grid; place-items:center; padding:40px 24px; background:var(--rail)}
   .scard{background:#fff; border:1px solid var(--line); border-radius:9px;
@@ -303,6 +378,7 @@ const C = {
   lessons: [], lessonId: null,
   take: null,          // {recId, name, lesson, lessonName, banked} while one is open
   lib: null, libQ: '',
+  ed: null,            // the full editor, while it is open
   panel: null,         // 'library' while it is open
   msg: null, err: null,
   armed: null          // item id whose × has been pressed once
@@ -710,10 +786,14 @@ function paint() {
     '</button>' +
     '<button class="invite" id="inv-note" style="left:258px;top:' + inviteTop() + 'px;width:170px">' +
       '\uFF0B a note' +
+    '</button>' +
+    '<button class="invite" id="inv-read" style="left:450px;top:' + inviteTop() + 'px;width:200px">' +
+      '\u270E write something to read' +
     '</button>';
 
   document.getElementById('inv-lib').onclick = openLibrary;
   document.getElementById('inv-note').onclick = () => addNote();
+  document.getElementById('inv-read').onclick = () => newReader();
 
   felt.querySelectorAll('.item').forEach(wireItem);
   overlay();
@@ -754,7 +834,11 @@ function itemHTML(it) {
 }
 
 function tools(it, armed, isCard) {
+  // Only `display` opens here so far. A card of a kind this editor cannot open
+  // shows no Open button rather than one that lies.
+  const openable = isCard && it.act && it.act.kind === 'display';
   return '<div class="tools">' +
+    (openable ? '<button data-open title="Open it full size">Open</button>' : '') +
     (isCard
       ? '<button data-carry="step" title="On the trunk it is a step">\u2192 step</button>' +
         '<button data-carry="handout" title="Indented under a step it is a handout">\u2192 handout</button>'
@@ -780,6 +864,9 @@ function wireItem(el) {
   el.querySelectorAll('[data-carry]').forEach(b => {
     b.onclick = ev => { ev.stopPropagation(); carry(it, b.dataset.carry); };
   });
+  const op = el.querySelector('[data-open]');
+  if (op) op.onclick = ev => { ev.stopPropagation(); openReader(it.activity_id, it.id); };
+
   const x = el.querySelector('[data-x]');
   if (x) x.onclick = ev => { ev.stopPropagation(); remove(it); };
 
@@ -874,7 +961,7 @@ async function addNote(text) {
   if (el) el.focus();
 }
 
-async function addCard(activity) {
+async function addCard(activity, quiet) {
   const spot = freeSpot(132);
   const top = C.items.reduce((m, i) => Math.max(m, i.z || 0), 0) + 1;
   const { data, error } = await C.sb.from('board_items')
@@ -883,6 +970,7 @@ async function addCard(activity) {
   if (error) { C.err = error.message; return tray(); }
   data.act = { id: activity.id, name: activity.name, kind: activity.kind };
   C.items.push(data);
+  if (quiet) return;      // the editor is still open over the board
   C.panel = null;
   paint();
 }
@@ -999,9 +1087,340 @@ async function openLibrary() {
   }
 }
 
+
+// ───────────────────────────────────────────────────────────────────────────
+// The full editor — the reader (§2, frame 6)
+//
+// The fifth surface. The quick rack makes `Something to read` in three seconds
+// with one box; this is the same kind at its full size: a real passage, and the
+// words in it that the learner is meant to come away with.
+//
+// §12 asks whether the shallow and the full editor for one kind are one tool at
+// two sizes or two tools. THEY ARE ONE KIND WRITTEN TWICE, ON PURPOSE, and the
+// seam is the content shape rather than the code:
+//
+//   rack (studio):  { body, carries }
+//   here:           { body, marks:[{word,meaning,item_id}], carries }
+//
+// `marks` is a key the rack does not write and the studio's display.draw()
+// ignores — so a reader made here opens in the rack without breaking, and one
+// made in the rack opens here with no words yet. Neither tool has to know the
+// other exists. Sharing the code instead would have meant the rack carrying a
+// passage editor it must never show mid-take.
+//
+// Marks are words and meanings, NOT offsets into the text. An offset is wrong
+// the moment a sentence is edited above it, and this is a text the teacher will
+// keep editing. Every occurrence of the word is marked, which is also what a
+// learner expects.
+// ───────────────────────────────────────────────────────────────────────────
+
+function blankReader() {
+  return { id: null, name: '', body: '', marks: [], tab: 'write',
+           items: null, boardItem: null, saving: false, err: null, saved: null };
+}
+
+async function openReader(activityId, boardItemId) {
+  const { data, error } = await C.sb.from('activities')
+    .select('id,name,kind,content').eq('id', activityId).maybeSingle();
+  if (error || !data) { C.err = (error && error.message) || 'That activity is gone.'; return tray(); }
+
+  const c = data.content || {};
+  C.ed = blankReader();
+  C.ed.id = data.id;
+  C.ed.name = data.name || '';
+  C.ed.body = c.body || '';
+  C.ed.marks = Array.isArray(c.marks) ? c.marks.slice() : [];
+  C.ed.boardItem = boardItemId || null;
+  overlay();
+  loadWordsYouHave();
+}
+
+function newReader() {
+  C.ed = blankReader();
+  overlay();
+  loadWordsYouHave();
+}
+
+// The words the teacher has already collected. This is the whole point of the
+// app sitting underneath: a reader is not written in a vacuum, it is written
+// over words that were saved from somewhere. Frame 6 draws this as
+// `Pull from the words already in … · 47 available`.
+async function loadWordsYouHave() {
+  if (C.ed && C.ed.items) return;
+  const { data } = await C.sb.from('items')
+    .select('id,surface,translation').is('deleted_at', null).limit(2000);
+  if (!C.ed) return;
+  C.ed.items = data || [];
+  if (C.ed) words();
+}
+
+// Which of them actually appear in this passage. Case-insensitive, and word
+// boundaries, so `auf` does not match `aufstehen` and claim coverage it has not
+// got.
+function itemsInPassage() {
+  if (!C.ed || !C.ed.items) return [];
+  const body = (C.ed.body || '').toLowerCase();
+  if (!body) return [];
+  return C.ed.items.filter(i => {
+    const w = (i.surface || '').trim().toLowerCase();
+    if (!w) return false;
+    const at = body.indexOf(w);
+    if (at < 0) return false;
+    const before = at === 0 ? ' ' : body[at - 1];
+    const after = body[at + w.length] === undefined ? ' ' : body[at + w.length];
+    return !/[\w\u00c0-\u024f]/.test(before) && !/[\w\u00c0-\u024f]/.test(after);
+  });
+}
+
+function editorHTML() {
+  const e = C.ed;
+  return '<div class="scrim" id="edscrim"></div>' +
+  '<div class="edit">' +
+    '<div class="ehead">' +
+      '<input class="etitle" id="edname" placeholder="Name this reader" value="' + esc(e.name) + '">' +
+      '<div class="etabs">' +
+        '<button class="etab' + (e.tab === 'write' ? ' on' : '') + '" data-tab="write">Write</button>' +
+        '<button class="etab' + (e.tab === 'look'  ? ' on' : '') + '" data-tab="look">Look</button>' +
+      '</div>' +
+      '<div style="flex:1"></div>' +
+      '<button class="btn" id="edclose">Close</button>' +
+    '</div>' +
+    '<div class="ebody">' +
+      '<div class="ewrite">' +
+        (e.tab === 'write'
+          ? '<textarea class="passage" id="edbody" placeholder="The passage. A blank line starts a new paragraph.">' +
+              esc(e.body) + '</textarea>' +
+            '<div class="etools">' +
+              '<button class="btn" id="edmark">Mark what I selected</button>' +
+              '<span>Select a word in the passage, then press this. Every place it ' +
+                'appears is marked.</span>' +
+            '</div>'
+          : '<div class="look"><div class="learner">' + drawPassage() + '</div></div>' +
+            '<div class="etools"><span>What the learner sees, in the learner\u2019s own ' +
+              'typography. The editor never restyles it.</span></div>') +
+      '</div>' +
+      '<div class="ewords">' +
+        '<div class="whead">The words in it</div>' +
+        '<div class="wlist" id="edwords"></div>' +
+        '<div class="coverage" id="edcov"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="efoot">' +
+      '<span id="edstate">' +
+        (e.err ? '<span style="color:#8a2d2d">' + esc(e.err) + '</span>'
+               : e.saved ? esc(e.saved) : 'Saved to your library either way.') +
+      '</span>' +
+      '<div style="flex:1"></div>' +
+      '<button class="btn" id="edboard">Leave it on the canvas</button>' +
+      '<button class="btn" id="edlesson">Put it in the lesson</button>' +
+      '<button class="btn dark" id="edsave">Save</button>' +
+    '</div>' +
+  '</div>';
+}
+
+// The passage as the learner gets it. Marks are applied to the rendered text,
+// never stored in it.
+function drawPassage() {
+  const e = C.ed;
+  const ws = (e.marks || []).map(m => (m.word || '').trim()).filter(Boolean)
+    .sort((a, b) => b.length - a.length);   // longest first, so `aufstehen` wins over `auf`
+  return (e.body || '').split(/\n\s*\n/).map(para => {
+    let html = esc(para.trim());
+    ws.forEach(w => {
+      const re = new RegExp('(^|[^\\w\\u00c0-\\u024f])(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+                            ')(?![\\w\\u00c0-\\u024f])', 'gi');
+      html = html.replace(re, '$1<span class="mark">$2</span>');
+    });
+    return '<p>' + html + '</p>';
+  }).join('') || '<p style="color:#9b9e96">Nothing written yet.</p>';
+}
+
+function words() {
+  const host = document.getElementById('edwords');
+  if (!host || !C.ed) return;
+  const e = C.ed;
+  const here = itemsInPassage();
+  const have = new Set((e.marks || []).map(m => (m.word || '').toLowerCase()));
+  const pullable = here.filter(i => !have.has((i.surface || '').toLowerCase()));
+  const known = (e.marks || []).filter(m => m.item_id).length;
+
+  host.innerHTML =
+    (e.marks.length
+      ? e.marks.map((m, i) =>
+          '<div class="wrow">' +
+            '<span class="w" title="' + esc(m.word) + '">' + esc(m.word) + '</span>' +
+            '<input data-mi="' + i + '" placeholder="what it means" value="' + esc(m.meaning || '') + '">' +
+            '<button class="drop" data-mx="' + i + '" title="Not a word to learn">\u00d7</button>' +
+          '</div>').join('')
+      : '<p class="wnone">No words marked yet. Select one in the passage and press ' +
+        '<b>Mark what I selected</b>.</p>') +
+    '<div style="height:10px"></div>' +
+    (e.items === null
+      ? '<p class="wnone">Reading the words you already have\u2026</p>'
+      : pullable.length
+        ? '<button class="btn" id="edpull" style="width:100%">Pull the ' + pullable.length +
+            ' word' + (pullable.length === 1 ? '' : 's') + ' you already have</button>' +
+          '<p class="wnone" style="margin-top:6px">Of ' + e.items.length +
+            ' collected, ' + here.length + ' appear' + (here.length === 1 ? 's' : '') +
+            ' in this passage.</p>'
+        : '<p class="wnone">' + (here.length
+            ? 'Every collected word in this passage is already marked.'
+            : 'None of your collected words appear in this passage yet.') + '</p>');
+
+  const cov = document.getElementById('edcov');
+  if (cov) {
+    cov.innerHTML = '<b>' + e.marks.length + ' vocabulary item' +
+      (e.marks.length === 1 ? '' : 's') + '</b>' +
+      (known ? ', ' + known + ' of them words you already collected' : '') +
+      '. This is what the activity carries towards a lesson\u2019s coverage.';
+  }
+
+  host.querySelectorAll('[data-mi]').forEach(inp => {
+    // Typed into, not re-rendered. The words column redrawing under the cursor
+    // is exactly the leak the studio has.
+    inp.oninput = () => { C.ed.marks[+inp.dataset.mi].meaning = inp.value; C.ed.saved = null; };
+  });
+  host.querySelectorAll('[data-mx]').forEach(b => {
+    b.onclick = () => { C.ed.marks.splice(+b.dataset.mx, 1); C.ed.saved = null; words(); };
+  });
+  const pull = document.getElementById('edpull');
+  if (pull) pull.onclick = () => {
+    pullable.forEach(i => C.ed.marks.push({
+      word: i.surface, meaning: i.translation || '', item_id: i.id
+    }));
+    C.ed.saved = null;
+    words();
+  };
+}
+
+function wireEditor() {
+  const e = C.ed;
+
+  document.getElementById('edscrim').onclick = closeEditor;
+  document.getElementById('edclose').onclick = closeEditor;
+
+  const nm = document.getElementById('edname');
+  nm.oninput = () => { C.ed.name = nm.value; C.ed.saved = null; };
+
+  document.querySelectorAll('[data-tab]').forEach(b => {
+    b.onclick = () => { C.ed.tab = b.dataset.tab; overlay(); };
+  });
+
+  const body = document.getElementById('edbody');
+  if (body) {
+    // No re-render while writing, and no save per keystroke.
+    body.oninput = () => { C.ed.body = body.value; C.ed.saved = null; };
+    // The words column depends on the passage, but only on pausing.
+    let t = null;
+    body.addEventListener('input', () => {
+      clearTimeout(t); t = setTimeout(words, 500);
+    });
+  }
+
+  const mark = document.getElementById('edmark');
+  if (mark) mark.onclick = () => {
+    const ta = document.getElementById('edbody');
+    if (!ta) return;
+    const sel = ta.value.slice(ta.selectionStart, ta.selectionEnd).trim();
+    if (!sel) { note('Select a word in the passage first, then press it.'); return; }
+    if (sel.length > 80) { note('That is a passage, not a word.'); return; }
+    if (C.ed.marks.some(m => (m.word || '').toLowerCase() === sel.toLowerCase())) {
+      note('That one is already marked.'); return;
+    }
+    // If it is a word already collected, keep the link — that is what makes
+    // coverage (§8) real rather than a count of strings.
+    const known = (C.ed.items || []).find(i =>
+      (i.surface || '').toLowerCase() === sel.toLowerCase());
+    C.ed.marks.push({
+      word: sel, meaning: known ? (known.translation || '') : '',
+      item_id: known ? known.id : null
+    });
+    C.ed.saved = null;
+    words();
+  };
+
+  document.getElementById('edsave').onclick = () => saveReader();
+  document.getElementById('edboard').onclick = () => saveReader('board');
+  document.getElementById('edlesson').onclick = () => saveReader('lesson');
+
+  words();
+}
+
+function note(msg) {
+  const el = document.getElementById('edstate');
+  if (el) el.textContent = msg;
+}
+
+// One save, three exits. The activity is written to the library every time,
+// whichever button was pressed — frame 6: something made in a hurry is still
+// something the teacher owns, and must not exist only inside one lesson.
+async function saveReader(then) {
+  const e = C.ed;
+  if (e.saving) return;
+  if (!(e.body || '').trim()) { e.err = 'Nothing written on it yet.'; return overlay(); }
+
+  e.saving = true; e.err = null;
+  note('Saving\u2026');
+
+  const name = (e.name || '').trim() || (e.body.split('\n')[0] || 'Untitled').slice(0, 60);
+  const content = {
+    body: e.body,
+    marks: e.marks,
+    // §8 wants its data from day one even though its screen can wait. Only
+    // marks that point at a real collected item count — a string nobody has
+    // ever saved is not coverage.
+    carries: { vocab: e.marks.filter(m => m.item_id).map(m => m.item_id), structures: [] }
+  };
+
+  let id = e.id;
+  if (id) {
+    const { error } = await C.sb.from('activities').update({ name, content }).eq('id', id);
+    if (error) { e.saving = false; e.err = error.message; return overlay(); }
+  } else {
+    const { data, error } = await C.sb.from('activities')
+      .insert({ kind: 'display', name, content }).select('id').single();
+    if (error) { e.saving = false; e.err = error.message; return overlay(); }
+    id = data.id; e.id = id;
+  }
+
+  e.name = name;
+  e.saving = false;
+  e.saved = 'Saved to your library.';
+
+  if (then === 'board' && !e.boardItem) {
+    await addCard({ id, name, kind: 'display' }, true);
+    const made = C.items[C.items.length - 1];
+    if (made) e.boardItem = made.id;
+    e.saved = 'Saved, and left on the canvas.';
+  }
+  if (then === 'lesson') {
+    await carry({ activity_id: id, act: { name } }, 'step');
+    e.saved = 'Saved, and put in the lesson.';
+  }
+
+  // The card on the board carries the name, and the name may have changed.
+  C.items.forEach(i => { if (i.activity_id === id && i.act) i.act.name = name; });
+  paint();   // paint() redraws the overlay last, so the editor stays open
+}
+
+function closeEditor() {
+  const e = C.ed;
+  if (e && !e.saved && (e.body || '').trim() && !confirm('Close without saving? What is written here goes.')) return;
+  C.ed = null;
+  overlay();
+  paint();
+}
+
 function overlay() {
   const over = document.getElementById('over');
   if (!over) return;
+
+  // The editor takes the overlay when it is open; the library panel otherwise.
+  if (C.ed) {
+    over.innerHTML = editorHTML();
+    wireEditor();
+    return;
+  }
   if (C.panel !== 'library') { over.innerHTML = ''; return; }
 
   const q = (C.libQ || '').toLowerCase();
@@ -1056,7 +1475,8 @@ function overlay() {
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
-    if (C.panel) { C.panel = null; overlay(); }
+    if (C.ed) { closeEditor(); }
+    else if (C.panel) { C.panel = null; overlay(); }
     else if (C.armed) { C.armed = null; paint(); }
   }
 });
