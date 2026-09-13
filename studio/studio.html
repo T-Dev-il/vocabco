@@ -285,6 +285,7 @@
   .takerow .t{opacity:.7; min-width:14px}
   .takebar{display:flex; gap:5px; padding:0 10px}
   .takebar .btn{flex:1; padding:4px 2px; font-size:11px}
+  .takebar .btn:first-child{flex:0 0 26px}
   .takebar .btn:last-child{flex:0 0 26px}
   .takebar .btn:disabled{opacity:.4; cursor:default}
   .slotmenu{position:fixed; z-index:60; min-width:150px; background:#fff;
@@ -1779,10 +1780,18 @@ function wireJoined() {
       openSlotMenu(el.getAttribute('data-slot'), e.clientX, e.clientY);
     };
 
+    // dragenter as well as dragover: a drop is only permitted where BOTH have
+    // been cancelled, and a target that only cancels dragover is refused in
+    // some browsers with no error and no sign of why.
+    el.ondragenter = e => { if (dragId) e.preventDefault(); };
+
     el.ondragover = e => {
       const id = el.getAttribute('data-slot');
       if (!dragId || id === dragId) return;
       e.preventDefault();
+      // Without a dropEffect the browser settles on 'none', and a drop with no
+      // effect is cancelled on release — the mark shows, the move does not happen.
+      try { e.dataTransfer.dropEffect = 'move'; } catch (x) {}
       const r = el.getBoundingClientRect();
       const p = (e.clientY - r.top) / (r.height || 1);
       const want = p < 0.3 ? 'before' : p > 0.7 ? 'after' : 'into';
@@ -1940,7 +1949,7 @@ function saveCorner() {
   try { localStorage.setItem('studioCornerShut', S.cornerShut ? '1' : '0'); } catch (e) {}
 }
 
-const BUILD = 'studio 16';
+const BUILD = 'studio 17';
 
 // The DEV DATABASE badge sits bottom-left over the deck, which is where the
 // take controls are, and it was covering them. It belongs to config.js, which
@@ -2575,6 +2584,22 @@ async function clipUrl(path) {
 // Clips are laid end to end here, and only here. Inside a clip an action's time
 // is its own; across a take the offset is the sum of the clips before it. That
 // conversion belongs at the point of playing, not in the stored data.
+// A take called "Take 7" is a take nobody can find again. The name is the only
+// handle on it, so it is editable rather than issued once and kept forever.
+async function renameTake() {
+  const id = S.renameTake;
+  const box = document.getElementById('takename');
+  if (!id || !box) { S.renameTake = null; return render(); }
+  const name = box.value.trim();
+  if (!name) { S.renameTake = null; return render(); }
+  const t = S.takes.find(x => x.id === id);
+  if (t) t.name = name;                       // on screen before the round trip
+  S.renameTake = null;
+  render();
+  const { error } = await S.sb.from('recordings').update({ name }).eq('id', id);
+  if (error) { S.error = error.message; render(); }
+}
+
 async function playTake(recId) {
   const rec = S.takes.find(t => t.id === recId);
   const { data: clips } = await S.sb.from('clips')
@@ -2793,14 +2818,27 @@ function takePanel() {
 
   const list = S.takes.length
     ? S.takes.map(t =>
-        '<button class="takerow' + (t.id === S.pickTake ? ' on' : '') + '" data-pick="' +
-          esc(t.id) + '">' +
-          '<span class="t">' + t.clips + '</span><b>' + esc(t.name) + '</b>' +
-        '</button>').join('')
+        (S.renameTake === t.id
+          ? '<div class="takerow on"><span class="t">' + t.clips + '</span>' +
+            '<input class="inp" id="takename" value="' + esc(t.name) + '" ' +
+              'style="flex:1;padding:2px 5px;font-size:11.5px"></div>'
+          : '<button class="takerow' + (t.id === S.pickTake ? ' on' : '') + '" data-tk="' +
+            esc(t.id) + '">' +
+            '<span class="t">' + t.clips + '</span><b>' + esc(t.name) + '</b>' +
+          '</button>')).join('')
     : '<div class="none">No takes yet.</div>';
 
   const off = sel ? '' : ' disabled';
+  if (S.renameTake) {
+    return '<div class="lbl">Takes</div>' + left +
+      '<div class="takelist">' + list + '</div>' +
+      '<div class="takebar">' +
+        '<button class="btn" id="rnsave">Save the name</button>' +
+        '<button class="btn" id="rncancel">Cancel</button>' +
+      '</div>';
+  }
   const bar = '<div class="takebar">' +
+      '<button class="btn" id="rename"' + off + ' title="Rename this take">\u270e</button>' +
       '<button class="btn" data-playtake="' + esc(S.pickTake || '') + '"' + off + '>Play</button>' +
       '<button class="btn" data-resume="' + esc(S.pickTake || '') + '"' + off + '>Carry on</button>' +
       '<button class="btn" data-carve="' + esc(S.pickTake || '') + '"' + off + '>Carve</button>' +
@@ -2829,6 +2867,18 @@ function wireRecord() {
   if ($('cornercl')) $('cornercl').onclick = () => { S.cornerShut = true; saveCorner(); render(); };
   if ($('cornerop')) $('cornerop').onclick = () => { S.cornerShut = false; saveCorner(); render(); };
   if ($('starttake')) $('starttake').onclick = armNew;
+  if ($('rename')) $('rename').onclick = () => {
+    S.renameTake = S.pickTake;
+    render();
+    const box = document.getElementById('takename');
+    if (box) { box.focus(); box.select(); }
+  };
+  if ($('rncancel')) $('rncancel').onclick = () => { S.renameTake = null; render(); };
+  if ($('rnsave')) $('rnsave').onclick = renameTake;
+  if ($('takename')) $('takename').onkeydown = e => {
+    if (e.key === 'Enter') renameTake();
+    if (e.key === 'Escape') { S.renameTake = null; render(); }
+  };
   if ($('go')) $('go').onclick = startArmed;
   if ($('unarm')) $('unarm').onclick = () => { S.arming = null; render(); };
   if ($('stop')) $('stop').onclick = stopTake;
@@ -2841,8 +2891,12 @@ function wireRecord() {
     el.onclick = () => playTake(el.getAttribute('data-playtake')));
   root.querySelectorAll('[data-carve]').forEach(el =>
     el.onclick = () => openCarve(el.getAttribute('data-carve')));
-  root.querySelectorAll('[data-pick]').forEach(el => el.onclick = () => {
-    S.pickTake = el.getAttribute('data-pick');
+  // data-tk, not data-pick or data-take: wirePreview already owns both of those
+  // for answering a multiple choice and for ordering, and it runs AFTER this,
+  // so it was quietly rebinding every take row to "you picked answer NaN".
+  // Nothing looked broken; the rows simply stopped being rows.
+  root.querySelectorAll('[data-tk]').forEach(el => el.onclick = () => {
+    S.pickTake = el.getAttribute('data-tk');
     S.confirmTake = null;
     render();
   });
@@ -3340,14 +3394,16 @@ function answerable(slot) {
   return ANSWERABLE.indexOf(a.kind) >= 0;
 }
 
-function ruleBar() {
+// inRack: drawn inside the open editor rather than under the stage. In joined
+// that is the only place it appears — tried at the foot of the stage, where the
+// editor's own panel covered it, and tried tied to the editor while still being
+// drawn underneath it, which was the same mistake wearing a hat.
+function ruleBar(inRack) {
+  if (S.mode === 'joined' && !inRack) return '';
   if (S.mode !== 'build' && S.mode !== 'joined') return '';
   const slot = S.slots.find(s => s.id === S.lookSlot);
   if (!slot) return '';
-  // Tied to the editor for one build, which turned out to hide them entirely:
-  // the rack draws over the stage, so they were rendered underneath something
-  // and unreachable. Back at the foot of the stage until they have a better
-  // home — an awkward place beats a place nobody can get to.
+
 
   const flat = flatWithKids();
   const me = flat.findIndex(x => x.id === slot.id);
@@ -3645,6 +3701,7 @@ function rack() {
     '<div class="pbody"><div class="form" id="rform">' +
       (S.rackErr ? '<p class="err">' + esc(S.rackErr) + '</p>' : '') +
       K.form(S.rack.content) +
+      (S.rack.editing ? ruleBar(true) : '') +
     '</div></div>' +
     '<div class="pfoot">' +
       (S.rack.editing
@@ -3896,7 +3953,14 @@ function wire() {
   wireRecord();
   // Joined is both at once, which is the point of it: the stage is live and
   // answerable AND the slide carries its own editing controls.
-  if (S.mode === 'joined') { wirePreview(); if (!S.rack) wireEdit(); else wireRules(); }
+  // The same collision, one level up. The rack's own form uses data-pick and
+  // data-take for its options, so running the learner's wiring over an open
+  // editor turned every option in it into an answer being chosen. While the
+  // editor is open it is the only thing wired.
+  if (S.mode === 'joined') {
+    if (S.rack) wireRules();
+    else { wirePreview(); wireEdit(); }
+  }
   else if (S.mode === 'preview' || S.mode === 'record') wirePreview();
   else if (!S.rack) wireEdit();
   if (S.take && !S.play) tick();
