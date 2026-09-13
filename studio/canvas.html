@@ -373,7 +373,7 @@
 // Bumped by hand every time this file is handed over. It exists because a
 // browser serving a cached copy is indistinguishable from a fix that did not
 // work, and we lost a round to exactly that.
-const BUILD = 'canvas 6';
+const BUILD = 'canvas 7';
 
 const C = {
   env: 'live', sb: null, has006: false,
@@ -468,6 +468,9 @@ function loadScript(src) {
   const p6 = await C.sb.from('slots').select('register,parent_slot_id').limit(1);
   C.has006 = !p6.error;
   rec(BUILD);
+  try { console.log(BUILD + ' \u2014 press the What happened button, triple-click the ' +
+        'build stamp, or call showLog() here.'); } catch (e) {}
+  window.showLog = showLog;
   rec('booted', { env: C.env, has006: C.has006, user: session.user && session.user.id });
 
   shell();
@@ -772,8 +775,8 @@ function chrome() {
 
   document.getElementById('top').innerHTML =
     '<span class="title">Canvas</span>' +
-    '<span style="font-size:10.5px;color:#9b9e96" title="Which build is loaded">' +
-      BUILD + '</span>' +
+    '<span id="build" style="font-size:10.5px;color:#9b9e96;cursor:pointer" ' +
+      'title="Which build is loaded. Click three times for the record.">' + BUILD + '</span>' +
     '<div class="boards">' +
       C.boards.map(b =>
         '<button class="btab' + (C.board && b.id === C.board.id ? ' on' : '') + '" ' +
@@ -806,6 +809,19 @@ function chrome() {
   });
   document.getElementById('addboard').onclick = addBoard;
 
+  // Triple-click the build stamp. reader.html uses the same gesture on its own
+  // badge, and a second route in costs nothing on the day the first one is
+  // somehow not on screen.
+  const bd = document.getElementById('build');
+  if (bd) {
+    let n = 0, t = null;
+    bd.onclick = () => {
+      clearTimeout(t); n++;
+      t = setTimeout(() => { n = 0; }, 700);
+      if (n >= 3) { n = 0; showLog(); }
+    };
+  }
+
   const sel = document.getElementById('lesson');
   if (sel) sel.onchange = e => {
     C.lessonId = e.target.value || null;
@@ -825,7 +841,8 @@ function tray() {
      '<span>' + cards + (cards === 1 ? ' card' : ' cards') + ' \u00b7 ' +
        notes + (notes === 1 ? ' note' : ' notes') +
        ' \u00b7 nothing here is in a lesson until you carry it across</span>') +
-    '<button class="btn" id="whathappened" style="margin-left:auto">What happened</button>';
+    '<button class="btn dark" id="whathappened" style="margin-left:auto">' +
+      '\u2699 What happened</button>';
   const wh = document.getElementById('whathappened');
   if (wh) wh.onclick = showLog;
 }
