@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Footage with no take</title>
+<title>Leftover video</title>
 
 <!--
   sweep.html — lives at website/studio/sweep.html
@@ -85,7 +85,7 @@
 <script>
 "use strict";
 
-const BUILD = 'sweep 1';
+const BUILD = 'sweep 2';
 const BUCKET = 'takes';
 
 const S = { sb: null, env: 'live', uid: null, found: null, keep: 0, busy: false,
@@ -98,7 +98,7 @@ const mb = n => (n / 1048576).toFixed(1) + ' MB';
 
 function shell(inner) {
   root.innerHTML =
-    '<div class="top"><span class="title">Footage with no take</span>' +
+    '<div class="top"><span class="title">Leftover video</span>' +
       '<span class="build">' + BUILD + '</span>' +
       '<div style="flex:1"></div>' +
       '<button class="btn" id="back">Back to the studio</button></div>' +
@@ -147,41 +147,51 @@ function loadScript(src) {
 })().catch(e => card('The sweep stopped', '<p>' + esc(e && e.message || e) + '</p>'));
 
 function draw() {
+  // Everything this function draws needs wiring at the bottom, so NOTHING here
+  // returns early. An early return on the first screen is why the button sat
+  // there doing nothing: it was drawn and then never connected.
   if (S.found === null) {
-    return card('Nothing has been touched yet',
-      '<p>Every clip of footage lives at <code>your id / recording / clip.webm</code>. ' +
-      'When a recording or a lesson is deleted, its rows go and its files stay — there ' +
-      'are no foreign keys between a database and a bucket. This finds the files that ' +
-      'no longer have a clip.</p>' +
-      '<p>Looking reads only. Nothing is removed until you ask for it by name.</p>' +
+    card('Nothing has been looked at yet',
+      '<p>When you record a take, the video is saved as a file. If you later delete ' +
+      'that take or the lesson it belonged to, the video file is <b>not</b> deleted with ' +
+      'it — it stays where it is, using up space, belonging to nothing.</p>' +
+      '<p>This page finds those leftover videos and tells you how much room they are ' +
+      'taking. Looking changes nothing. Nothing is deleted unless you press the red ' +
+      'button afterwards.</p>' +
       '<p>You are on the <b>' + esc(S.envLabel) + '</b> database.</p>' +
       '<div class="row"><button class="btn dark" id="look"' + (S.busy ? ' disabled' : '') + '>' +
         (S.busy ? 'Looking\u2026' : 'Look in the bucket') + '</button>' +
         (S.err ? '<span class="err">' + esc(S.err) + '</span>' : '') + '</div>');
+    wire();
+    return;
   }
 
   const total = S.found.reduce((n, f) => n + (f.size || 0), 0);
-  card(S.found.length ? 'Found ' + S.found.length + ' file' + (S.found.length === 1 ? '' : 's') +
-       ' with no clip' : 'Nothing is leaking',
+  card(S.found.length ? 'Found ' + S.found.length + ' leftover video' +
+       (S.found.length === 1 ? '' : 's') : 'Nothing to clear out',
     (S.found.length
-      ? '<p>These are in the bucket and no <code>clips</code> row claims them. Together ' +
-        'they are <b>' + mb(total) + '</b>. <span class="keep">' + S.keep + ' file' +
-        (S.keep === 1 ? '' : 's') + ' still belong to a clip and will not be touched.</span></p>' +
+      ? '<p>These videos no longer belong to any take. Together they are taking up ' +
+        '<b>' + mb(total) + '</b>. <span class="keep">' + S.keep + ' other video' +
+        (S.keep === 1 ? '' : 's') + ' still belong to a take and will not be touched.</span></p>' +
         '<div class="list">' + S.found.map(f =>
           '<div class="f"><span>' + esc(f.name) + '</span>' +
           '<span class="sz">' + mb(f.size || 0) + '</span></div>').join('') + '</div>' +
         '<div class="row">' +
           '<button class="btn danger" id="go"' + (S.busy ? ' disabled' : '') + '>' +
-            (S.busy ? 'Removing\u2026' : 'Remove these ' + S.found.length) + '</button>' +
+            (S.busy ? 'Deleting\u2026' : 'Delete these ' + S.found.length) + '</button>' +
           '<button class="btn" id="again">Look again</button>' +
           (S.done ? '<span>' + esc(S.done) + '</span>' : '') +
           (S.err ? '<span class="err">' + esc(S.err) + '</span>' : '') +
         '</div>'
-      : '<p>Every file in the bucket belongs to a clip that still exists. ' +
-        '<span class="keep">' + S.keep + ' file' + (S.keep === 1 ? '' : 's') + ' checked.</span></p>' +
+      : '<p>Every video you have still belongs to a take. Nothing is going to waste. ' +
+        '<span class="keep">' + S.keep + ' video' + (S.keep === 1 ? '' : 's') + ' checked.</span></p>' +
         (S.done ? '<p>' + esc(S.done) + '</p>' : '') +
         '<div class="row"><button class="btn" id="again">Look again</button></div>'));
 
+  wire();
+}
+
+function wire() {
   const look = document.getElementById('look');
   if (look) look.onclick = sweep;
   const again = document.getElementById('again');
@@ -252,8 +262,8 @@ async function sweep() {
 // page never claims an outcome it has not re-read.
 async function remove() {
   if (!S.found || !S.found.length) return;
-  if (!confirm('Remove ' + S.found.length + ' file' + (S.found.length === 1 ? '' : 's') +
-               ' permanently? This cannot be undone.')) return;
+  if (!confirm('Delete ' + S.found.length + ' leftover video' +
+               (S.found.length === 1 ? '' : 's') + ' for good? This cannot be undone.')) return;
 
   S.busy = true; S.err = null; draw();
   const paths = S.found.map(f => f.name);
@@ -269,7 +279,7 @@ async function remove() {
     S.err = e.message || String(e);
   }
   S.busy = false;
-  S.done = 'Removed ' + gone + ' file' + (gone === 1 ? '' : 's') + '.';
+  S.done = 'Deleted ' + gone + ' video' + (gone === 1 ? '' : 's') + '.';
   await sweep();
 }
 </script>
