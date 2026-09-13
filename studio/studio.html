@@ -830,6 +830,8 @@ function tabs() {
   return '<div class="apptop">' +
     '<button class="apptab" id="tocanvas" title="The canvas \u2014 where things get made">Canvas</button>' +
     '<span class="apptab on">Studio — ' + esc(S.lesson ? S.lesson.name : '') + '</span>' +
+    '<span style="font-size:10.5px;color:#9b9e96;align-self:center;padding:0 4px" ' +
+      'title="Which build is loaded">' + BUILD + '</span>' +
     '<button class="apptab undock" id="undock" ' +
       'title="Open the canvas in its own window, beside this one">\u29c9</button>' +
   '</div>';
@@ -1444,6 +1446,58 @@ async function stopTake() {
 // neither polls the database.
 // ───────────────────────────────────────────────────────────────────────────
 const TAKE_LIVE = 'studioTakeLive';
+
+// Bumped by hand on every handover, for the same reason the canvas carries one:
+// a cached copy and a failed fix look identical from the outside.
+const BUILD = 'studio 3';
+
+// ───────────────────────────────────────────────────────────────────────────
+// The canvas has changed this lesson
+//
+// This window reads a lesson when it opens it and then holds it. A row written
+// from the canvas was invisible here until the next open, which read as
+// carrying across being broken when it had worked perfectly.
+//
+// It does NOT re-read by itself. §4: the one rule is whether a thing moves the
+// teacher's place, and a spine that rebuilds itself under a running lesson
+// does. So this offers, and the teacher decides when.
+//
+// The bar is made and removed directly rather than through render(), because
+// render() redraws the whole window and this must be able to appear mid-take
+// without doing that.
+// ───────────────────────────────────────────────────────────────────────────
+const LESSON_TOUCHED = 'studioLessonTouched';
+
+window.addEventListener('storage', e => {
+  if (e.key && e.key !== LESSON_TOUCHED) return;
+  let v = null;
+  try { v = JSON.parse(e.newValue || 'null'); } catch (er) {}
+  if (!v || !S.lesson || v.lesson !== S.lesson.id) return;
+  staleBar(v.what);
+});
+
+function staleBar(what) {
+  let bar = document.getElementById('stalebar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'stalebar';
+    bar.style.cssText =
+      'position:fixed;left:12px;bottom:12px;z-index:60;background:#262A2E;color:#E8EAEC;' +
+      'border-radius:7px;padding:9px 11px;font:12px ui-sans-serif,system-ui,sans-serif;' +
+      'display:flex;align-items:center;gap:9px;box-shadow:0 8px 24px rgba(20,24,28,.28)';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = '<span>The canvas put <b>' + esc(what || 'something') +
+    '</b> in this lesson.</span>' +
+    '<button class="btn dark" id="stalego">Show it</button>' +
+    '<button class="btn dark" id="stalex" title="Leave it for now">\u00d7</button>';
+  document.getElementById('stalego').onclick = async () => {
+    bar.remove();
+    await openLesson(S.lesson.id);
+    render();
+  };
+  document.getElementById('stalex').onclick = () => bar.remove();
+}
 
 function markLive() {
   if (!S.take) return;

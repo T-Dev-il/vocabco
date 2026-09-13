@@ -370,6 +370,11 @@
 // change — see the note at the top of this file. paintBoard() is called when
 // the SET of items changes; a drag moves one element and writes one row.
 // ───────────────────────────────────────────────────────────────────────────
+// Bumped by hand every time this file is handed over. It exists because a
+// browser serving a cached copy is indistinguishable from a fix that did not
+// work, and we lost a round to exactly that.
+const BUILD = 'canvas 6';
+
 const C = {
   env: 'live', sb: null, has006: false,
   boards: [], board: null,
@@ -462,6 +467,7 @@ function loadScript(src) {
   // 006 decides whether a thing can be carried across as a handout at all.
   const p6 = await C.sb.from('slots').select('register,parent_slot_id').limit(1);
   C.has006 = !p6.error;
+  rec(BUILD);
   rec('booted', { env: C.env, has006: C.has006, user: session.user && session.user.id });
 
   shell();
@@ -766,6 +772,8 @@ function chrome() {
 
   document.getElementById('top').innerHTML =
     '<span class="title">Canvas</span>' +
+    '<span style="font-size:10.5px;color:#9b9e96" title="Which build is loaded">' +
+      BUILD + '</span>' +
     '<div class="boards">' +
       C.boards.map(b =>
         '<button class="btab' + (C.board && b.id === C.board.id ? ' on' : '') + '" ' +
@@ -1128,6 +1136,19 @@ async function carry(it, register) {
                                 positions: (after || []).map(x => x.position).sort((a, b) => a - b) });
 
   await loadUses();
+
+  // The studio reads a lesson when it opens it and then holds it. A row
+  // written here is invisible there until it reads again, which looked exactly
+  // like carrying across not working at all. So say so: the studio is
+  // listening for this and offers to re-read. It does not re-read by itself —
+  // §4, nothing moves the teacher's place without being asked.
+  try {
+    localStorage.setItem('studioLessonTouched', JSON.stringify({
+      lesson: C.lessonId, at: Date.now(),
+      what: (it.act && it.act.name) || 'something'
+    }));
+  } catch (e3) {}
+
   C.err = null;
   C.msg = '<b>' + esc(it.act ? it.act.name : 'It') + '</b> is now ' +
     (reg === 'handout' ? 'a handout' : 'step ' + pos) +
@@ -1296,10 +1317,10 @@ function editorHTML() {
     '<div class="efoot">' +
       '<span id="edstate">' +
         (e.err ? '<span style="color:#8a2d2d">' + esc(e.err) + '</span>'
-               : e.saved ? esc(e.saved) : 'Saved to your library either way.') +
+               : e.saved ? esc(e.saved)
+               : 'Saved to your library, and left on the canvas either way.') +
       '</span>' +
       '<div style="flex:1"></div>' +
-      '<button class="btn" id="edboard">Leave it on the canvas</button>' +
       '<button class="btn" id="edlesson">Put it in the lesson</button>' +
       '<button class="btn dark" id="edsave">Save</button>' +
     '</div>' +
@@ -1428,7 +1449,6 @@ function wireEditor() {
   };
 
   document.getElementById('edsave').onclick = () => saveReader();
-  document.getElementById('edboard').onclick = () => saveReader('board');
   document.getElementById('edlesson').onclick = () => saveReader('lesson');
 
   words();
@@ -1473,18 +1493,22 @@ async function saveReader(then) {
 
   e.name = name;
   e.saving = false;
-  e.saved = 'Saved to your library.';
+  e.saved = 'Saved to your library, and on the canvas.';
 
-  if (then === 'board' && !e.boardItem) {
+  // Anything made here is left on the canvas, always, without being asked for.
+  // The teacher who makes a reader and sends it straight to the lesson should
+  // not then have to hunt for it: the canvas is where it was made and the
+  // canvas is where it stays. Putting it in a lesson is a separate decision
+  // and does not take it off the desk — the same rule carrying across follows.
+  if (!e.boardItem) {
     await addCard({ id, name, kind: 'display' }, true);
     const made = C.items[C.items.length - 1];
     if (made) e.boardItem = made.id;
-    e.saved = 'Saved, and left on the canvas.';
   }
   if (then === 'lesson') {
     rec('reader saved, carrying it across', { activity: id, name });
     await carry({ activity_id: id, act: { name } }, 'stage');
-    e.saved = 'Saved, and put in the lesson.';
+    e.saved = 'Saved, on the canvas, and put in the lesson.';
   }
 
   // The card on the board carries the name, and the name may have changed.
