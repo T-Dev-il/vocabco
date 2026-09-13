@@ -210,6 +210,12 @@
     position:fixed; z-index:40; display:none; background:#000;
     border-radius:5px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.35);
   }
+  /* Docked: the take's video, in the corner, as surface.html puts it. */
+  #st-panel.dock{
+    right:14px; bottom:74px; left:auto; top:auto; width:320px; height:180px;
+    box-shadow:0 6px 24px rgba(20,22,18,.34);
+  }
+  @media (max-width:900px){ #st-panel.dock{ width:220px; height:124px } }
   #st-panel iframe, #st-host{ width:100%; height:100%; border:0; display:block }
   .learner .vidbadge{
     font:11.5px/1.5 ui-sans-serif,system-ui,sans-serif; color:var(--dim);
@@ -1386,9 +1392,40 @@ function clock(sec) {
   sec = Math.max(0, Math.floor(sec));
   return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
 }
+// The video is the clock when the take follows one. An action recorded at 4:12
+// is four minutes twelve into the VIDEO, so the walk and the video cannot come
+// apart. Without a video this is the stopwatch it has always been, and a take
+// with no media records exactly as it did before.
+//
+// An advert, a stall, or a player still loading must NOT move the clock. Holding
+// the last good reading is the whole point: it is what stops a break for an
+// advert being recorded as the teacher jumping back to the start of the lesson.
 function takeSeconds() {
   if (!S.take) return 0;
+  const m = S.take.media || {};
+  if (ytId(m.ref)) {
+    const ms = stMediaState();
+    if (ms.kind === 'ad' || ms.kind === 'loading' || ms.kind === 'buffering') return stLastGood;
+    stLastGood = S.take.base + Math.max(0, stTime() - (m.in_s || 0));
+    return stLastGood;
+  }
   return S.take.base + (Date.now() - S.take.startedMs) / 1000;
+}
+
+// Everything clips.media holds for the open clip, in one place. It exists
+// because four different writers used to set media to { seconds } wholesale,
+// which would now erase the address, the in point and the learned length every
+// time an action fired. A partial write is how the clock loses its video.
+function takeMedia(extra) {
+  const m = (S.take && S.take.media) || {};
+  let sec = clipSeconds();
+  // With a stopwatch, seconds only ever goes up. With a video it is wherever the
+  // video is, and a teacher who scrubs back to re-explain something would
+  // otherwise SHRINK the take — and the next clip would then resume from the
+  // wrong place, because base is the sum of these. So keep the furthest point
+  // reached, which is what "how much of this take exists" has always meant.
+  if (ytId(m.ref)) { S.take.maxSec = Math.max(S.take.maxSec || 0, sec); sec = S.take.maxSec; }
+  return { ...m, seconds: sec, ...(extra || {}) };
 }
 
 // Clip duration lives in clips.media as { seconds }. 003 leaves media's shape
@@ -1399,7 +1436,7 @@ function clipSeconds() { return Math.round(takeSeconds() - S.take.base); }
 // began the instant you reached for it would have you in it before you were
 // ready, and a take is the thing you keep.
 function armNew() {
-  S.arming = { recId: null, name: 'Take ' + (S.takes.length + 1), base: 0 };
+  S.arming = { recId: null, name: 'Take ' + (S.takes.length + 1), base: 0, ref: '' };
   S.mode = 'record';
   render();
 }
@@ -1411,7 +1448,10 @@ async function armResume(recId) {
   const { data: clips } = await S.sb.from('clips')
     .select('media').eq('recording_id', recId).is('deleted_at', null);
   const base = (clips || []).reduce((n, c) => n + ((c.media && c.media.seconds) || 0), 0);
-  S.arming = { recId, name: rec.name, base };
+  // Carrying the video across too. Resuming a take that followed a video and
+  // then following nothing would put the second half on a different clock.
+  const prev = (clips || []).map(c => (c.media || {}).ref).filter(Boolean).pop() || '';
+  S.arming = { recId, name: rec.name, base, ref: prev };
   S.mode = 'record';
   render();
 }
@@ -1419,6 +1459,15 @@ async function armResume(recId) {
 async function startArmed() {
   if (!S.arming) return;
   const a = S.arming;
+  // Read from the box at the moment Start is pressed. Nothing re-renders while
+  // arming, but reading it here means nothing has to be true about that.
+  const box = document.getElementById('takeref');
+  if (box) a.ref = box.value.trim();
+  if (a.ref && !ytId(a.ref)) {
+    S.error = 'That is not a YouTube address. Only YouTube plays here today — ' +
+              'clear the box to record with a stopwatch instead.';
+    return render();
+  }
   let recId = a.recId;
   if (!recId) {
     const { data: rec, error } = await S.sb.from('recordings')
@@ -1429,20 +1478,28 @@ async function startArmed() {
   S.arming = null;
   S.mediaNote = null;
   await startCapture();
-  await openClip(recId, a.name, a.base);
+  await openClip(recId, a.name, a.base, a.ref);
 }
 
-async function openClip(recId, name, base) {
+async function openClip(recId, name, base, ref) {
   const { data: clips } = await S.sb.from('clips')
     .select('position').eq('recording_id', recId).is('deleted_at', null);
   const pos = (clips || []).reduce((m, c) => Math.max(m, c.position || 0), 0) + 1;
 
+  // media's shape is left open by 003. { seconds } was the first thing in it;
+  // ref and in_s are the next, and they are the same two keys surface.html
+  // already reads, so a take recorded here can be replayed there.
+  const media = { seconds: 0 };
+  if (ytId(ref)) { media.ref = String(ref).trim(); media.in_s = 0; }
+
   const { data: clip, error } = await S.sb.from('clips')
-    .insert({ recording_id: recId, position: pos, media: { seconds: 0 }, actions: [] })
+    .insert({ recording_id: recId, position: pos, media, actions: [] })
     .select('id').single();
   if (error) { S.error = error.message; return render(); }
 
-  S.take = { id: recId, name, clipId: clip.id, base, startedMs: Date.now(), actions: [] };
+  S.take = { id: recId, name, clipId: clip.id, base, startedMs: Date.now(),
+             actions: [], media };
+  stLastGood = base;
   // Where the take begins is itself an action. Without it a replay has no idea
   // where to put you and simply leaves you wherever you already were — which is
   // exactly what it did before this line existed.
@@ -1458,7 +1515,7 @@ async function act(kind, slotId, extra) {
   if (!S.take) return;
   S.take.actions.push({ t: +(takeSeconds() - S.take.base).toFixed(2), kind, slot: slotId || null, ...(extra || {}) });
   await S.sb.from('clips')
-    .update({ actions: S.take.actions, media: { seconds: clipSeconds() } })
+    .update({ actions: S.take.actions, media: takeMedia() })
     .eq('id', S.take.clipId);
 }
 
@@ -1469,9 +1526,11 @@ async function stopTake() {
 
   const file = await finishCapture(recId, clipId);
   await S.sb.from('clips')
-    .update({ actions: S.take.actions, media: { seconds, ...(file || {}) } })
+    .update({ actions: S.take.actions, media: takeMedia({ seconds, ...(file || {}) }) })
     .eq('id', clipId);
   S.take = null;
+  // The video belonged to the take. Stopping the take stops it.
+  stKill();
   try { localStorage.removeItem(OPEN_TAKE); } catch (e) {}
   clearLive();
   stopTick();
@@ -1506,33 +1565,44 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 8';
+const BUILD = 'studio 9';
 
 // ───────────────────────────────────────────────────────────────────────────
-// A video activity plays its own video
+// The lesson video, and the clock that reads from it
 //
-// Until now it did not, and said so on screen. This is the same mechanism that
-// is already proven in surface.html — the player, the ad heuristic, and the
-// rule that an advert must not be mistaken for the lesson. It is brought over
-// rather than shared, for the reason §12 gives about the reader: the two files
-// do not know about each other, and a seam between them is a key, not a module.
+// Brought over from surface.html, which has had this working for a while: the
+// player, the advert heuristic, and the rule that the clock HOLDS rather than
+// counts when what is on screen is not the lesson. Transferred rather than
+// shared — the two files do not know about each other, and the seam between
+// them is the shape of clips.media, not a module.
 //
-// THE PANEL LIVES ON <body>, NEVER INSIDE #root. This studio re-renders its
-// entire window on every change, and moving an iframe reloads it — so the panel
-// is created once, positioned fixed over a placeholder, and left alone. Exactly
-// the rule surface.html states in capitals, and it matters more here, not less.
+// WHAT IT IS FOR. A take is the teacher walking their own lesson while the
+// lesson's video plays. Timing that walk with a stopwatch means the walk and
+// the video come apart the moment anything pauses, buffers, or breaks for an
+// advert — and they never come back together. So the video is the clock: an
+// action recorded at 4:12 is four minutes twelve into the VIDEO, whatever the
+// teacher's afternoon did in the meantime.
 //
-// Nothing hooks into render(). A loop looks for the placeholder and reacts to
-// what it finds, so the player survives a render loop that was never designed
-// with it in mind and needs no cooperation from one.
+// Only YouTube today, exactly as in surface.html, and deliberately so. Another
+// platform is another ytId() and another mount; nothing that reads the clock
+// would change.
+//
+// ONE PLAYER, AND THE TAKE OWNS IT. A running take that follows a video
+// outranks a video activity sitting on the stage. Two players would mean two
+// soundtracks, and the take is the thing being recorded. The activity's slot
+// says so on its face rather than going quietly dark.
+//
+// THE PANEL LIVES ON <body>, NEVER INSIDE #root. This window re-renders itself
+// completely on every change, and moving an iframe reloads it. That is the rule
+// surface.html states in capitals; here it matters more, not less.
 
 const AD_CEILING = 300;                  // the developer's rule, as in surface.html
 let stPlayer = null, stReady = false, stCurrent = null, stState = -1;
 let stMaxDur = 0;
-const stKnownDur = {};                   // video id -> its real length, this session only
+let stLastGood = 0;                      // the last clock reading that was the lesson
 
 // Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
-// Same reader as surface.html's, deliberately identical.
+// Deliberately identical to surface.html's, so the same address works in both.
 function ytId(ref) {
   const r = String(ref || '').trim();
   if (!r) return null;
@@ -1541,69 +1611,114 @@ function ytId(ref) {
   return m ? m[1] : null;
 }
 
-// What a video activity draws. A hole, not a frame: it reserves the space and
-// carries the address, and the loop below puts the player over it.
+// What a video activity draws: a hole, not a frame. It reserves the space and
+// carries the address; the loop below puts the one player over it. The message
+// inside is a floor — the panel covers it when the player loads, so if it is
+// still readable something did not work and the teacher is told.
 function videoBlock(ref) {
   const id = ytId(ref);
   if (!ref) return '<div class="vid">No video address on this activity.</div>';
   if (!id) return '<div class="vid">Only YouTube addresses play here today.<br>' +
     'This one is ' + esc(String(ref).slice(0, 80)) + '</div>';
-  // The message is a floor, not decoration: the panel covers it when the player
-  // loads, so if it is still readable something did not work and the teacher is
-  // told rather than left looking at a black rectangle.
   return '<div class="vid ytslot" data-yt="' + esc(id) + '">' +
            '<span class="ph">Starting the player\u2026</span>' +
-         '</div>' +
-         '<div class="vidbadge" id="vidbadge"></div>';
+         '</div>';
 }
 
 function stDur() {
   try { return stPlayer && stPlayer.getDuration ? stPlayer.getDuration() : 0; } catch { return 0; }
 }
+function stTime() {
+  try { return stPlayer && stPlayer.getCurrentTime ? stPlayer.getCurrentTime() : 0; } catch { return 0; }
+}
 
-// AD DETECTION, AND WHY IT IS STILL A HEURISTIC. YouTube's iframe API exposes no
-// ad signal: during a break the player reports PLAYING and getCurrentTime()
-// counts the advert from zero. What does change is getDuration(), which reports
-// the advert's length during the advert. So the longest duration seen is the
-// content, and anything shorter means an advert is on screen.
+// ADVERT DETECTION, AND WHY IT IS STILL A HEURISTIC. YouTube's iframe API
+// exposes no advert signal at all: during a break the player reports PLAYING and
+// getCurrentTime() counts the advert from zero. That is what made surface.html's
+// walkthrough restart every time a break began. What DOES change is
+// getDuration(), which reports the advert's length during the advert and the
+// video's length otherwise. So the longest duration seen is the content, and
+// anything shorter means an advert is on screen.
 //
-// A pre-roll defeats that on its own, because before the lesson has ever loaded
-// the advert's length IS the longest seen. Hence AD_CEILING: until a duration
-// above it has been seen, anything under it is assumed to be an advert, and the
-// first duration above it is taken as the real length.
+// A pre-roll defeats that on its own — before the lesson has ever loaded, the
+// advert's length IS the longest seen. Hence the remembered length: once known,
+// anything shorter than it is an advert, exactly. Until it is known, anything
+// under AD_CEILING is assumed to be one, and the first duration above it is
+// saved as the real length.
 //
-// Unlike surface.html this does NOT write the learned length anywhere. There it
-// belongs to a clip and has a home in clips.media.dur. Here it would have to go
-// on the activity, and nothing reads it — how a video activity reaches a clip is
-// not settled. Remembering it for the session is enough to keep the badge honest
-// while the teacher is looking at it, and invents no meaning that has to be
-// lived with later.
+// The real answer for a teacher is upstream: their own unmonetised upload
+// carries no adverts. This keeps the take honest when one appears anyway.
 function stMediaState() {
-  const slot = document.querySelector('.ytslot');
-  if (!slot) return { kind: 'none' };
+  const w = stWanted();
+  if (!w) return { kind: 'none' };
   if (!stPlayer || !stReady) return { kind: 'loading' };
   const d = stDur();
   if (d > stMaxDur) stMaxDur = d;
-  const known = stKnownDur[stCurrent] || 0;
+
+  const known = stKnownDur(w);
   if (d > 0) {
     if (known) { if (d < known - 1) return { kind: 'ad' }; }
     else if (d < AD_CEILING) return { kind: 'ad', unsure: true };
-    else stKnownDur[stCurrent] = Math.round(d);
+    else rememberDuration(w, d);
   }
   if (stState === 2) return { kind: 'paused' };
   if (stState === 3) return { kind: 'buffering' };
   return { kind: 'ok' };
 }
 
-// Said out loud, because a player that has quietly stopped being the lesson is
-// indistinguishable from one that is working.
-function stBadgeText(ms) {
-  if (ms.kind === 'ad' && ms.unsure) return 'advert? \u2014 not counted';
-  return ms.kind === 'loading'   ? 'video loading'
-       : ms.kind === 'ad'        ? 'advert \u2014 not the lesson'
-       : ms.kind === 'buffering' ? 'buffering'
-       : ms.kind === 'paused'    ? 'paused'
-       : 'playing the lesson video';
+// Where the remembered length lives. For a take it belongs to the clip, in
+// clips.media.dur — the same field surface.html writes, so a take recorded here
+// and replayed there does not have to learn the video's length twice. For a
+// video activity it is held for the session only: it would have to go on the
+// activity, nothing reads it there, and how a video activity reaches a clip is
+// not settled. Guessing at that now would be a meaning to live with later.
+const stSessionDur = {};
+function stKnownDur(w) {
+  if (w.owner === 'take') return (S.take.media || {}).dur || 0;
+  if (w.owner === 'play') { const r = S.play.reel[S.play.at]; return (r && r.dur) || 0; }
+  return stSessionDur[w.id] || 0;
+}
+
+let _durSaving = false;
+async function rememberDuration(w, d) {
+  const dur = Math.round(d);
+  if (w.owner === 'activity') { stSessionDur[w.id] = dur; return; }
+  if (w.owner === 'play') { const r = S.play.reel[S.play.at]; if (r) r.dur = dur; return; }
+  if (_durSaving || !S.take || (S.take.media || {}).dur) return;
+  _durSaving = true;
+  S.take.media = { ...(S.take.media || {}), dur };
+  // Not a trim and not a fork: this records what the video is, not what the
+  // teacher chose. Written once per clip, the first time the real length shows.
+  await S.sb.from('clips').update({ media: takeMedia() }).eq('id', S.take.clipId);
+  _durSaving = false;
+}
+
+// Said out loud, because a clock that has quietly stopped following the video is
+// indistinguishable from one that is working. This is the line that was missing.
+function stBadge() {
+  const el = document.getElementById('vidbadge');
+  if (!el) return;
+  const ms = stMediaState();
+  const txt = ms.kind === 'none'      ? ''
+            : ms.kind === 'loading'   ? 'video loading \u2014 clock holding'
+            : ms.kind === 'ad'        ? (ms.unsure ? 'advert? \u2014 clock holding'
+                                                   : 'advert \u2014 clock holding')
+            : ms.kind === 'buffering' ? 'buffering \u2014 clock holding'
+            : ms.kind === 'paused'    ? 'paused'
+            : 'following the video';
+  const wantBtn = ms.kind === 'ad' && !!ms.unsure;
+  if (el.getAttribute('data-txt') === txt + (wantBtn ? '+b' : '')) return;
+  el.setAttribute('data-txt', txt + (wantBtn ? '+b' : ''));
+  el.innerHTML = esc(txt) + (wantBtn
+    ? ' <button class="btn" id="notad" style="padding:1px 6px;font-size:11px">' +
+      'It\u2019s the video</button>' : '');
+  const b = document.getElementById('notad');
+  // The escape hatch for a short lesson video that AD_CEILING gets wrong. It
+  // says: whatever is playing now is the lesson, remember its length as real.
+  if (b) b.onclick = () => {
+    const w = stWanted();
+    if (w) rememberDuration(w, Math.max(stDur(), AD_CEILING + 1));
+  };
 }
 
 function stPanel() {
@@ -1630,7 +1745,7 @@ function loadYtApi(cb) {
   document.head.appendChild(tag);
 }
 
-function stMount(videoId) {
+function stMount(videoId, startAt) {
   if (stCurrent === videoId && stPlayer) return;
   stKill();
   stCurrent = videoId;
@@ -1642,9 +1757,12 @@ function stMount(videoId) {
         videoId,
         host: 'https://www.youtube-nocookie.com',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1,
-                      origin: location.origin },
+                      start: Math.floor(startAt || 0), origin: location.origin },
         events: {
-          onReady: () => { stReady = true; stMaxDur = 0; },
+          onReady: () => {
+            stReady = true; stMaxDur = 0;
+            try { stPlayer.seekTo(startAt || 0, true); } catch {}
+          },
           onStateChange: e => { stState = e.data; }
         }
       });
@@ -1659,69 +1777,86 @@ function stKill() {
   if (p) p.remove();
 }
 
-// Leaving the activity hides the player rather than destroying it, so coming
-// back does not reload the video. But a hidden player must not keep talking:
-// audio from a video nobody can see is worse than a reload.
+// Leaving an activity hides the player rather than destroying it, so coming back
+// does not reload the video. A hidden player must not keep talking, though:
+// sound from a video nobody can see is worse than a reload.
 function stHide() {
   const p = document.getElementById('st-panel');
   if (p) p.style.display = 'none';
   try { if (stPlayer && stPlayer.pauseVideo) stPlayer.pauseVideo(); } catch {}
 }
 
-// One loop, no hooks. It watches for the placeholder, follows it while it moves,
-// and clips it to the scrolling area so a fixed panel cannot float over the
-// spine or the corner when the stage is scrolled past it.
+// Who the player belongs to at this instant, in priority order.
+function stWanted() {
+  if (S.take && ytId((S.take.media || {}).ref))
+    return { id: ytId(S.take.media.ref), owner: 'take', in_s: (S.take.media.in_s || 0) };
+  if (S.play) {
+    const r = S.play.reel[S.play.at];
+    if (r && ytId(r.ref)) return { id: ytId(r.ref), owner: 'play', in_s: r.in_s || 0 };
+  }
+  const slot = document.querySelector('.ytslot');
+  if (slot) return { id: slot.getAttribute('data-yt'), owner: 'activity', el: slot, in_s: 0 };
+  return null;
+}
+
+// One loop and no hooks into render(). It watches for whoever owns the player,
+// follows a stage placeholder while it moves, and clips it to the scrolling area
+// so a fixed panel cannot float over the spine when the stage is scrolled past.
 let stLastBox = '';
 function stLoop() {
   requestAnimationFrame(stLoop);
-  const slots = document.querySelectorAll('.ytslot');
-  if (!slots.length) { if (stPlayer) stHide(); return; }
-  const slot = slots[0];
+  const w = stWanted();
 
-  // A step and a handout can both carry a video. There is one player, so the
-  // rest say what they are instead of sitting there as dark boxes that look
-  // broken. Which one plays is the step's, because it is drawn first.
-  for (let i = 1; i < slots.length; i++) {
-    if (slots[i].getAttribute('data-extra')) continue;
-    slots[i].setAttribute('data-extra', '1');
-    slots[i].innerHTML = '<span class="ph">One video plays at a time. ' +
-      'This one is waiting its turn.</span>';
-  }
+  // Every stage video slot that is NOT driving the player says why.
+  document.querySelectorAll('.ytslot').forEach((el, i) => {
+    const mine = w && w.owner === 'activity' && i === 0;
+    const msg = mine ? '' : (w && w.owner !== 'activity'
+      ? 'The take has the player. This video waits until the take stops.'
+      : 'One video plays at a time. This one is waiting its turn.');
+    if (el.getAttribute('data-msg') === msg) return;
+    el.setAttribute('data-msg', msg);
+    el.innerHTML = '<span class="ph">' +
+      (msg || 'Starting the player\u2026') + '</span>';
+  });
 
-  const want = slot.getAttribute('data-yt');
-  if (want && want !== stCurrent) stMount(want);
+  if (!w) { if (stPlayer) stHide(); return; }
+  if (w.id !== stCurrent) stMount(w.id, w.in_s);
 
   const p = document.getElementById('st-panel');
   if (!p) return;
 
-  const r = slot.getBoundingClientRect();
-  const holder = slot.closest('.body') || document.getElementById('root');
-  const h = holder ? holder.getBoundingClientRect() : { top: 0, bottom: innerHeight };
-  const hidden = r.height < 2 || r.bottom < h.top + 4 || r.top > h.bottom - 4;
-  p.style.display = hidden ? 'none' : 'block';
-  if (hidden) return;
-
-  const box = Math.round(r.left) + ',' + Math.round(r.top) + ',' +
-              Math.round(r.width) + ',' + Math.round(r.height);
-  if (box !== stLastBox) {
-    stLastBox = box;
-    p.style.left = r.left + 'px';
-    p.style.top = r.top + 'px';
-    p.style.width = r.width + 'px';
-    p.style.height = r.height + 'px';
+  if (w.owner === 'activity') {
+    p.classList.remove('dock');
+    const r = w.el.getBoundingClientRect();
+    const holder = w.el.closest('.body') || document.getElementById('root');
+    const h = holder ? holder.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+    const hidden = r.height < 2 || r.bottom < h.top + 4 || r.top > h.bottom - 4;
+    p.style.display = hidden ? 'none' : 'block';
+    if (!hidden) {
+      const box = Math.round(r.left) + ',' + Math.round(r.top) + ',' +
+                  Math.round(r.width) + ',' + Math.round(r.height);
+      if (box !== stLastBox) {
+        stLastBox = box;
+        p.style.left = r.left + 'px'; p.style.top = r.top + 'px';
+        p.style.width = r.width + 'px'; p.style.height = r.height + 'px';
+      }
+    }
+  } else {
+    // Docked in the corner, as in surface.html. The teacher is walking a lesson
+    // with a video running, not looking at a page that has a video on it.
+    if (!p.classList.contains('dock')) {
+      p.classList.add('dock');
+      p.style.left = p.style.top = p.style.width = p.style.height = '';
+      stLastBox = '';
+    }
+    p.style.display = 'block';
   }
 
-  const badge = document.getElementById('vidbadge');
-  if (badge) {
-    const txt = stBadgeText(stMediaState());
-    if (badge.textContent !== txt) badge.textContent = txt;
-  }
+  stBadge();
 }
 requestAnimationFrame(stLoop);
 
-// A take that is running must not be scored against a video that is talking over
-// it, and a window being closed should not leave a player alive in a page the
-// browser is tearing down.
+// A window being torn down should not leave a player alive in it.
 addEventListener('pagehide', stKill);
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1797,7 +1932,7 @@ function flushClip() {
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
-      body: JSON.stringify({ media: { seconds: clipSeconds() } })
+      body: JSON.stringify({ media: takeMedia() })
     });
   } catch (e) {}
 }
@@ -1842,7 +1977,7 @@ function tick() {
     // times a minute for the length of a lesson is the kind of volume FIX-004
     // was about. Ten seconds is the most an unannounced death can now cost.
     if (n % 10 === 0) {
-      S.sb.from('clips').update({ media: { seconds: clipSeconds() } })
+      S.sb.from('clips').update({ media: takeMedia() })
         .eq('id', S.take.clipId);
     }
   }, 1000);
@@ -1951,14 +2086,16 @@ async function playTake(recId) {
   (clips || []).forEach(c => {
     (c.actions || []).forEach(a => seq.push({ ...a, at: base + (a.t || 0) }));
     const sec = (c.media && c.media.seconds) || 0;
-    reel.push({ offset: base, seconds: sec, path: c.media && c.media.path });
+    const md = c.media || {};
+    reel.push({ offset: base, seconds: sec, path: md.path,
+                ref: md.ref, in_s: md.in_s || 0, dur: md.dur || 0 });
     base += sec;
   });
   seq.sort((x, y) => x.at - y.at);
 
   S.play = { recId, name: rec ? rec.name : 'Take', seq, reel, at: 0, total: base,
              done: 0, startedMs: Date.now() };
-  if (reel.some(r => r.path)) await cueClip(0);
+  if (reel.some(r => r.path || ytId(r.ref))) await cueClip(0);
   S.handed = {};
   S.live = {};
   S.finished = false;
@@ -1980,6 +2117,9 @@ async function cueClip(i) {
   if (!S.play || !S.play.reel[i]) return;
   S.play.at = i;
   const r = S.play.reel[i];
+  // A clip that followed a video needs no bucket file: stWanted() sees the new
+  // reel position and the loop mounts it. Seeking is the player's own job.
+  if (ytId(r.ref)) { stLastGood = r.offset; S.play.url = null; render(); return; }
   if (!r.path) return;
   S.play.url = await clipUrl(r.path);
   render();
@@ -1990,6 +2130,18 @@ async function cueClip(i) {
 function playElapsed() {
   if (!S.play) return 0;
   const r = S.play.reel[S.play.at];
+
+  // A clip that followed a YouTube video is replayed against that video, on the
+  // same rule as recording: an advert or a stall holds the clock rather than
+  // moving it. Otherwise the replay would run on past a break and hand things
+  // out to somebody still watching the advert.
+  if (r && ytId(r.ref)) {
+    const ms = stMediaState();
+    if (ms.kind !== 'ad' && ms.kind !== 'loading' && ms.kind !== 'buffering')
+      stLastGood = r.offset + Math.max(0, stTime() - (r.in_s || 0));
+    return stLastGood;
+  }
+
   const v = document.getElementById('reel');
   if (r && r.path && v && !isNaN(v.currentTime)) return r.offset + v.currentTime;
   return (Date.now() - S.play.startedMs) / 1000;
@@ -2028,6 +2180,8 @@ function playTick() {
 function stopPlay() {
   S.play = null;
   stopTick();
+  // The video belonged to the replay, not to the page.
+  stKill();
   render();
 }
 
@@ -2062,6 +2216,7 @@ function deck() {
     '<div class="track"><u style="width:100%"></u></div>' +
     '<button class="btn" id="mark">Mark</button>' +
     '<span style="color:#8B939B">' + esc(S.take.name) + '</span>' +
+    '<span id="vidbadge" style="color:#8B939B"></span>' +
   '</div>';
 }
 
@@ -2077,7 +2232,17 @@ function takePanel() {
   if (S.arming) {
     return '<div class="lbl">Ready</div>' +
       '<div class="none">' + esc(S.arming.name) + ' is set up. Press Start on the deck below ' +
-      'when you are ready.</div>';
+      'when you are ready.</div>' +
+      // Asked here rather than after Start, because the clock has to know what it
+      // is reading from before the first action lands on it.
+      '<div style="padding:0 10px 8px">' +
+        '<div class="field"><label>Video this take follows (optional)</label>' +
+          '<input id="takeref" class="inp" type="text" placeholder="Paste a YouTube address" value="' +
+            esc(S.arming.ref || '') + '"></div>' +
+        '<div class="none" style="padding:0">Leave it empty and the take is timed by a ' +
+        'stopwatch, as before. Put a video in and the video becomes the clock, so ' +
+        'pausing it pauses the take.</div>' +
+      '</div>';
   }
   if (S.take) {
     const acts = S.take.actions.slice(-8).reverse();
@@ -2352,6 +2517,10 @@ function camBox() {
       'controls playsinline></video>';
   }
   if (S.play) {
+    const r = S.play.reel[S.play.at];
+    if (r && ytId(r.ref))
+      return '<div class="cam" style="font-size:10.5px;padding:0 10px;text-align:center">' +
+        'following the lesson video in the corner</div>';
     return '<div class="cam">this take has no video</div>';
   }
   if (S.media) {
