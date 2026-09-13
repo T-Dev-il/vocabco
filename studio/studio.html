@@ -199,6 +199,23 @@
     color:#7b838c; font:12px/1.4 ui-sans-serif,system-ui,sans-serif;
     text-align:center; padding:0 16px;
   }
+  /* The hole the player is positioned over. It reserves the space and holds the
+     address; it never contains the iframe. See the panel note further down. */
+  .learner .ytslot{
+    height:auto; aspect-ratio:16/9; width:100%; padding:0;
+    background:#14171b; position:relative;
+  }
+  .learner .ytslot .ph{ font:12px/1.4 ui-sans-serif,system-ui,sans-serif; color:#7b838c }
+  #st-panel{
+    position:fixed; z-index:40; display:none; background:#000;
+    border-radius:5px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,.35);
+  }
+  #st-panel iframe, #st-host{ width:100%; height:100%; border:0; display:block }
+  .learner .vidbadge{
+    font:11.5px/1.5 ui-sans-serif,system-ui,sans-serif; color:var(--dim);
+    margin:-8px 0 12px; display:flex; gap:8px; align-items:center;
+  }
+  .learner .vidbadge button{ padding:1px 6px; font-size:11.5px }
   .learner .raw{
     font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap;
     background:#F4F4F0; border:1px solid var(--line); border-radius:5px; padding:10px;
@@ -667,8 +684,7 @@ const KINDS = {
       field('Address of the video', input('url', c.url)),
     read: el => ({ title: val(el,'title'), url: val(el,'url'), carries:{...CARRIES} }),
     check: c => !c.url ? 'No video address.' : null,
-    draw: c => '<div class="vid">A video activity does not play its own video yet.<br>' +
-      'Only the walkthrough\'s player is real.</div>' +
+    draw: c => videoBlock(c.url) +
       (c.title ? '<p class="q">' + esc(c.title) + '</p>' : '') +
       '<p class="after">' + esc(c.url) + '</p>'
   },
@@ -1319,10 +1335,10 @@ function paper(slot) {
   let out = '';
 
   if (a.kind === 'video' || c.video_id || c.video) {
-    // §10: a video activity does not play its own video. Only the walkthrough's
-    // player is real. Saying so is better than a dead play button.
-    out += '<div class="vid">A video activity does not play its own video yet.<br>' +
-           'Only the walkthrough\'s player is real.</div>';
+    // The scaffolding's activities kept the address under any of several names,
+    // and their shapes were never written down. Try each, and say so honestly
+    // when none of them holds a YouTube address rather than showing a dead frame.
+    out += videoBlock(c.url || c.video_id || c.video || c.href || c.src);
   }
   if (a.name) out += '<h1>' + esc(a.name) + '</h1>';
 
@@ -1490,7 +1506,223 @@ const TAKE_LIVE = 'studioTakeLive';
 
 // Bumped by hand on every handover, for the same reason the canvas carries one:
 // a cached copy and a failed fix look identical from the outside.
-const BUILD = 'studio 7';
+const BUILD = 'studio 8';
+
+// ───────────────────────────────────────────────────────────────────────────
+// A video activity plays its own video
+//
+// Until now it did not, and said so on screen. This is the same mechanism that
+// is already proven in surface.html — the player, the ad heuristic, and the
+// rule that an advert must not be mistaken for the lesson. It is brought over
+// rather than shared, for the reason §12 gives about the reader: the two files
+// do not know about each other, and a seam between them is a key, not a module.
+//
+// THE PANEL LIVES ON <body>, NEVER INSIDE #root. This studio re-renders its
+// entire window on every change, and moving an iframe reloads it — so the panel
+// is created once, positioned fixed over a placeholder, and left alone. Exactly
+// the rule surface.html states in capitals, and it matters more here, not less.
+//
+// Nothing hooks into render(). A loop looks for the placeholder and reacts to
+// what it finds, so the player survives a render loop that was never designed
+// with it in mind and needs no cooperation from one.
+
+const AD_CEILING = 300;                  // the developer's rule, as in surface.html
+let stPlayer = null, stReady = false, stCurrent = null, stState = -1;
+let stMaxDur = 0;
+const stKnownDur = {};                   // video id -> its real length, this session only
+
+// Accepts a full watch URL, a youtu.be link, an embed link, or a bare id.
+// Same reader as surface.html's, deliberately identical.
+function ytId(ref) {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  if (/^[\w-]{11}$/.test(r)) return r;
+  const m = r.match(/(?:youtu\.be\/|v=|\/embed\/|\/shorts\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+// What a video activity draws. A hole, not a frame: it reserves the space and
+// carries the address, and the loop below puts the player over it.
+function videoBlock(ref) {
+  const id = ytId(ref);
+  if (!ref) return '<div class="vid">No video address on this activity.</div>';
+  if (!id) return '<div class="vid">Only YouTube addresses play here today.<br>' +
+    'This one is ' + esc(String(ref).slice(0, 80)) + '</div>';
+  // The message is a floor, not decoration: the panel covers it when the player
+  // loads, so if it is still readable something did not work and the teacher is
+  // told rather than left looking at a black rectangle.
+  return '<div class="vid ytslot" data-yt="' + esc(id) + '">' +
+           '<span class="ph">Starting the player\u2026</span>' +
+         '</div>' +
+         '<div class="vidbadge" id="vidbadge"></div>';
+}
+
+function stDur() {
+  try { return stPlayer && stPlayer.getDuration ? stPlayer.getDuration() : 0; } catch { return 0; }
+}
+
+// AD DETECTION, AND WHY IT IS STILL A HEURISTIC. YouTube's iframe API exposes no
+// ad signal: during a break the player reports PLAYING and getCurrentTime()
+// counts the advert from zero. What does change is getDuration(), which reports
+// the advert's length during the advert. So the longest duration seen is the
+// content, and anything shorter means an advert is on screen.
+//
+// A pre-roll defeats that on its own, because before the lesson has ever loaded
+// the advert's length IS the longest seen. Hence AD_CEILING: until a duration
+// above it has been seen, anything under it is assumed to be an advert, and the
+// first duration above it is taken as the real length.
+//
+// Unlike surface.html this does NOT write the learned length anywhere. There it
+// belongs to a clip and has a home in clips.media.dur. Here it would have to go
+// on the activity, and nothing reads it — how a video activity reaches a clip is
+// not settled. Remembering it for the session is enough to keep the badge honest
+// while the teacher is looking at it, and invents no meaning that has to be
+// lived with later.
+function stMediaState() {
+  const slot = document.querySelector('.ytslot');
+  if (!slot) return { kind: 'none' };
+  if (!stPlayer || !stReady) return { kind: 'loading' };
+  const d = stDur();
+  if (d > stMaxDur) stMaxDur = d;
+  const known = stKnownDur[stCurrent] || 0;
+  if (d > 0) {
+    if (known) { if (d < known - 1) return { kind: 'ad' }; }
+    else if (d < AD_CEILING) return { kind: 'ad', unsure: true };
+    else stKnownDur[stCurrent] = Math.round(d);
+  }
+  if (stState === 2) return { kind: 'paused' };
+  if (stState === 3) return { kind: 'buffering' };
+  return { kind: 'ok' };
+}
+
+// Said out loud, because a player that has quietly stopped being the lesson is
+// indistinguishable from one that is working.
+function stBadgeText(ms) {
+  if (ms.kind === 'ad' && ms.unsure) return 'advert? \u2014 not counted';
+  return ms.kind === 'loading'   ? 'video loading'
+       : ms.kind === 'ad'        ? 'advert \u2014 not the lesson'
+       : ms.kind === 'buffering' ? 'buffering'
+       : ms.kind === 'paused'    ? 'paused'
+       : 'playing the lesson video';
+}
+
+function stPanel() {
+  let p = document.getElementById('st-panel');
+  if (p) return p;
+  p = document.createElement('div');
+  p.id = 'st-panel';
+  p.innerHTML = '<div id="st-host"></div>';
+  document.body.appendChild(p);
+  return p;
+}
+
+function loadYtApi(cb) {
+  if (window.YT && window.YT.Player) return cb();
+  (window._ytCbs = window._ytCbs || []).push(cb);
+  if (window._ytLoading) return;
+  window._ytLoading = true;
+  window.onYouTubeIframeAPIReady = () => {
+    (window._ytCbs || []).forEach(f => { try { f(); } catch {} });
+    window._ytCbs = [];
+  };
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+}
+
+function stMount(videoId) {
+  if (stCurrent === videoId && stPlayer) return;
+  stKill();
+  stCurrent = videoId;
+  stPanel();
+  loadYtApi(() => {
+    if (stCurrent !== videoId || !document.getElementById('st-host')) return;
+    try {
+      stPlayer = new YT.Player('st-host', {
+        videoId,
+        host: 'https://www.youtube-nocookie.com',
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, controls: 1,
+                      origin: location.origin },
+        events: {
+          onReady: () => { stReady = true; stMaxDur = 0; },
+          onStateChange: e => { stState = e.data; }
+        }
+      });
+    } catch (err) { console.warn('studio player failed', err); }
+  });
+}
+
+function stKill() {
+  try { if (stPlayer && stPlayer.destroy) stPlayer.destroy(); } catch {}
+  stPlayer = null; stReady = false; stCurrent = null; stState = -1; stMaxDur = 0;
+  const p = document.getElementById('st-panel');
+  if (p) p.remove();
+}
+
+// Leaving the activity hides the player rather than destroying it, so coming
+// back does not reload the video. But a hidden player must not keep talking:
+// audio from a video nobody can see is worse than a reload.
+function stHide() {
+  const p = document.getElementById('st-panel');
+  if (p) p.style.display = 'none';
+  try { if (stPlayer && stPlayer.pauseVideo) stPlayer.pauseVideo(); } catch {}
+}
+
+// One loop, no hooks. It watches for the placeholder, follows it while it moves,
+// and clips it to the scrolling area so a fixed panel cannot float over the
+// spine or the corner when the stage is scrolled past it.
+let stLastBox = '';
+function stLoop() {
+  requestAnimationFrame(stLoop);
+  const slots = document.querySelectorAll('.ytslot');
+  if (!slots.length) { if (stPlayer) stHide(); return; }
+  const slot = slots[0];
+
+  // A step and a handout can both carry a video. There is one player, so the
+  // rest say what they are instead of sitting there as dark boxes that look
+  // broken. Which one plays is the step's, because it is drawn first.
+  for (let i = 1; i < slots.length; i++) {
+    if (slots[i].getAttribute('data-extra')) continue;
+    slots[i].setAttribute('data-extra', '1');
+    slots[i].innerHTML = '<span class="ph">One video plays at a time. ' +
+      'This one is waiting its turn.</span>';
+  }
+
+  const want = slot.getAttribute('data-yt');
+  if (want && want !== stCurrent) stMount(want);
+
+  const p = document.getElementById('st-panel');
+  if (!p) return;
+
+  const r = slot.getBoundingClientRect();
+  const holder = slot.closest('.body') || document.getElementById('root');
+  const h = holder ? holder.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+  const hidden = r.height < 2 || r.bottom < h.top + 4 || r.top > h.bottom - 4;
+  p.style.display = hidden ? 'none' : 'block';
+  if (hidden) return;
+
+  const box = Math.round(r.left) + ',' + Math.round(r.top) + ',' +
+              Math.round(r.width) + ',' + Math.round(r.height);
+  if (box !== stLastBox) {
+    stLastBox = box;
+    p.style.left = r.left + 'px';
+    p.style.top = r.top + 'px';
+    p.style.width = r.width + 'px';
+    p.style.height = r.height + 'px';
+  }
+
+  const badge = document.getElementById('vidbadge');
+  if (badge) {
+    const txt = stBadgeText(stMediaState());
+    if (badge.textContent !== txt) badge.textContent = txt;
+  }
+}
+requestAnimationFrame(stLoop);
+
+// A take that is running must not be scored against a video that is talking over
+// it, and a window being closed should not leave a player alive in a page the
+// browser is tearing down.
+addEventListener('pagehide', stKill);
 
 // ───────────────────────────────────────────────────────────────────────────
 // The canvas has changed this lesson
