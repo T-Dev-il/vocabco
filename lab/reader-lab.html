@@ -17,6 +17,10 @@
        places already, and a copy here would make it seven.
     4. Pinned to dev, under its own localStorage key, so switching the lab can
        never move the live site's choice.
+    5. All items and Activity are hidden. Library stays, because it is the door
+       into a text. Done here in CSS rather than in app-lab.js, so the copy of
+       the app stays byte-identical to the site's and can be re-copied from it
+       without losing this.
 
   Everything else is the site. Contractor 11, 2026-09-14.
 -->
@@ -35,6 +39,12 @@
   #auth .msg{font-size:12.5px;margin-top:11px;padding:8px 10px;border-radius:6px}
   #auth .msg.err{background:#fbeae6;color:#a23e2a}
   #boot{position:fixed;inset:0;display:grid;place-items:center;color:#8d9285;font-family:Inter,system-ui,sans-serif;font-size:13px}
+
+  /* The lab is the reader. The two tabs that are not on the way to a text are
+     hidden rather than removed — a rule here survives every re-render, and
+     app-lab.js stays a plain copy. Delete these two lines to get them back. */
+  [data-tab="allterms"]{display:none !important}
+  [data-tab="activity"]{display:none !important}
 </style>
 </head>
 <body>
