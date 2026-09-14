@@ -321,20 +321,33 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .lab-a-chip{background:#f4f6f1;border:.5px solid #d3dbc9;box-shadow:0 1.5px 0 #d3dbc9;
     border-radius:4px;padding:1px 5px}
 
-  /* Covered. The text is still there — it is the reader who is not allowed it
-     until they ask. */
-  .lab-a-redact{background:#2b2e29;color:transparent;border-radius:3px;cursor:pointer;
+  /* Cover and blank are NOT forms a class takes. They are a way of playing with
+     whatever is already marked — two switches laid over any class that is
+     showing. The text is never removed; it is styled out of sight and put back,
+     so nothing can be lost by toggling them. */
+  .lab-cover{background:#2b2e29;color:transparent !important;border-radius:3px;cursor:pointer;
     transition:color .12s,background .12s}
-  .lab-a-redact:hover,.lab-a-redact.open{background:rgba(43,46,41,.08);color:inherit}
+  .lab-cover:hover,.lab-cover.lab-reveal{background:rgba(43,46,41,.09);color:inherit !important}
 
-  /* A blank you can answer. Click it, type, press Enter. */
-  .lab-a-blank{border-bottom:2px solid #9ab0c9;color:transparent;cursor:pointer;
-    background:rgba(154,176,201,.12);border-radius:2px}
-  .lab-a-blank.lab-open{color:inherit;background:none}
-  .lab-a-blank.lab-ok{color:#4a7a35;border-bottom-color:#4a7a35;background:none}
-  .lab-a-blank.lab-no{border-bottom-color:#a23e2a;background:rgba(162,62,42,.12)}
-  .lab-blank-in{font:inherit;font-size:.95em;border:none;outline:none;background:none;
-    color:#1B1E21;width:auto;min-width:40px;border-bottom:1px solid #9ab0c9}
+  .lab-blank{position:relative;color:transparent !important;cursor:pointer;
+    border-bottom:2px solid #9ab0c9;background:rgba(154,176,201,.13);border-radius:2px}
+  .lab-blank.lab-reveal{color:inherit !important;background:none}
+  .lab-blank.lab-ok{color:#4a7a35 !important;background:none;border-bottom-color:#4a7a35}
+  .lab-blank.lab-no{border-bottom-color:#a23e2a;background:rgba(162,62,42,.13)}
+  .lab-in{position:absolute;left:0;top:0;height:100%;min-width:100%;font:inherit;
+    border:none;outline:none;background:none;color:#1B1E21;padding:0}
+  .lab-blank.lab-no .lab-in{color:#a23e2a}
+
+  /* What the AI said, beside the tooltip. */
+  #labai{position:fixed;z-index:96;max-width:340px;background:#fff;border:1px solid #c4ccbb;
+    border-radius:10px;box-shadow:0 6px 26px rgba(0,0,0,.18);padding:12px 13px;
+    font:13px/1.55 Inter,system-ui,sans-serif;color:#1B1E21;display:none}
+  #labai.on{display:block}
+  #labai .t{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8b9099;
+    font-weight:650;margin-bottom:6px;display:flex;gap:8px;align-items:center}
+  #labai .t .sp{flex:1}
+  #labai .body{white-space:pre-wrap;max-height:260px;overflow-y:auto}
+  #labai .err{color:#8a3f3f}
 
   /* A span held while a several-part item is being built. */
   .lab-held{outline:1.5px dashed #4a6f9e;outline-offset:2px;border-radius:3px;
@@ -342,6 +355,8 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
 </style>
 
 <button id="labbtn">Composer</button>
+
+<div id="labai"></div>
 
 <div id="labdr">
   <div class="dh"><b>Tooltip composer</b><span class="sp"></span>
@@ -362,10 +377,32 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <span style="font-size:11.5px;color:#6B7178">characters either side, plus the whole sentence</span></div>
     <div class="r"><button class="lb sm" id="marktoggle">Marks in the text</button>
       <span style="font-size:11.5px;color:#6B7178">one switch over every class</span></div>
+    <div class="r"><label class="inl">Play</label>
+      <button class="lb sm playb" data-play="off">off</button>
+      <button class="lb sm playb" data-play="cover">cover them</button>
+      <button class="lb sm playb" data-play="blank">blank them</button></div>
+    <p style="margin-top:6px">Laid over whatever is marked, whatever form the class
+      takes. Covered opens on hover or a press. A blank takes a typed answer:
+      Enter checks it, a wrong one stays on the page in red, clearing the box puts
+      the blank back, Escape gives it up.</p>
     <div class="r"><button class="lb sm" id="capshow">Show what's collected</button>
       <button class="lb sm" id="capcopy">Copy</button>
       <button class="lb sm warn" id="capclear">Clear</button></div>
     <div class="caps" id="caps" style="display:none"></div>
+  </div>
+
+  <div class="card">
+    <h3>Tools that ask an AI</h3>
+    <p>The key is kept in this browser and nowhere else — not in this file, not in
+      the repository, not in the database. Anyone who opens this page on your
+      machine can use it, and nobody else can.</p>
+    <div class="r"><label class="inl">Key</label>
+      <input type="password" id="aikey" placeholder="paste it here" style="flex:1"></div>
+    <div class="r"><label class="inl">Model</label>
+      <input type="text" id="aimodel" style="flex:1"></div>
+    <div class="r"><button class="lb sm" id="aitest">Test it</button>
+      <button class="lb sm warn" id="aiforget">Forget the key</button></div>
+    <div id="aistatus" style="font-size:11.5px;color:#6B7178;margin-top:7px"></div>
   </div>
 
   <div class="card">
@@ -431,8 +468,6 @@ var ANNS = {
   dashed:  "dashed underline",
   boxed:   "dashed box",
   chip:    "marquee chip",
-  redact:  "covered \u2014 hover to reveal",
-  blank:   "blank \u2014 click and type the answer",
   none:    "nothing on the page"
 };
 
@@ -463,7 +498,8 @@ function defaults(){ return {
   define:    {label:"Define", icon:"doc", showLabel:false, kind:"none"},
   defineOwn: {label:"Define in English", icon:"doc", showLabel:false, kind:"none"},
   synonyms:  {label:"Synonyms", icon:"search", showLabel:false, kind:"none"},
-  examples:  {label:"Used elsewhere", icon:"stack", showLabel:false, kind:"none"},
+  examples:  {label:"Examples", icon:"stack", showLabel:true, kind:"ai", wired:true,
+    prompt:"Give me 3 example sentences using \"{{selection}}\" with the meaning it has in this context:\n\n{{context}}\n\nAnswer with the three sentences only, numbered, in the same language as the context. Keep each under 15 words."},
   pronounce: {label:"Say it", icon:"play", showLabel:false, kind:"none"},
   grammar:   {label:"Why this form", icon:"edit", showLabel:false, kind:"none"},
   register:  {label:"How formal", icon:"edit", showLabel:false, kind:"none"},
@@ -498,6 +534,7 @@ var CLASSES = load("classes", []) || [];
 var CAPS = load("caps", []) || [];
 var CTXCHARS = load("ctxchars", 75);
 var SHOWMARKS = load("showmarks", true);
+var PLAY = load("play", "off");          // off | cover | blank
 var extent = "word", picked = null, LOG = [], LAST = null, ttEl = null;
 var parts = [], revealed = false;
 
@@ -552,12 +589,18 @@ function sentenceAround(b, start, end){
    each carrying its character offset in data-c. That is the same thing
    charOffsetOfPoint reads, so the lab and the reader agree by construction
    rather than by a second implementation. */
+/* Unwrap, and nothing else. An earlier version rebuilt each span's contents
+   from a data-text attribute, which destroyed anything the reader had rendered
+   INSIDE that span — a chip, a highlight — and took the rest of the paragraph
+   with it. A lab span is only ever a wrapper, so lifting its children out and
+   dropping the wrapper is always right and can never lose text. */
 function clearPaint(root){
+  var ins = root.querySelectorAll("input.lab-in");
+  for (var k=0; k<ins.length; k++) ins[k].remove();
   var els = root.querySelectorAll("[data-lab]");
-  for (var i=0; i<els.length; i++){
+  for (var i=els.length-1; i>=0; i--){            // innermost first, so nesting unwinds
     var el = els[i], par = el.parentNode;
-    var t = el.getAttribute("data-text");
-    if (t != null) el.textContent = t;          // a blank may have eaten its own text
+    if (!par) continue;
     while (el.firstChild) par.insertBefore(el.firstChild, el);
     par.removeChild(el);
   }
@@ -607,9 +650,10 @@ function labPaint(){
     var cls = CLASSES.filter(function(x){ return x.id === c.cls; })[0];
     if (!cls || !cls.show || cls.ann === "none") return;
     var rs = c.ranges || [{start:c.start, end:c.end}];
+    var play = (PLAY === "cover" ? " lab-cover" : PLAY === "blank" ? " lab-blank" : "");
     rs.forEach(function(r){
       paintRange(root, r.start, r.end,
-        "lab-ann lab-a-" + cls.ann + " lab-c-" + cls.colour, cls.name);
+        "lab-ann lab-a-" + cls.ann + " lab-c-" + cls.colour + play, cls.name);
     });
   });
 }
@@ -622,34 +666,95 @@ if (typeof render === "function" && !window.__labRender){
   };
 }
 
-/* Covered text opens on a click as well as on hover, because hover is not a
-   thing a finger does. A blank takes an answer. */
+/* Cover and blank are switches over what is already marked, so the handler
+   works on any painted span rather than on a particular class form. Nothing is
+   ever deleted: a wrong answer stays on the page in red, clearing the box puts
+   the blank back, Escape gives it up. */
 document.addEventListener("click", function(e){
   if (!e.target.closest) return;
-  var rd = e.target.closest(".lab-a-redact");
-  if (rd){ e.stopPropagation(); rd.classList.toggle("open"); return; }
-  var bl = e.target.closest(".lab-a-blank");
-  if (bl && !bl.querySelector("input")){
-    e.stopPropagation();
-    var answer = bl.getAttribute("data-text") || bl.textContent;
-    var inp = document.createElement("input");
-    inp.className = "lab-blank-in";
-    inp.style.width = Math.max(40, answer.length * 9) + "px";
-    bl.textContent = ""; bl.classList.add("lab-open"); bl.appendChild(inp);
-    inp.focus();
-    inp.onkeydown = function(ev){
-      if (ev.key === "Escape"){ bl.textContent = answer; bl.classList.remove("lab-open"); return; }
-      if (ev.key !== "Enter") return;
-      ev.preventDefault();
-      var ok = inp.value.trim().toLowerCase() === answer.trim().toLowerCase();
-      bl.textContent = ok ? answer : "";
-      bl.classList.toggle("lab-ok", ok);
-      bl.classList.toggle("lab-no", !ok);
-      if (!ok){ bl.classList.remove("lab-open"); setTimeout(function(){ bl.classList.remove("lab-no"); }, 900); }
-      say((ok ? "Blank answered: " : "Blank missed: ") + answer);
-    };
-  }
+  var cv = e.target.closest(".lab-cover");
+  if (cv){ e.stopPropagation(); cv.classList.toggle("lab-reveal"); return; }
+  var bl = e.target.closest(".lab-blank");
+  if (!bl || bl.querySelector("input") || bl.classList.contains("lab-ok")) return;
+  e.stopPropagation();
+  var answer = bl.getAttribute("data-text") || bl.textContent;
+  var inp = document.createElement("input");
+  inp.className = "lab-in";
+  bl.appendChild(inp);
+  inp.focus();
+  inp.oninput = function(){
+    bl.classList.remove("lab-no");
+    if (!inp.value) bl.classList.remove("lab-reveal");
+  };
+  inp.onkeydown = function(ev){
+    if (ev.key === "Escape"){ inp.remove(); bl.classList.add("lab-reveal"); return; }
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    var ok = inp.value.trim().toLowerCase() === answer.trim().toLowerCase();
+    if (ok){ inp.remove(); bl.classList.remove("lab-no"); bl.classList.add("lab-ok"); }
+    else bl.classList.add("lab-no");
+    say((ok ? "Blank answered: " : "Still not it: ") + answer);
+  };
 }, true);
+
+/* ── asking an AI ─────────────────────────────────────────
+   Google's Gemini endpoint, called straight from the page. It answers CORS, so
+   no server of ours is involved — which is also why the key is the user's own
+   and stays in their browser. A slot carries its own prompt, so Translate,
+   Define and Examples are three different questions rather than one tool with
+   three labels. */
+var AI_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+
+function fillPrompt(tpl){
+  var b = bodyText(), rs = heldRanges();
+  var sel = heldTerm();
+  var s0 = rs.length ? rs[0].start : 0, e0 = rs.length ? rs[rs.length-1].end : 0;
+  return String(tpl || "")
+    .replace(/\{\{\s*selection\s*\}\}/g, sel)
+    .replace(/\{\{\s*sentence\s*\}\}/g, rs.length ? sentenceAround(b, s0, e0) : "")
+    .replace(/\{\{\s*context\s*\}\}/g, rs.length
+        ? ((typeof makeContext === "function") ? makeContext(b, s0, e0-s0, Math.max(CTXCHARS, 200))
+           : b.slice(Math.max(0,s0-200), Math.min(b.length, e0+200)))
+        : "")
+    .replace(/\{\{\s*title\s*\}\}/g, (S.texts[ui.readerTextId] || {}).name || "");
+}
+
+async function askAI(promptText){
+  var key = load("aikey", ""), model = load("aimodel", "gemini-3.5-flash");
+  if (!key) return {err:"No key yet. Put one in the composer, under Tools that ask an AI."};
+  try{
+    var res = await fetch(AI_URL + encodeURIComponent(model) + ":generateContent", {
+      method:"POST",
+      headers:{"Content-Type":"application/json", "x-goog-api-key":key},
+      body: JSON.stringify({contents:[{parts:[{text:promptText}]}]})
+    });
+    var j = null;
+    try{ j = await res.json(); }catch(e){}
+    if (!res.ok){
+      return {err:(j && j.error && j.error.message) || ("HTTP " + res.status + " " + res.statusText)};
+    }
+    var cand = (j && j.candidates && j.candidates[0]) || null;
+    var txt = cand && cand.content && cand.content.parts
+      ? cand.content.parts.map(function(p){ return p.text || ""; }).join("")
+      : "";
+    if (!txt && cand && cand.finishReason) return {err:"No text back — " + cand.finishReason};
+    return {text: txt || "(empty reply)"};
+  }catch(e){
+    return {err:"Could not reach the endpoint: " + (e && e.message ? e.message : e)};
+  }
+}
+
+function showAI(title, html, isErr){
+  var box = $("labai");
+  box.className = "on";
+  box.innerHTML = '<div class="t">' + esc(title) + '<span class="sp"></span>'
+    + '<button class="lb sm" id="aiclose">close</button></div>'
+    + '<div class="body' + (isErr ? " err" : "") + '">' + html + "</div>";
+  var r = ttEl ? ttEl.getBoundingClientRect() : {left:40, bottom:80};
+  box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 356)) + "px";
+  box.style.top  = Math.min(window.innerHeight - 120, (r.bottom || 80) + 10) + "px";
+  var c = $("aiclose"); if (c) c.onclick = function(){ box.className = ""; };
+}
 
 /* ── the bar ──────────────────────────────────────────────────────────── */
 function say(m){ LOG.unshift(m); if (LOG.length>40) LOG.pop();
@@ -659,10 +764,15 @@ function heldRanges(){
   if (parts.length) return parts.slice();
   return (LAST && LAST.range) ? [LAST.range] : [];
 }
+/* A held piece carries its own text, taken when it was held. Looking it up
+   afterwards went wrong as soon as anything re-rendered. */
+function makePart(r){
+  var b = bodyText();
+  return {start:r.start, end:r.end, text:b.slice(r.start, r.end).trim()};
+}
 function heldTerm(){
   if (!parts.length) return LAST ? LAST.term : "";
-  var b = bodyText();
-  return parts.map(function(p){ return b.slice(p.start, p.end).trim(); }).join(" \u2026 ");
+  return parts.map(function(p){ return p.text; }).filter(Boolean).join(" \u2026 ");
 }
 
 function slotNode(id, ghost){
@@ -740,7 +850,7 @@ function slotNode(id, ghost){
     b2.title = "Hold Ctrl or Cmd and select the next piece";
     b2.onclick = function(e){
       e.stopPropagation();
-      if (LAST && LAST.range && !parts.length) parts.push(LAST.range);
+      if (LAST && LAST.range && !parts.length) parts.push(makePart(LAST.range));
       try{ window.getSelection().removeAllRanges(); }catch(err){}
       say(parts.length + " part held \u2014 Ctrl-select the next");
       labHide();
@@ -755,6 +865,21 @@ function slotNode(id, ghost){
       + COLS[cls.colour] + '"></span> ' + esc(cls.name);
     b2.title = "Collect into " + cls.name;
     b2.onclick = async function(e){ e.stopPropagation(); b2.disabled = true; await capture(cls); };
+    return b2;
+  }
+
+  if (s.kind === "ai"){
+    b2.className = pre + "tt-x"; b2.title = s.label;
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.onclick = async function(e){
+      e.stopPropagation();
+      var q = fillPrompt(s.prompt);
+      showAI(s.label, "asking\u2026", false);
+      say(s.label + " \u2014 asked");
+      var r = await askAI(q);
+      if (r.err){ showAI(s.label, esc(r.err), true); say(s.label + " \u2014 " + r.err); }
+      else { showAI(s.label, esc(r.text), false); }
+    };
     return b2;
   }
 
@@ -774,7 +899,7 @@ async function applyToParts(what, colour){
     else await addReaderHighlight(term, colour || "yellow", rs[i]);
   }
   say((what === "add" ? "Add" : "Highlight") + " on " + rs.length + " parts, as one item: " + term);
-  parts = []; labHide();
+  parts = []; labHide(); labPaint();          // the dashed outlines go with them
 }
 
 async function capture(cls){
@@ -837,7 +962,7 @@ function labShow(rect, term, savedId, hlId){
     parts.forEach(function(pr, i){
       var chip = document.createElement("button");
       chip.className = "tt-part";
-      chip.innerHTML = esc(b.slice(pr.start, pr.end).trim()) + " <b>\u00d7</b>";
+      chip.innerHTML = esc(pr.text || b.slice(pr.start, pr.end).trim()) + " <b>\u00d7</b>";
       chip.title = "Drop this piece";
       chip.onclick = function(ev){
         ev.stopPropagation();
@@ -887,9 +1012,9 @@ document.addEventListener("mouseup", function(e){
   setTimeout(function(){
     var r = ui.lastSelRange;
     if (!r) return;
-    if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start) parts.push(LAST.range);
+    if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start) parts.push(makePart(LAST.range));
     var dup = parts.some(function(p){ return p.start === r.start && p.end === r.end; });
-    if (!dup) parts.push(r);
+    if (!dup) parts.push(makePart(r));
     parts.sort(function(a,b){ return a.start - b.start; });
     try{ window.getSelection().removeAllRanges(); }catch(err){}
     var rect = LAST ? LAST.rect : {left:20, top:80};
@@ -957,11 +1082,24 @@ function paintEditor(){
     + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader\u2019s own</span>'
         : '<select id="eIcon">'+iconOpts+"</select>")
     + '<label style="font-size:11.5px"><input type="checkbox" id="eShow"'+(s.showLabel?" checked":"")+"> show label</label></div>"
-    + '<p style="margin-top:9px">'+(s.kind === "class"
+    + (s.kind === "ai"
+        ? '<div style="margin-top:9px"><label class="inl" style="display:block;margin-bottom:4px">Prompt</label>'
+          + '<textarea id="ePrompt" style="width:100%;min-height:110px;border:1px solid #D9DBD5;'
+          + 'border-radius:6px;padding:6px 8px;font:12px inherit;font-family:inherit;line-height:1.5">'
+          + esc(s.prompt || "") + "</textarea>"
+          + '<p style="margin-top:5px">{{selection}}, {{sentence}}, {{context}}, {{title}} are filled in '
+          + "before it is sent.</p></div>"
+        : "")
+    + '<p style="margin-top:9px">'+(s.kind === "ai" ? "Asks the AI and shows what comes back."
+        : s.kind === "class"
         ? "A focus class. It highlights and collects, with the context set above."
         : s.wired ? "Wired \u2014 it calls the reader\u2019s own function."
                   : "Nothing behind this yet. Pressing it writes a line in the log.")+"</p>"
-    + (s.wired ? "" : '<div class="r"><button class="lb sm warn" id="eDel">Delete this slot</button></div>');
+    + '<div class="r" style="margin-top:9px">'
+    + (s.kind === "none"
+        ? '<button class="lb sm" id="eMakeAI">Make it ask the AI</button>' : "")
+    + (s.wired && s.kind !== "ai" ? "" : '<button class="lb sm warn" id="eDel">Delete this slot</button>')
+    + "</div>";
 }
 function paintPresets(){
   var ps = load("presets", []) || [];
@@ -996,6 +1134,8 @@ function paintClasses(){
   var mt = $("marktoggle");
   mt.classList.toggle("on", SHOWMARKS);
   mt.textContent = SHOWMARKS ? "Marks in the text" : "Marks hidden";
+  document.querySelectorAll(".playb").forEach(function(x){
+    x.classList.toggle("on", x.dataset.play === PLAY); });
 }
 function paintCaps(){
   var box = $("caps");
@@ -1057,6 +1197,7 @@ $("addslot").onclick = function(){
 $("sloteditor").addEventListener("input", function(e){
   var s = SLOTS[picked]; if (!s) return;
   if (e.target.id === "eLabel"){ s.label = e.target.value; keep(); paintSlots(); }
+  if (e.target.id === "ePrompt"){ s.prompt = e.target.value; keep(); }
 });
 $("sloteditor").addEventListener("change", function(e){
   var s = SLOTS[picked]; if (!s) return;
@@ -1065,6 +1206,13 @@ $("sloteditor").addEventListener("change", function(e){
   keep(); paintAll();
 });
 $("sloteditor").addEventListener("click", function(e){
+  if (e.target.id === "eMakeAI"){
+    var sl = SLOTS[picked];
+    sl.kind = "ai"; sl.wired = true;
+    sl.prompt = sl.prompt || ("About \"{{selection}}\" as it is used here:\n\n{{context}}\n\n"
+      + "Answer in three short lines.");
+    keep(); paintAll(); return;
+  }
   if (e.target.id !== "eDel") return;
   delete SLOTS[picked];
   Object.keys(COMP).forEach(function(k){
@@ -1111,6 +1259,26 @@ $("clslist").onchange = function(e){
   CLASSES.forEach(function(c){ if (c.id===id) c.ann = e.target.value; });
   saveL("classes", CLASSES); labPaint();
   say("Class form: " + ANNS[e.target.value]);
+};
+document.querySelectorAll(".playb").forEach(function(b){
+  b.onclick = function(){
+    PLAY = b.dataset.play; saveL("play", PLAY);
+    document.querySelectorAll(".playb").forEach(function(x){
+      x.classList.toggle("on", x.dataset.play === PLAY); });
+    labPaint();
+  };
+});
+$("aikey").value = load("aikey", "");
+$("aimodel").value = load("aimodel", "gemini-3.5-flash");
+$("aikey").onchange = function(){ saveL("aikey", this.value.trim());
+  $("aistatus").textContent = this.value ? "Key kept in this browser." : "No key."; };
+$("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-3.5-flash"); };
+$("aiforget").onclick = function(){ saveL("aikey", ""); $("aikey").value = "";
+  $("aistatus").textContent = "Key forgotten."; };
+$("aitest").onclick = async function(){
+  $("aistatus").textContent = "asking\u2026";
+  var r = await askAI("Reply with exactly: ok");
+  $("aistatus").textContent = r.err ? ("Failed \u2014 " + r.err) : ("Answered: " + r.text.trim());
 };
 $("marktoggle").onclick = function(){
   SHOWMARKS = !SHOWMARKS; saveL("showmarks", SHOWMARKS);
