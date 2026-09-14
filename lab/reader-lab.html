@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vocab Collector — lab</title>
+<!--
+  lab/index.html — build stamp: lab · 2026-09-14.  SCAFFOLDING (route.md §4).
+
+  A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
+  stood on 2026-09-14. Four changes and no more:
+
+    1. app.css  -> app-lab.css   (a copy, so experiments cannot reach the site)
+    2. app.js   -> app-lab.js    (same)
+    3. config.js, store-supabase.js and icons.js load from the folder above,
+       NOT copied. START-HERE.md §5: the Supabase details are hard-coded in six
+       places already, and a copy here would make it seven.
+    4. Pinned to dev, under its own localStorage key, so switching the lab can
+       never move the live site's choice.
+
+  Everything else is the site. Contractor 11, 2026-09-14.
+-->
+<link rel="stylesheet" href="app-lab.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  /* only styles the sign-in gate; everything after sign-in is your app.css */
+  #auth{position:fixed;inset:0;display:grid;place-items:center;background:#FBFAF6;font-family:Inter,system-ui,sans-serif;z-index:9999}
+  #auth .card{width:340px;background:#fff;border:1px solid #e8e4da;border-radius:12px;padding:28px 26px;box-shadow:0 6px 28px rgba(40,44,36,.08)}
+  #auth h1{font-size:20px;margin:0 0 18px}
+  #auth label{display:block;font-size:12px;color:#585e53;margin:0 0 4px}
+  #auth input{width:100%;padding:9px 11px;border:1px solid #dcd7ca;border-radius:7px;font-size:14px;margin-bottom:11px;box-sizing:border-box}
+  #auth button.go{width:100%;padding:10px;border:1px solid #4f7a37;background:#6f9b54;color:#fff;border-radius:7px;font-size:14px;cursor:pointer}
+  #auth button.go:hover{background:#4f7a37}
+  #auth .link{background:none;border:none;color:#585e53;text-decoration:underline;font-size:12.5px;cursor:pointer;margin-top:12px;display:block}
+  #auth .msg{font-size:12.5px;margin-top:11px;padding:8px 10px;border-radius:6px}
+  #auth .msg.err{background:#fbeae6;color:#a23e2a}
+  #boot{position:fixed;inset:0;display:grid;place-items:center;color:#8d9285;font-family:Inter,system-ui,sans-serif;font-size:13px}
+</style>
+</head>
+<body>
+<div id="auth">
+  <div class="card">
+    <h1>Vocab Collector</h1>
+    <label>Email</label><input id="email" type="email" autocomplete="username">
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <button class="go" id="go">Sign in</button>
+    <button class="link" id="toggle">New here? Create an account</button>
+    <div id="msg" class="msg" style="display:none"></div>
+  </div>
+</div>
+<div id="root"></div>
+
+<script src="../config.js"></script>
+<script src="../store-supabase.js"></script>
+<script>
+// ── which database ──────────────────────────────────────────────────────
+// Remembered per browser. Live unless deliberately changed: sign out, then
+// click the "Vocab Collector" heading five times. Or put #env in the address
+// bar. See schema-log.md.
+let ENV_NAME = null;
+// The lab is dev. Its own key, so switching here never moves the live site's
+// choice, and a fallback to dev rather than to VOCAB_DEFAULT_ENV, which is live.
+try { ENV_NAME = localStorage.getItem('vocabEnvLab'); } catch (e) {}
+if (!VOCAB_ENVS[ENV_NAME]) ENV_NAME = 'dev';
+const SUPABASE_URL  = VOCAB_ENVS[ENV_NAME].url;
+const SUPABASE_ANON = VOCAB_ENVS[ENV_NAME].anon;
+function switchEnv(name) {
+  try { localStorage.setItem('vocabEnvLab', name); } catch (e) {}
+  location.hash = '';          // or the picker reopens on the way back in
+  location.reload();
+}
+const DEEP_HASH = location.hash;  // stash before Supabase can strip it
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
+const $ = id => document.getElementById(id);
+// exposed for the app's header menu (hamburger, top-left)
+window.appSignOut = async ()=>{ await sb.auth.signOut(); location.reload(); };
+let signup = false, started = false;
+
+// The badge shows on dev and never on live. The gesture sits on the sign-in
+// heading, so switching is reachable only while signed out — which is right,
+// since the two databases have separate accounts anyway.
+vocabEnvBanner(ENV_NAME, switchEnv);
+vocabEnvGesture(document.querySelector('#auth h1'), ENV_NAME, switchEnv);
+if (/^#env\b/.test(DEEP_HASH || '')) vocabEnvPicker(ENV_NAME, switchEnv);
+
+$('toggle').onclick = () => {
+  signup = !signup;
+  $('go').textContent = signup ? 'Create account' : 'Sign in';
+  $('toggle').textContent = signup ? 'Have an account? Sign in' : 'New here? Create an account';
+};
+function err(m){ const e=$('msg'); e.className='msg err'; e.textContent=m; e.style.display='block'; }
+$('go').onclick = async () => {
+  const email=$('email').value.trim(), password=$('pw').value;
+  if(!email||!password){ err('Enter an email and password.'); return; }
+  $('go').disabled=true; $('go').textContent='…';
+  try{
+    if(signup){
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if(error) throw error;
+      if(!data.session){ err('Account created — if email confirmation is on, confirm then sign in.'); $('go').disabled=false; $('go').textContent='Create account'; return; }
+    } else {
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      if(error) throw error;
+    }
+  }catch(e){ err(e.message||'Sign-in failed'); $('go').disabled=false; $('go').textContent=signup?'Create account':'Sign in'; }
+};
+$('pw').addEventListener('keydown', e=>{ if(e.key==='Enter') $('go').click(); });
+
+function loadScript(src){
+  return new Promise((res, rej)=>{ const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('failed to load '+src)); document.body.appendChild(s); });
+}
+function flash(msg){
+  const d=document.createElement('div');
+  d.textContent=msg;
+  d.style.cssText='position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#23241f;color:#fff;font:13px Inter,system-ui,sans-serif;padding:10px 14px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.3);z-index:99999;max-width:90%;text-align:center';
+  document.body.appendChild(d); setTimeout(()=>d.remove(), 9000);
+}
+// Open the reader for #text=<id> by driving app.js directly once its state is ready.
+async function openDeepLink(){
+  const m = (DEEP_HASH||'').match(/text=([^&]+)/);
+  if(!m) return;
+  const id = decodeURIComponent(m[1]);
+  for(let i=0;i<250;i++){                       // wait until the library actually loads
+    try{
+      if(typeof S!=='undefined' && S && S.texts && Object.keys(S.texts).length){
+        if(S.texts[id] && typeof ui!=='undefined' && typeof render==='function'){
+          ui.view='reader'; ui.readerTextId=id; ui.readerEditing=false; render();
+        } else {
+          flash('Link points to a text not in your library ('+Object.keys(S.texts).length+' loaded).');
+        }
+        return;
+      }
+    }catch(e){}
+    await new Promise(r=>setTimeout(r,200));
+  }
+  flash('Library didn’t finish loading in time — the load is very slow.');
+}
+// The open text is mirrored into the address bar by app.js (syncHistory), which also
+// records a history entry per view so the Back button works. A replaceState poll here
+// would wipe that state, so it's gone.
+async function start(user){
+  if(started) return; started = true;
+  const auth = $('auth'); if(auth) auth.remove();
+  const boot = document.createElement('div'); boot.id='boot'; boot.textContent='Loading your library…'; document.body.appendChild(boot);
+  try{
+    await VocabStore.init(sb, user.id);
+    await loadScript('../icons.js').catch(()=>{});   // optional; only if your app.js uses it
+    await loadScript('app-lab.js');     // boots itself, renders into #root
+  }catch(e){
+    boot.textContent = 'Failed to start: ' + (e.message||e);
+    return;
+  }
+  boot.remove();
+  openDeepLink();
+  watchRemoteChanges(user.id);
+}
+
+// Live updates: anything saved from the extension (or another tab) lands in Supabase,
+// not in this page, so nothing here would know about it. Realtime pushes those changes;
+// re-focusing the tab is the fallback for when Realtime isn't available.
+function watchRemoteChanges(uid){
+  let timer = null, lastReload = 0;
+  const bump = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      // our own save already refreshed the screen — don't re-download the library for it
+      if (VocabStore.sinceLocalWrite && VocabStore.sinceLocalWrite() < 2500) return;
+      if (Date.now() - lastReload < 1500) return;
+      lastReload = Date.now();
+      try { await VocabStore.reload(); } catch(e){ console.warn('[vocab] refresh failed', e); }
+    }, 500);
+  };
+
+  try {
+    const ch = sb.channel('vocab-live');
+    for (const table of ['items','highlights','sources','collections','collection_items','settings']) {
+      ch.on('postgres_changes', { event:'*', schema:'public', table, filter:'user_id=eq.'+uid }, bump);
+    }
+    ch.subscribe(s => console.log('[vocab] realtime:', s));
+  } catch(e){ console.warn('[vocab] realtime unavailable', e); }
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) bump(); });
+  window.addEventListener('focus', bump);
+}
+
+sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
+(async()=>{ const { data:{ session } } = await sb.auth.getSession(); if(session) start(session.user); })();
+</script>
+</body>
+</html>
