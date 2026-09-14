@@ -17,7 +17,10 @@
        places already, and a copy here would make it seven.
     4. Pinned to dev, under its own localStorage key, so switching the lab can
        never move the live site's choice.
-    5. All items and Activity are hidden. Library stays, because it is the door
+    5. The lab layer at the foot of this file: the reader's tooltip rebuilt
+       from slots, plus a composer. The default arrangement is the reader's
+       own three, calling the reader's own functions.
+    6. All items and Activity are hidden. Library stays, because it is the door
        into a text. Done here in CSS rather than in app-lab.js, so the copy of
        the app stays byte-identical to the site's and can be re-copied from it
        without losing this.
@@ -156,6 +159,7 @@ async function start(user){
     await VocabStore.init(sb, user.id);
     await loadScript('../icons.js').catch(()=>{});   // optional; only if your app.js uses it
     await loadScript('app-lab.js');     // boots itself, renders into #root
+    if (window.labInit) window.labInit();   // the composer, once the reader exists
   }catch(e){
     boot.textContent = 'Failed to start: ' + (e.message||e);
     return;
@@ -196,5 +200,461 @@ function watchRemoteChanges(uid){
 sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
 (async()=>{ const { data:{ session } } = await sb.auth.getSession(); if(session) start(session.user); })();
 </script>
+
+<!-- ═══ THE LAB LAYER ═══════════════════════════════════════════════════
+     The reader's tooltip, taken apart and put back together from parts.
+
+     WHAT IT DOES NOT DO: change the tooltip. The default arrangement is the
+     three slots app-lab.js ships with, in the same order, with the same
+     classes, the same icons and the same handlers calling the same functions
+     — addReaderTerm, unsaveReaderTerm, toggleReaderHighlight,
+     addReaderHighlight, showInlineTranslation. Open the lab and press nothing
+     in the composer and you are using the current tooltip.
+
+     WHAT IT ADDS: the bar is now built from a list of slots rather than
+     written out, so a slot can be reordered, unticked, renamed, re-iconed, or
+     invented. Each kind of selection — part of a word, one word, a few words,
+     a sentence, more than one, several parts — carries its own list.
+
+     HOW IT ATTACHES: showTT, hideTT and reopenTT are function declarations in
+     app-lab.js, so they are properties of window and can be replaced from
+     here. S, ui and VocabStore are top-level let/const in classic scripts,
+     which share one global scope across a page — so this file reads them
+     directly. app-lab.js is not edited at all: it stays a byte-for-byte copy
+     of the site's app.js, and can be re-copied over whenever that moves.
+
+     Slots with no wiring behind them say so in the log rather than pretending.
+
+     Contractor 11, 2026-09-14.
+     ═══════════════════════════════════════════════════════════════════ -->
+
+<style id="lab-css">
+  #labbtn{position:fixed;right:16px;bottom:16px;z-index:90;border:1px solid #c9ccc3;
+    background:#fff;color:#1B1E21;border-radius:20px;padding:9px 15px;
+    font:600 12px/1 Inter,system-ui,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.18);cursor:pointer}
+  #labdr{position:fixed;top:0;right:0;bottom:0;width:380px;max-width:100%;z-index:95;
+    background:#F6F5F1;color:#1B1E21;border-left:1px solid #D9DBD5;
+    transform:translateX(102%);transition:transform .2s ease;overflow-y:auto;
+    font:13px/1.5 Inter,system-ui,sans-serif;padding:0 0 40px}
+  #labdr.on{transform:none}
+  #labdr .dh{position:sticky;top:0;background:#fff;border-bottom:1px solid #D9DBD5;
+    padding:11px 14px;display:flex;align-items:center;gap:9px;z-index:2}
+  #labdr .dh b{font-size:13px} #labdr .dh .sp{flex:1}
+  #labdr .card{background:#fff;border:1px solid #D9DBD5;border-radius:9px;margin:12px 12px 0;padding:12px 13px}
+  #labdr h3{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#8b9099;
+    margin:0 0 9px;font-weight:650}
+  #labdr p{margin:0 0 8px;font-size:12px;color:#6B7178}
+  #labdr .r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  #labdr .r + .r{margin-top:7px}
+  .lb{border:1px solid #D9DBD5;background:#fff;border-radius:6px;padding:5px 9px;
+    font:12px/1 inherit;color:#1B1E21;cursor:pointer}
+  .lb:hover{border-color:#b9bcb4}
+  .lb.on{background:#31363C;border-color:#4A5158;color:#E8EAEC}
+  .lb.sm{padding:3px 7px;font-size:11px}
+  .lb.warn{color:#8a3f3f;border-color:#e2c9c9}
+  #labdr input[type=text],#labdr select{border:1px solid #D9DBD5;border-radius:6px;padding:5px 8px;
+    font:12px inherit;font-family:inherit;background:#fff;color:#1B1E21;max-width:100%}
+  #labdr label.inl{font-size:11.5px;color:#6B7178;min-width:62px}
+  .slotrow{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;
+    border:1px solid transparent}
+  .slotrow:hover{background:#F6F5F1}
+  .slotrow.picked{border-color:#0F5D8C;background:#eef5fa}
+  .slotrow .nm{flex:1;font-size:12.5px}
+  .slotrow.in .nm{font-weight:600}
+  .slotrow .tag{font-size:10px;color:#9b9e96}
+  .slotrow .tag.wired{color:#4a7a35}
+  .loglist{list-style:none;margin:0;padding:0;font-size:11.5px;color:#6B7178;max-height:150px;overflow-y:auto}
+  .loglist li{padding:3px 0;border-bottom:1px solid #eee}
+  /* Slots the reader has no function for. Same bar, same shape, no pretence. */
+  .sel-tt button.tt-x{color:var(--text2)}
+  .sel-tt button.tt-x svg{width:13px;height:13px}
+</style>
+
+<button id="labbtn">Composer</button>
+
+<div id="labdr">
+  <div class="dh"><b>Tooltip composer</b><span class="sp"></span>
+    <button class="lb sm" id="labclose">Close</button></div>
+
+  <div class="card">
+    <h3>What was selected</h3>
+    <div class="r" id="extbar"></div>
+    <p style="margin-top:9px">Follows the selection. Pick one by hand to arrange a
+      case without going and finding it in the text.</p>
+  </div>
+
+  <div class="card">
+    <h3>Slots in the bar</h3>
+    <div id="slotlist"></div>
+    <div class="r" style="margin-top:9px">
+      <button class="lb sm" id="moveL">\u2190 earlier</button>
+      <button class="lb sm" id="moveR">later \u2192</button></div>
+    <div class="r"><input type="text" id="newslot" placeholder="New slot" style="flex:1">
+      <button class="lb sm" id="addslot">Add</button></div>
+  </div>
+
+  <div class="card"><h3>The picked slot</h3>
+    <div id="sloteditor"><p>Pick a slot above.</p></div></div>
+
+  <div class="card">
+    <h3>Arrangements</h3>
+    <div class="r"><input type="text" id="pname" placeholder="Name this one" style="flex:1">
+      <button class="lb sm" id="psave">Save</button></div>
+    <div id="plist" style="margin-top:9px"></div>
+    <div class="r" style="margin-top:9px">
+      <button class="lb sm warn" id="reset">Back to the reader's own</button></div>
+  </div>
+
+  <div class="card">
+    <h3>What got pressed</h3>
+    <ul class="loglist" id="loglist"><li>Nothing yet.</li></ul>
+  </div>
+</div>
+
+<script>
+window.labInit = function(){
+"use strict";
+if (window.__labOn) return;
+if (typeof S === "undefined"){ console.warn("[lab] app-lab.js did not load"); return; }
+// The reader can finish booting before the rest of this page has parsed.
+if (!document.getElementById("labbtn")){
+  document.addEventListener("DOMContentLoaded", window.labInit); return;
+}
+window.__labOn = true;
+
+var $ = function(id){ return document.getElementById(id); };
+var K = "vc.readerlab.";
+function load(k,d){ try{ var v=localStorage.getItem(K+k); return v?JSON.parse(v):d; }catch(e){ return d; } }
+function saveL(k,v){ try{ localStorage.setItem(K+k, JSON.stringify(v)); }catch(e){} }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+/* Icons for slots the reader has none of. The three it does have use its own
+   icon() so the default bar is identical to the pixel. */
+var I = {
+  doc:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6.5 3h7.6l5 5V20a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8.5 13h7M8.5 16.5h7" stroke-linecap="round"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  stack: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3.5L20.5 8 12 12.5 3.5 8z"/><path d="M3.5 12.5L12 17l8.5-4.5"/></svg>',
+  play:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>',
+  edit:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 20h4L18 10l-4-4L4 16zM14 6l4 4"/></svg>',
+  note:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5 3h14a2 2 0 0 1 2 2v9l-6 6H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 21v-5a1 1 0 0 1 1-1h5"/></svg>',
+  link:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9.5 14.5l5-5"/><path d="M11 7.5l1.5-1.5a3.5 3.5 0 0 1 5 5L16 12.5"/><path d="M13 16.5L11.5 18a3.5 3.5 0 0 1-5-5L8 11.5"/></svg>',
+  listPlus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6.5h10M4 12h7M4 17.5h7M16 15.5h6M19 12.5v6"/></svg>',
+  dot:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="7"/></svg>'
+};
+function iconOf(s){
+  if (s.useReaderIcon && typeof icon === "function"){ try{ return icon(s.useReaderIcon); }catch(e){} }
+  return I[s.icon] || I.dot;
+}
+
+/* ── the slots ─────────────────────────────────────────────────────────
+   The first three are the reader's, broken out. "wired" means the reader has
+   a function behind it; the rest are shapes waiting for one. */
+function defaults(){ return {
+  add:       {label:"Add", useReaderIcon:"plus", showLabel:true, kind:"add", wired:true},
+  translate: {label:"Translate", useReaderIcon:"translate", showLabel:false, kind:"translate", wired:true},
+  highlight: {label:"Highlight", useReaderIcon:"highlight", showLabel:false, kind:"highlight", wired:true},
+
+  sentence:  {label:"Full sentence", icon:"doc", showLabel:true, kind:"none"},
+  define:    {label:"Define", icon:"doc", showLabel:false, kind:"none"},
+  defineOwn: {label:"Define in English", icon:"doc", showLabel:false, kind:"none"},
+  synonyms:  {label:"Synonyms", icon:"search", showLabel:false, kind:"none"},
+  examples:  {label:"Used elsewhere", icon:"stack", showLabel:false, kind:"none"},
+  pronounce: {label:"Say it", icon:"play", showLabel:false, kind:"none"},
+  grammar:   {label:"Why this form", icon:"edit", showLabel:false, kind:"none"},
+  register:  {label:"How formal", icon:"edit", showLabel:false, kind:"none"},
+  relatives: {label:"Relatives here", icon:"link", showLabel:false, kind:"none"},
+  note:      {label:"Note", icon:"note", showLabel:false, kind:"none"},
+  collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"}
+};}
+
+/* The reader ships one bar for every selection. Splitting it by extent is the
+   first thing there is to try, so each starts as a copy of what exists. */
+function defaultComp(){ return {
+  subword:["add","translate","highlight"], word:["add","translate","highlight"],
+  phrase:["add","translate","highlight"], sentence:["add","translate","highlight"],
+  beyond:["add","translate","highlight"], multi:["add","translate","highlight"]
+};}
+
+var EXTENTS = [
+  {id:"subword", name:"Part of a word"}, {id:"word", name:"One word"},
+  {id:"phrase", name:"A few words"}, {id:"sentence", name:"A sentence"},
+  {id:"beyond", name:"More than one"}, {id:"multi", name:"Several parts"}
+];
+
+var SLOTS = load("slots", null) || defaults();
+var COMP  = load("comp", null) || defaultComp();
+var extent = "word", picked = null, LOG = [], LAST = null, ttEl = null;
+
+/* ── which kind of selection this is ──────────────────────────────────── */
+function classify(raw, before, after){
+  var t = String(raw||"").trim(); if (!t) return null;
+  var L = /[A-Za-z0-9\u00C0-\u024F]/;
+  if (!/\s/.test(t)){
+    if ((L.test(t.charAt(0)) && L.test(before||"")) ||
+        (L.test(t.charAt(t.length-1)) && L.test(after||""))) return "subword";
+  }
+  var words = t.match(/[A-Za-z0-9\u00C0-\u024F'\u2019-]+/g) || [];
+  if ((t.match(/[.!?]\s+[A-Z\u00C0-\u00DE]/g) || []).length >= 1) return "beyond";
+  if (/[.!?]["'\u201D]?$/.test(t) || words.length > 8) return "sentence";
+  if (words.length > 1) return "phrase";
+  return "word";
+}
+/* The reader owns its text, so the characters either side of the selection are
+   there to be read rather than guessed at. */
+function neighbours(){
+  try{
+    var r = ui.lastSelRange; if (!r || typeof r.start !== "number") return ["",""];
+    var body = (S.texts[ui.readerTextId] || {}).body || "";
+    return [body.charAt(r.start-1) || "", body.charAt(r.end) || ""];
+  }catch(e){ return ["",""]; }
+}
+
+/* ── the bar ──────────────────────────────────────────────────────────── */
+function say(m){ LOG.unshift(m); if (LOG.length>40) LOG.pop();
+  $("loglist").innerHTML = LOG.map(function(l){ return "<li>"+esc(l)+"</li>"; }).join(""); }
+
+function slotNode(id){
+  var s = SLOTS[id]; if (!s) return null;
+
+  if (s.kind === "highlight"){
+    var cur = (S.settings.reader && S.settings.reader.lastColor) || "yellow";
+    var wrap = document.createElement("div");
+    wrap.className = "tt-hl-wrap";
+    wrap.title = "Highlight \u2014 scroll to change color";
+    wrap.innerHTML =
+        '<button class="tt-hl ' + (LAST.hlId ? "on" : "") + '" id="tt-hl">'
+      + '<span class="hl-pen">' + iconOf(s) + "</span>"
+      + (s.showLabel ? " " + esc(s.label) : "") + "</button>"
+      + '<div class="tt-colors" id="tt-colors">'
+      + ["yellow","pink","blue"].map(function(c){
+          return '<button class="hl-line hl-ln-' + c + (c===cur?" on":"") + '" data-color="' + c + '"></button>';
+        }).join("") + "</div>";
+    wrap.querySelector(".tt-hl").onclick = async function(){
+      this.disabled = true;
+      var hid = await toggleReaderHighlight(LAST.term, (S.settings.reader && S.settings.reader.lastColor) || "yellow");
+      say(s.label); labReopen(LAST.savedId, hid);
+    };
+    wrap.querySelectorAll("[data-color]").forEach(function(b){
+      b.onclick = async function(e){
+        e.stopPropagation();
+        S.settings.reader.lastColor = b.dataset.color;
+        VocabStore.set({settings:S.settings});
+        var hid = await addReaderHighlight(LAST.term, b.dataset.color);
+        say(s.label + " \u2014 " + b.dataset.color); labReopen(LAST.savedId, hid);
+      };
+    });
+    wrap.addEventListener("wheel", function(e){
+      e.preventDefault();
+      var o = ["yellow","pink","blue"];
+      var i = (o.indexOf((S.settings.reader && S.settings.reader.lastColor) || "yellow")
+               + (e.deltaY>0?1:-1) + 3) % 3;
+      S.settings.reader.lastColor = o[i]; VocabStore.set({settings:S.settings});
+      wrap.querySelectorAll("[data-color]").forEach(function(b){
+        b.classList.toggle("on", b.dataset.color === o[i]); });
+    }, {passive:false});
+    return wrap;
+  }
+
+  var b = document.createElement("button");
+  if (s.kind === "add"){
+    b.className = "tt-add " + (LAST.savedId ? "on" : "");
+    b.title = LAST.savedId ? "Saved \u2014 click to undo" : "Save this item";
+    b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b.onclick = async function(){
+      b.disabled = true;
+      if (LAST.savedId){ await unsaveReaderTerm(LAST.savedId); say("Unsaved"); labReopen(null, LAST.hlId); }
+      else { var tid = await addReaderTerm(LAST.term, "saved"); say("Add"); labReopen(tid, LAST.hlId); }
+    };
+    return b;
+  }
+  if (s.kind === "translate"){
+    b.className = "tt-tr"; b.title = "Translate";
+    b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b.onclick = function(){
+      showInlineTranslation(LAST.term, ttEl.getBoundingClientRect());
+      say("Translate"); labHide();
+    };
+    return b;
+  }
+  b.className = "tt-x"; b.title = s.label;
+  b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+  b.onclick = function(e){
+    e.stopPropagation();
+    say(s.label + " \u2014 nothing behind it yet");
+  };
+  return b;
+}
+
+function labShow(rect, term, savedId, hlId){
+  labHide();
+  if (savedId === undefined) savedId = savedTermIdForRange(ui.lastSelRange);
+  if (hlId === undefined)   hlId   = highlightIdForRange(ui.lastSelRange);
+  LAST = {rect:rect, term:term, savedId:savedId||null, hlId:hlId||null};
+
+  var nb = neighbours();
+  var kind = classify(term, nb[0], nb[1]);
+  if (kind){ extent = kind; paintExtents(); paintSlots(); }
+
+  ttEl = document.createElement("div");
+  ttEl.className = "sel-tt";
+  (COMP[extent] || []).forEach(function(id){
+    var n = slotNode(id); if (n) ttEl.appendChild(n);
+  });
+  if (!ttEl.childNodes.length){
+    var e = document.createElement("span");
+    e.style.cssText = "padding:6px 10px;font-size:11px;color:#9b9e96";
+    e.textContent = "no slots for this";
+    ttEl.appendChild(e);
+  }
+  ttEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth-220)) + "px";
+  ttEl.style.top  = Math.max(8, rect.top - 46) + "px";
+  ttEl.addEventListener("mousedown", function(e){ e.stopPropagation(); });
+  document.body.appendChild(ttEl);
+}
+function labHide(){ if (ttEl){ ttEl.remove(); ttEl = null; } }
+
+/* The tooltip stays open after an action so the same selection can be worked
+   on — the reader's behaviour, kept. app-lab.js's own reopenTT cannot do it
+   any more: it reads _ttTerm, which only its own showTT sets, and that no
+   longer runs. This reads ours instead. */
+function labReopen(termId, hlId){
+  var el = termId ? document.querySelector('[data-rterm="' + termId + '"]') : null;
+  var r = el ? el.getBoundingClientRect() : (LAST && LAST.rect);
+  var term = LAST && LAST.term;
+  if (!r || !term){ labHide(); return; }
+  labShow(r, term, termId || null, hlId === undefined ? undefined : (hlId || null));
+}
+
+window.showTT   = labShow;
+window.hideTT   = labHide;
+window.reopenTT = labReopen;
+document.addEventListener("mousedown", function(e){
+  if (!ttEl) return;
+  if (ttEl.contains(e.target)) return;
+  if ($("labdr").contains(e.target) || e.target.id === "labbtn") return;
+  labHide();
+});
+
+/* ── the composer ─────────────────────────────────────────────────────── */
+function keep(){ saveL("slots", SLOTS); saveL("comp", COMP); }
+
+function paintExtents(){
+  $("extbar").innerHTML = EXTENTS.map(function(x){
+    return '<button class="lb sm extb' + (x.id===extent?" on":"") + '" data-x="'+x.id+'">'
+         + esc(x.name) + "</button>"; }).join("");
+}
+function paintSlots(){
+  var list = COMP[extent] || [];
+  var ids = Object.keys(SLOTS).sort(function(a,b){
+    var ia=list.indexOf(a), ib=list.indexOf(b);
+    if (ia>=0 && ib>=0) return ia-ib;
+    if (ia>=0) return -1; if (ib>=0) return 1; return 0; });
+  $("slotlist").innerHTML = ids.map(function(id){
+    var s = SLOTS[id], inC = list.indexOf(id) >= 0;
+    return '<div class="slotrow'+(inC?" in":"")+(picked===id?" picked":"")+'" data-id="'+id+'">'
+      + '<input type="checkbox"'+(inC?" checked":"")+">"
+      + '<span class="nm">'+esc(s.label)+"</span>"
+      + '<span class="tag'+(s.wired?" wired":"")+'">'+(s.wired?"wired":"shape only")+"</span></div>";
+  }).join("");
+}
+function paintEditor(){
+  var box = $("sloteditor");
+  if (!picked || !SLOTS[picked]){ box.innerHTML = "<p>Pick a slot above.</p>"; return; }
+  var s = SLOTS[picked];
+  var iconOpts = Object.keys(I).map(function(k){
+    return '<option value="'+k+'"'+(k===s.icon?" selected":"")+">"+k+"</option>"; }).join("");
+  box.innerHTML =
+      '<div class="r"><label class="inl">Label</label>'
+    + '<input type="text" id="eLabel" value="'+esc(s.label)+'" style="flex:1"></div>'
+    + '<div class="r"><label class="inl">Icon</label>'
+    + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader\u2019s own \u2014 '
+        + esc(s.useReaderIcon) + "</span>" : '<select id="eIcon">'+iconOpts+"</select>")
+    + '<label style="font-size:11.5px"><input type="checkbox" id="eShow"'+(s.showLabel?" checked":"")+"> show label</label></div>"
+    + '<p style="margin-top:9px">'+(s.wired
+        ? "This one does what it says \u2014 it calls the reader\u2019s own function."
+        : "Nothing behind this yet. Pressing it writes a line in the log.")+"</p>"
+    + (s.wired ? "" : '<div class="r"><button class="lb sm warn" id="eDel">Delete this slot</button></div>');
+}
+function paintPresets(){
+  var ps = load("presets", []) || [];
+  $("plist").innerHTML = ps.length ? ps.map(function(p,i){
+    return '<div class="r" style="justify-content:space-between"><span>'+esc(p.name)+"</span><span>"
+      + '<button class="lb sm" data-use="'+i+'">Use</button> '
+      + '<button class="lb sm warn" data-del="'+i+'">\u00d7</button></span></div>'; }).join("")
+    : '<p style="margin:0">None yet. An arrangement is every slot and every kind of selection at once, so two can be compared rather than described.</p>';
+}
+function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets(); }
+
+$("labbtn").onclick = function(){ $("labdr").classList.add("on"); paintAll(); };
+$("labclose").onclick = function(){ $("labdr").classList.remove("on"); };
+$("extbar").onclick = function(e){
+  var b = e.target.closest("[data-x]"); if (!b) return;
+  extent = b.dataset.x; picked = null; paintAll();
+};
+$("slotlist").onclick = function(e){
+  var row = e.target.closest(".slotrow"); if (!row) return;
+  var id = row.dataset.id, list = COMP[extent] = (COMP[extent]||[]).slice();
+  if (e.target.tagName === "INPUT"){
+    var i = list.indexOf(id);
+    if (i>=0) list.splice(i,1); else list.push(id);
+  }
+  picked = id; keep(); paintAll();
+};
+function move(d){
+  if (!picked) return;
+  var list = COMP[extent]||[], i = list.indexOf(picked), j = i+d;
+  if (i<0 || j<0 || j>=list.length) return;
+  list.splice(j,0,list.splice(i,1)[0]); keep(); paintAll();
+}
+$("moveL").onclick = function(){ move(-1); };
+$("moveR").onclick = function(){ move(1); };
+$("addslot").onclick = function(){
+  var n = $("newslot").value.trim(); if (!n){ $("newslot").focus(); return; }
+  var id = n.toLowerCase().replace(/[^a-z0-9]+/g,"") || ("slot"+Object.keys(SLOTS).length);
+  while (SLOTS[id]) id += "2";
+  SLOTS[id] = {label:n, icon:"dot", showLabel:false, kind:"none"};
+  (COMP[extent] = COMP[extent]||[]).push(id);
+  picked = id; $("newslot").value = ""; keep(); paintAll();
+};
+$("sloteditor").addEventListener("input", function(e){
+  var s = SLOTS[picked]; if (!s) return;
+  if (e.target.id === "eLabel"){ s.label = e.target.value; keep(); paintSlots(); }
+});
+$("sloteditor").addEventListener("change", function(e){
+  var s = SLOTS[picked]; if (!s) return;
+  if (e.target.id === "eIcon") s.icon = e.target.value;
+  if (e.target.id === "eShow") s.showLabel = e.target.checked;
+  keep(); paintAll();
+});
+$("sloteditor").addEventListener("click", function(e){
+  if (e.target.id !== "eDel") return;
+  delete SLOTS[picked];
+  Object.keys(COMP).forEach(function(k){
+    COMP[k] = COMP[k].filter(function(x){ return x !== picked; }); });
+  picked = null; keep(); paintAll();
+});
+$("psave").onclick = function(){
+  var n = $("pname").value.trim(); if (!n){ $("pname").focus(); return; }
+  var ps = load("presets", []) || [];
+  ps.push({name:n, slots:JSON.parse(JSON.stringify(SLOTS)), comp:JSON.parse(JSON.stringify(COMP))});
+  saveL("presets", ps); $("pname").value=""; paintPresets();
+};
+$("plist").onclick = function(e){
+  var ps = load("presets", []) || [];
+  var u = e.target.getAttribute && e.target.getAttribute("data-use");
+  var d = e.target.getAttribute && e.target.getAttribute("data-del");
+  if (u){ var p = ps[+u]; if (p){ SLOTS = p.slots; COMP = p.comp; picked = null; keep(); paintAll(); } return; }
+  if (d){ ps.splice(+d,1); saveL("presets", ps); paintPresets(); }
+};
+$("reset").onclick = function(){
+  SLOTS = defaults(); COMP = defaultComp(); picked = null; keep(); paintAll();
+};
+
+paintAll();
+say("Composer ready \u2014 the bar you see is the reader\u2019s own, built from parts");
+};
+</script>
+
 </body>
 </html>
