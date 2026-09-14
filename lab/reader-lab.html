@@ -204,35 +204,48 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
 <!-- ═══ THE LAB LAYER ═══════════════════════════════════════════════════
      The reader's tooltip, taken apart and put back together from parts.
 
-     WHAT IT DOES NOT DO: change the tooltip. The default arrangement is the
-     three slots app-lab.js ships with, in the same order, with the same
-     classes, the same icons and the same handlers calling the same functions
-     — addReaderTerm, unsaveReaderTerm, toggleReaderHighlight,
-     addReaderHighlight, showInlineTranslation. Open the lab and press nothing
-     in the composer and you are using the current tooltip.
-
-     WHAT IT ADDS: the bar is now built from a list of slots rather than
-     written out, so a slot can be reordered, unticked, renamed, re-iconed, or
-     invented. Each kind of selection — part of a word, one word, a few words,
-     a sentence, more than one, several parts — carries its own list.
+     WHAT IT DOES NOT DO: change the tooltip. Add, Translate and Highlight are
+     the reader's own, calling addReaderTerm, unsaveReaderTerm,
+     toggleReaderHighlight, addReaderHighlight and showInlineTranslation.
 
      HOW IT ATTACHES: showTT, hideTT and reopenTT are function declarations in
      app-lab.js, so they are properties of window and can be replaced from
-     here. S, ui and VocabStore are top-level let/const in classic scripts,
-     which share one global scope across a page — so this file reads them
-     directly. app-lab.js is not edited at all: it stays a byte-for-byte copy
-     of the site's app.js, and can be re-copied over whenever that moves.
+     here. S, ui, VocabStore and makeContext are top-level declarations in
+     classic scripts, which share one global scope across a page, so this file
+     reads them directly. app-lab.js is not edited at all.
 
-     Slots with no wiring behind them say so in the log rather than pretending.
+     THREE THINGS ADDED
 
-     Contractor 11, 2026-09-14.
+     1. Detection reads the characters either side of the selection from the
+        live DOM selection rather than from ui.lastSelRange, which is null
+        whenever the reader cannot map a selection to character offsets. That
+        was why part of a word was missed some of the time.
+
+     2. Ctrl or Cmd held with the tooltip open grows an extra slot, ghosted.
+        Ctrl-select a second span and the two are held as one item. Add then
+        makes ONE item labelled "steht … auf" with a mark on each part: the
+        store returns the existing id for a repeated term, so both marks link
+        to the same item. No new machinery.
+
+     3. Focus classes. A class is a standing thing to look for — the dative, a
+        prefix, a/an — that lives above any one text. Turn one on and the
+        tooltip grows a slot for it; press it and the span is highlighted in
+        the class colour AND collected, with its sentence and a settable window
+        of characters either side. The collection spans texts.
+
+     WHAT IS NOT REAL: classes and their captures live in this browser, not in
+     the database. The highlights they leave are real reader highlights. When
+     the shape settles, the captures go to dev as their own table.
+
+     Contractor 11, 2026-09-14b.
      ═══════════════════════════════════════════════════════════════════ -->
 
 <style id="lab-css">
   #labbtn{position:fixed;right:16px;bottom:16px;z-index:90;border:1px solid #c9ccc3;
     background:#fff;color:#1B1E21;border-radius:20px;padding:9px 15px;
     font:600 12px/1 Inter,system-ui,sans-serif;box-shadow:0 3px 14px rgba(0,0,0,.18);cursor:pointer}
-  #labdr{position:fixed;top:0;right:0;bottom:0;width:380px;max-width:100%;z-index:95;
+  #labbtn .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px}
+  #labdr{position:fixed;top:0;right:0;bottom:0;width:390px;max-width:100%;z-index:95;
     background:#F6F5F1;color:#1B1E21;border-left:1px solid #D9DBD5;
     transform:translateX(102%);transition:transform .2s ease;overflow-y:auto;
     font:13px/1.5 Inter,system-ui,sans-serif;padding:0 0 40px}
@@ -252,8 +265,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .lb.on{background:#31363C;border-color:#4A5158;color:#E8EAEC}
   .lb.sm{padding:3px 7px;font-size:11px}
   .lb.warn{color:#8a3f3f;border-color:#e2c9c9}
-  #labdr input[type=text],#labdr select{border:1px solid #D9DBD5;border-radius:6px;padding:5px 8px;
-    font:12px inherit;font-family:inherit;background:#fff;color:#1B1E21;max-width:100%}
+  #labdr input[type=text],#labdr input[type=number],#labdr select{border:1px solid #D9DBD5;
+    border-radius:6px;padding:5px 8px;font:12px inherit;font-family:inherit;background:#fff;
+    color:#1B1E21;max-width:100%}
   #labdr label.inl{font-size:11.5px;color:#6B7178;min-width:62px}
   .slotrow{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;
     border:1px solid transparent}
@@ -263,11 +277,21 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .slotrow.in .nm{font-weight:600}
   .slotrow .tag{font-size:10px;color:#9b9e96}
   .slotrow .tag.wired{color:#4a7a35}
-  .loglist{list-style:none;margin:0;padding:0;font-size:11.5px;color:#6B7178;max-height:150px;overflow-y:auto}
+  .loglist{list-style:none;margin:0;padding:0;font-size:11.5px;color:#6B7178;max-height:140px;overflow-y:auto}
   .loglist li{padding:3px 0;border-bottom:1px solid #eee}
-  /* Slots the reader has no function for. Same bar, same shape, no pretence. */
+  .note{font-size:11.5px;color:#4a6f9e;background:#eef3f9;border-radius:6px;padding:7px 9px;margin-top:8px}
+  .clsrow{display:flex;align-items:center;gap:7px;padding:6px;border-radius:6px;border:1px solid #eee;margin-bottom:6px}
+  .clsrow .sw{width:13px;height:13px;border-radius:3px;flex:none}
+  .clsrow .nm{flex:1;font-size:12.5px}
+  .caps{max-height:240px;overflow-y:auto;margin-top:8px}
+  .cap{border-left:3px solid #ddd;padding:5px 0 5px 9px;margin-bottom:8px;font-size:12px}
+  .cap .hit{font-weight:650}
+  .cap .ctx{color:#6B7178;font-size:11.5px;line-height:1.5}
+  .cap .src{color:#9b9e96;font-size:10.5px;margin-top:2px}
   .sel-tt button.tt-x{color:var(--text2)}
   .sel-tt button.tt-x svg{width:13px;height:13px}
+  .sel-tt button.tt-ghost{opacity:.5;outline:1px dashed var(--g-line);outline-offset:-2px}
+  .sel-tt .tt-parts{font-size:10px;color:#4a6f9e;padding:6px 8px;align-self:center;white-space:nowrap}
 </style>
 
 <button id="labbtn">Composer</button>
@@ -277,10 +301,28 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <button class="lb sm" id="labclose">Close</button></div>
 
   <div class="card">
+    <h3>Focus classes</h3>
+    <p>A standing thing to look for, above any one text. Turn one on and the
+      tooltip grows a slot for it. Marking highlights the span and collects it
+      with its context, and the collection carries across texts.</p>
+    <div id="clslist"></div>
+    <div class="r"><input type="text" id="clsname" placeholder="e.g. Dative" style="flex:1">
+      <select id="clscol"><option value="yellow">yellow</option><option value="pink">pink</option>
+        <option value="blue">blue</option></select>
+      <button class="lb sm" id="clsadd">New</button></div>
+    <div class="r"><label class="inl">Context</label>
+      <input type="number" id="clschars" min="0" max="400" step="5" style="width:70px">
+      <span style="font-size:11.5px;color:#6B7178">characters either side, plus the whole sentence</span></div>
+    <div class="r"><button class="lb sm" id="capshow">Show what's collected</button>
+      <button class="lb sm" id="capcopy">Copy</button>
+      <button class="lb sm warn" id="capclear">Clear</button></div>
+    <div class="caps" id="caps" style="display:none"></div>
+  </div>
+
+  <div class="card">
     <h3>What was selected</h3>
     <div class="r" id="extbar"></div>
-    <p style="margin-top:9px">Follows the selection. Pick one by hand to arrange a
-      case without going and finding it in the text.</p>
+    <div class="note" id="extnote"></div>
   </div>
 
   <div class="card">
@@ -316,7 +358,6 @@ window.labInit = function(){
 "use strict";
 if (window.__labOn) return;
 if (typeof S === "undefined"){ console.warn("[lab] app-lab.js did not load"); return; }
-// The reader can finish booting before the rest of this page has parsed.
 if (!document.getElementById("labbtn")){
   document.addEventListener("DOMContentLoaded", window.labInit); return;
 }
@@ -328,9 +369,8 @@ function load(k,d){ try{ var v=localStorage.getItem(K+k); return v?JSON.parse(v)
 function saveL(k,v){ try{ localStorage.setItem(K+k, JSON.stringify(v)); }catch(e){} }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,function(c){
   return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+var COLS = {yellow:"#ffe14d", pink:"#ff9ccb", blue:"#6cc0ff"};
 
-/* Icons for slots the reader has none of. The three it does have use its own
-   icon() so the default bar is identical to the pixel. */
 var I = {
   doc:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6.5 3h7.6l5 5V20a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M8.5 13h7M8.5 16.5h7" stroke-linecap="round"/></svg>',
   search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
@@ -340,6 +380,7 @@ var I = {
   note:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5 3h14a2 2 0 0 1 2 2v9l-6 6H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M14 21v-5a1 1 0 0 1 1-1h5"/></svg>',
   link:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9.5 14.5l5-5"/><path d="M11 7.5l1.5-1.5a3.5 3.5 0 0 1 5 5L16 12.5"/><path d="M13 16.5L11.5 18a3.5 3.5 0 0 1-5-5L8 11.5"/></svg>',
   listPlus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6.5h10M4 12h7M4 17.5h7M16 15.5h6M19 12.5v6"/></svg>',
+  target:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>',
   dot:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="7"/></svg>'
 };
 function iconOf(s){
@@ -347,13 +388,11 @@ function iconOf(s){
   return I[s.icon] || I.dot;
 }
 
-/* ── the slots ─────────────────────────────────────────────────────────
-   The first three are the reader's, broken out. "wired" means the reader has
-   a function behind it; the rest are shapes waiting for one. */
 function defaults(){ return {
   add:       {label:"Add", useReaderIcon:"plus", showLabel:true, kind:"add", wired:true},
   translate: {label:"Translate", useReaderIcon:"translate", showLabel:false, kind:"translate", wired:true},
   highlight: {label:"Highlight", useReaderIcon:"highlight", showLabel:false, kind:"highlight", wired:true},
+  another:   {label:"Another part", icon:"link", showLabel:true, kind:"another", wired:true},
 
   sentence:  {label:"Full sentence", icon:"doc", showLabel:true, kind:"none"},
   define:    {label:"Define", icon:"doc", showLabel:false, kind:"none"},
@@ -367,26 +406,52 @@ function defaults(){ return {
   note:      {label:"Note", icon:"note", showLabel:false, kind:"none"},
   collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"}
 };}
-
-/* The reader ships one bar for every selection. Splitting it by extent is the
-   first thing there is to try, so each starts as a copy of what exists. */
 function defaultComp(){ return {
   subword:["add","translate","highlight"], word:["add","translate","highlight"],
   phrase:["add","translate","highlight"], sentence:["add","translate","highlight"],
   beyond:["add","translate","highlight"], multi:["add","translate","highlight"]
 };}
 
+/* The two that were confusable, named for what they are. "More than one
+   sentence" is still ONE continuous drag, across a full stop. "Several parts"
+   is one item whose pieces are not next to each other. */
 var EXTENTS = [
-  {id:"subword", name:"Part of a word"}, {id:"word", name:"One word"},
-  {id:"phrase", name:"A few words"}, {id:"sentence", name:"A sentence"},
-  {id:"beyond", name:"More than one"}, {id:"multi", name:"Several parts"}
+  {id:"subword", name:"Part of a word",
+   note:"The selection lies strictly inside one word \u2014 a prefix, a stem, an ending. Spaces either side of what you dragged never change the answer."},
+  {id:"word", name:"One word", note:"One word, on its own."},
+  {id:"phrase", name:"A few words", note:"More than one word, inside a single sentence."},
+  {id:"sentence", name:"One sentence", note:"A whole sentence, or something long enough to be treated as one."},
+  {id:"beyond", name:"More than one sentence",
+   note:"One continuous run of text that crosses a full stop \u2014 a passage. Still a single drag."},
+  {id:"multi", name:"Several parts of one thing",
+   note:"One item whose pieces are NOT next to each other \u2014 steht \u2026 auf, ne \u2026 pas. Hold Ctrl or Cmd and select the second piece. The only kind you cannot arrive at by dragging."}
 ];
 
 var SLOTS = load("slots", null) || defaults();
 var COMP  = load("comp", null) || defaultComp();
+var CLASSES = load("classes", []) || [];
+var CAPS = load("caps", []) || [];
+var CTXCHARS = load("ctxchars", 75);
 var extent = "word", picked = null, LOG = [], LAST = null, ttEl = null;
+var parts = [], revealed = false;
 
 /* ── which kind of selection this is ──────────────────────────────────── */
+function selNeighbours(){
+  try{
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    var raw = sel.toString();
+    if (!raw.trim()) return null;
+    var r = sel.getRangeAt(0);
+    var b = "", a = "";
+    if (r.startContainer.nodeType === 3) b = r.startContainer.textContent.charAt(r.startOffset-1) || "";
+    if (r.endContainer.nodeType === 3)   a = r.endContainer.textContent.charAt(r.endOffset) || "";
+    // A dragged space belongs to the selection, not to what is beside it.
+    if (/^\s/.test(raw)) b = " ";
+    if (/\s$/.test(raw)) a = " ";
+    return {raw:raw, before:b, after:a};
+  }catch(e){ return null; }
+}
 function classify(raw, before, after){
   var t = String(raw||"").trim(); if (!t) return null;
   var L = /[A-Za-z0-9\u00C0-\u024F]/;
@@ -400,21 +465,32 @@ function classify(raw, before, after){
   if (words.length > 1) return "phrase";
   return "word";
 }
-/* The reader owns its text, so the characters either side of the selection are
-   there to be read rather than guessed at. */
-function neighbours(){
-  try{
-    var r = ui.lastSelRange; if (!r || typeof r.start !== "number") return ["",""];
-    var body = (S.texts[ui.readerTextId] || {}).body || "";
-    return [body.charAt(r.start-1) || "", body.charAt(r.end) || ""];
-  }catch(e){ return ["",""]; }
+
+/* ── context for a capture ────────────────────────────────────────────── */
+function bodyText(){ try{ return (S.texts[ui.readerTextId] || {}).body || ""; }catch(e){ return ""; } }
+function sentenceAround(b, start, end){
+  var s = Math.max(b.lastIndexOf(".", start-1), b.lastIndexOf("!", start-1), b.lastIndexOf("?", start-1));
+  s = s < 0 ? 0 : s + 1;
+  var m = b.slice(end).search(/[.!?]/);
+  var e = m < 0 ? b.length : end + m + 1;
+  return b.slice(s, e).replace(/\s+/g, " ").trim();
 }
 
 /* ── the bar ──────────────────────────────────────────────────────────── */
 function say(m){ LOG.unshift(m); if (LOG.length>40) LOG.pop();
   $("loglist").innerHTML = LOG.map(function(l){ return "<li>"+esc(l)+"</li>"; }).join(""); }
 
-function slotNode(id){
+function heldRanges(){
+  if (parts.length) return parts.slice();
+  return (LAST && LAST.range) ? [LAST.range] : [];
+}
+function heldTerm(){
+  if (!parts.length) return LAST ? LAST.term : "";
+  var b = bodyText();
+  return parts.map(function(p){ return b.slice(p.start, p.end).trim(); }).join(" \u2026 ");
+}
+
+function slotNode(id, ghost){
   var s = SLOTS[id]; if (!s) return null;
 
   if (s.kind === "highlight"){
@@ -427,12 +503,14 @@ function slotNode(id){
       + '<span class="hl-pen">' + iconOf(s) + "</span>"
       + (s.showLabel ? " " + esc(s.label) : "") + "</button>"
       + '<div class="tt-colors" id="tt-colors">'
-      + ["yellow","pink","blue"].map(function(c){
+      + Object.keys(COLS).map(function(c){
           return '<button class="hl-line hl-ln-' + c + (c===cur?" on":"") + '" data-color="' + c + '"></button>';
         }).join("") + "</div>";
     wrap.querySelector(".tt-hl").onclick = async function(){
       this.disabled = true;
-      var hid = await toggleReaderHighlight(LAST.term, (S.settings.reader && S.settings.reader.lastColor) || "yellow");
+      var col = (S.settings.reader && S.settings.reader.lastColor) || "yellow";
+      if (parts.length){ await applyToParts("hl", col); return; }
+      var hid = await toggleReaderHighlight(LAST.term, col);
       say(s.label); labReopen(LAST.savedId, hid);
     };
     wrap.querySelectorAll("[data-color]").forEach(function(b){
@@ -440,15 +518,16 @@ function slotNode(id){
         e.stopPropagation();
         S.settings.reader.lastColor = b.dataset.color;
         VocabStore.set({settings:S.settings});
+        if (parts.length){ await applyToParts("hl", b.dataset.color); return; }
         var hid = await addReaderHighlight(LAST.term, b.dataset.color);
         say(s.label + " \u2014 " + b.dataset.color); labReopen(LAST.savedId, hid);
       };
     });
     wrap.addEventListener("wheel", function(e){
       e.preventDefault();
-      var o = ["yellow","pink","blue"];
+      var o = Object.keys(COLS);
       var i = (o.indexOf((S.settings.reader && S.settings.reader.lastColor) || "yellow")
-               + (e.deltaY>0?1:-1) + 3) % 3;
+               + (e.deltaY>0?1:-1) + o.length) % o.length;
       S.settings.reader.lastColor = o[i]; VocabStore.set({settings:S.settings});
       wrap.querySelectorAll("[data-color]").forEach(function(b){
         b.classList.toggle("on", b.dataset.color === o[i]); });
@@ -456,68 +535,146 @@ function slotNode(id){
     return wrap;
   }
 
-  var b = document.createElement("button");
+  var b2 = document.createElement("button");
+  var pre = ghost ? "tt-ghost " : "";
+
   if (s.kind === "add"){
-    b.className = "tt-add " + (LAST.savedId ? "on" : "");
-    b.title = LAST.savedId ? "Saved \u2014 click to undo" : "Save this item";
-    b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
-    b.onclick = async function(){
-      b.disabled = true;
+    b2.className = pre + "tt-add " + (LAST.savedId && !parts.length ? "on" : "");
+    b2.title = LAST.savedId ? "Saved \u2014 click to undo" : "Save this item";
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.onclick = async function(){
+      b2.disabled = true;
+      if (parts.length){ await applyToParts("add"); return; }
       if (LAST.savedId){ await unsaveReaderTerm(LAST.savedId); say("Unsaved"); labReopen(null, LAST.hlId); }
       else { var tid = await addReaderTerm(LAST.term, "saved"); say("Add"); labReopen(tid, LAST.hlId); }
     };
-    return b;
+    return b2;
   }
   if (s.kind === "translate"){
-    b.className = "tt-tr"; b.title = "Translate";
-    b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
-    b.onclick = function(){
-      showInlineTranslation(LAST.term, ttEl.getBoundingClientRect());
+    b2.className = pre + "tt-tr"; b2.title = "Translate";
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.onclick = function(){
+      showInlineTranslation(heldTerm(), ttEl.getBoundingClientRect());
       say("Translate"); labHide();
     };
-    return b;
+    return b2;
   }
-  b.className = "tt-x"; b.title = s.label;
-  b.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
-  b.onclick = function(e){
-    e.stopPropagation();
-    say(s.label + " \u2014 nothing behind it yet");
-  };
-  return b;
+  if (s.kind === "another"){
+    b2.className = pre + "tt-x";
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.title = "Hold Ctrl or Cmd and select the next piece";
+    b2.onclick = function(e){
+      e.stopPropagation();
+      if (LAST && LAST.range && !parts.length) parts.push(LAST.range);
+      try{ window.getSelection().removeAllRanges(); }catch(err){}
+      say(parts.length + " part held \u2014 Ctrl-select the next");
+      labHide();
+    };
+    return b2;
+  }
+  if (s.kind === "class"){
+    var cls = CLASSES.filter(function(c){ return c.id === s.classId; })[0];
+    if (!cls) return null;
+    b2.className = pre + "tt-x";
+    b2.innerHTML = '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+      + COLS[cls.colour] + '"></span> ' + esc(cls.name);
+    b2.title = "Collect into " + cls.name;
+    b2.onclick = async function(e){ e.stopPropagation(); b2.disabled = true; await capture(cls); };
+    return b2;
+  }
+
+  b2.className = pre + "tt-x"; b2.title = s.label;
+  b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+  b2.onclick = function(e){ e.stopPropagation(); say(s.label + " \u2014 nothing behind it yet"); };
+  return b2;
+}
+
+/* One item, several spans. addReaderTerm returns the EXISTING id for a term
+   already saved, so calling it once per part gives one item with a mark on
+   each \u2014 the store's duplicate handling does the joining. */
+async function applyToParts(what, colour){
+  var rs = parts.slice(), term = heldTerm();
+  for (var i=0; i<rs.length; i++){
+    if (what === "add") await addReaderTerm(term, "saved", rs[i]);
+    else await addReaderHighlight(term, colour || "yellow", rs[i]);
+  }
+  say((what === "add" ? "Add" : "Highlight") + " on " + rs.length + " parts, as one item: " + term);
+  parts = []; labHide();
+}
+
+async function capture(cls){
+  var b = bodyText(), rs = heldRanges();
+  if (!rs.length){ say("Nothing to collect \u2014 the reader could not place that selection"); return; }
+  var s0 = rs[0].start, e0 = rs[rs.length-1].end;
+  var hit = heldTerm();
+  for (var i=0; i<rs.length; i++) await addReaderHighlight(hit, cls.colour, rs[i]);
+  CAPS.unshift({
+    cls: cls.id, clsName: cls.name, colour: cls.colour, hit: hit,
+    sentence: sentenceAround(b, s0, e0),
+    ctx: (typeof makeContext === "function") ? makeContext(b, s0, e0-s0, CTXCHARS)
+         : b.slice(Math.max(0,s0-CTXCHARS), Math.min(b.length, e0+CTXCHARS)),
+    chars: CTXCHARS,
+    textId: ui.readerTextId,
+    textName: (S.texts[ui.readerTextId] || {}).name || "",
+    start: s0, end: e0, when: Date.now()
+  });
+  saveL("caps", CAPS);
+  say("Collected into " + cls.name + ": " + hit);
+  parts = []; labHide(); paintCaps(); paintClasses();
 }
 
 function labShow(rect, term, savedId, hlId){
   labHide();
   if (savedId === undefined) savedId = savedTermIdForRange(ui.lastSelRange);
   if (hlId === undefined)   hlId   = highlightIdForRange(ui.lastSelRange);
-  LAST = {rect:rect, term:term, savedId:savedId||null, hlId:hlId||null};
+  LAST = {rect:rect, term:term, savedId:savedId||null, hlId:hlId||null,
+          range: ui.lastSelRange || null};
 
-  var nb = neighbours();
-  var kind = classify(term, nb[0], nb[1]);
-  if (kind){ extent = kind; paintExtents(); paintSlots(); }
+  if (parts.length) extent = "multi";
+  else {
+    var nb = selNeighbours();
+    var kind = nb ? classify(nb.raw, nb.before, nb.after) : classify(term, "", "");
+    if (kind) extent = kind;
+  }
+  paintExtents(); paintSlots();
 
   ttEl = document.createElement("div");
   ttEl.className = "sel-tt";
+
+  CLASSES.filter(function(c){ return c.on; }).forEach(function(c){
+    var n = slotNode("__cls_" + c.id); if (n) ttEl.appendChild(n);
+  });
   (COMP[extent] || []).forEach(function(id){
     var n = slotNode(id); if (n) ttEl.appendChild(n);
   });
+  // The modifier as a disclosure: held, the bar grows the slot; let go and it
+  // is gone. Nothing sits there permanently for a case that comes up twice a
+  // chapter.
+  if (revealed && (COMP[extent]||[]).indexOf("another") < 0){
+    var g = slotNode("another", true); if (g) ttEl.appendChild(g);
+  }
+  if (parts.length){
+    var p = document.createElement("span");
+    p.className = "tt-parts";
+    p.textContent = parts.length + " parts held";
+    ttEl.appendChild(p);
+  }
   if (!ttEl.childNodes.length){
     var e = document.createElement("span");
     e.style.cssText = "padding:6px 10px;font-size:11px;color:#9b9e96";
     e.textContent = "no slots for this";
     ttEl.appendChild(e);
   }
-  ttEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth-220)) + "px";
+  ttEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth-280)) + "px";
   ttEl.style.top  = Math.max(8, rect.top - 46) + "px";
   ttEl.addEventListener("mousedown", function(e){ e.stopPropagation(); });
   document.body.appendChild(ttEl);
 }
 function labHide(){ if (ttEl){ ttEl.remove(); ttEl = null; } }
 
-/* The tooltip stays open after an action so the same selection can be worked
-   on — the reader's behaviour, kept. app-lab.js's own reopenTT cannot do it
-   any more: it reads _ttTerm, which only its own showTT sets, and that no
-   longer runs. This reads ours instead. */
+/* app-lab.js's own reopenTT reads _ttTerm, which only its own showTT sets and
+   that no longer runs. This reads ours, so the tooltip still stays open after
+   an action, as it does now. */
 function labReopen(termId, hlId){
   var el = termId ? document.querySelector('[data-rterm="' + termId + '"]') : null;
   var r = el ? el.getBoundingClientRect() : (LAST && LAST.rect);
@@ -529,6 +686,39 @@ function labReopen(termId, hlId){
 window.showTT   = labShow;
 window.hideTT   = labHide;
 window.reopenTT = labReopen;
+
+/* Ctrl or Cmd while making the next selection is what joins the two. Chrome
+   cannot hold two ranges in one native selection, so the page holds the first
+   itself either way. */
+document.addEventListener("mouseup", function(e){
+  if (!(e.ctrlKey || e.metaKey)) return;
+  if (ttEl && ttEl.contains(e.target)) return;
+  setTimeout(function(){
+    var r = ui.lastSelRange;
+    if (!r) return;
+    if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start) parts.push(LAST.range);
+    var dup = parts.some(function(p){ return p.start === r.start && p.end === r.end; });
+    if (!dup) parts.push(r);
+    parts.sort(function(a,b){ return a.start - b.start; });
+    try{ window.getSelection().removeAllRanges(); }catch(err){}
+    var rect = LAST ? LAST.rect : {left:20, top:80};
+    labShow(rect, heldTerm(), null, null);
+    say(parts.length + " parts held: " + heldTerm());
+  }, 30);
+}, true);
+
+document.addEventListener("keydown", function(e){
+  if ((e.key === "Control" || e.key === "Meta") && ttEl && !revealed && LAST){
+    revealed = true; labShow(LAST.rect, LAST.term, LAST.savedId, LAST.hlId);
+  }
+});
+document.addEventListener("keyup", function(e){
+  if ((e.key === "Control" || e.key === "Meta") && revealed){
+    revealed = false; if (ttEl && LAST) labShow(LAST.rect, LAST.term, LAST.savedId, LAST.hlId);
+  }
+});
+window.addEventListener("blur", function(){ revealed = false; });
+
 document.addEventListener("mousedown", function(e){
   if (!ttEl) return;
   if (ttEl.contains(e.target)) return;
@@ -543,6 +733,8 @@ function paintExtents(){
   $("extbar").innerHTML = EXTENTS.map(function(x){
     return '<button class="lb sm extb' + (x.id===extent?" on":"") + '" data-x="'+x.id+'">'
          + esc(x.name) + "</button>"; }).join("");
+  var cur = EXTENTS.filter(function(x){ return x.id===extent; })[0];
+  $("extnote").textContent = cur ? cur.note : "";
 }
 function paintSlots(){
   var list = COMP[extent] || [];
@@ -552,10 +744,11 @@ function paintSlots(){
     if (ia>=0) return -1; if (ib>=0) return 1; return 0; });
   $("slotlist").innerHTML = ids.map(function(id){
     var s = SLOTS[id], inC = list.indexOf(id) >= 0;
+    var tag = s.kind === "class" ? "a class" : (s.wired ? "wired" : "shape only");
     return '<div class="slotrow'+(inC?" in":"")+(picked===id?" picked":"")+'" data-id="'+id+'">'
       + '<input type="checkbox"'+(inC?" checked":"")+">"
       + '<span class="nm">'+esc(s.label)+"</span>"
-      + '<span class="tag'+(s.wired?" wired":"")+'">'+(s.wired?"wired":"shape only")+"</span></div>";
+      + '<span class="tag'+(s.wired?" wired":"")+'">'+tag+"</span></div>";
   }).join("");
 }
 function paintEditor(){
@@ -568,12 +761,13 @@ function paintEditor(){
       '<div class="r"><label class="inl">Label</label>'
     + '<input type="text" id="eLabel" value="'+esc(s.label)+'" style="flex:1"></div>'
     + '<div class="r"><label class="inl">Icon</label>'
-    + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader\u2019s own \u2014 '
-        + esc(s.useReaderIcon) + "</span>" : '<select id="eIcon">'+iconOpts+"</select>")
+    + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader\u2019s own</span>'
+        : '<select id="eIcon">'+iconOpts+"</select>")
     + '<label style="font-size:11.5px"><input type="checkbox" id="eShow"'+(s.showLabel?" checked":"")+"> show label</label></div>"
-    + '<p style="margin-top:9px">'+(s.wired
-        ? "This one does what it says \u2014 it calls the reader\u2019s own function."
-        : "Nothing behind this yet. Pressing it writes a line in the log.")+"</p>"
+    + '<p style="margin-top:9px">'+(s.kind === "class"
+        ? "A focus class. It highlights and collects, with the context set above."
+        : s.wired ? "Wired \u2014 it calls the reader\u2019s own function."
+                  : "Nothing behind this yet. Pressing it writes a line in the log.")+"</p>"
     + (s.wired ? "" : '<div class="r"><button class="lb sm warn" id="eDel">Delete this slot</button></div>');
 }
 function paintPresets(){
@@ -582,9 +776,48 @@ function paintPresets(){
     return '<div class="r" style="justify-content:space-between"><span>'+esc(p.name)+"</span><span>"
       + '<button class="lb sm" data-use="'+i+'">Use</button> '
       + '<button class="lb sm warn" data-del="'+i+'">\u00d7</button></span></div>'; }).join("")
-    : '<p style="margin:0">None yet. An arrangement is every slot and every kind of selection at once, so two can be compared rather than described.</p>';
+    : '<p style="margin:0">None yet.</p>';
 }
-function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets(); }
+function paintClasses(){
+  var counts = {};
+  CAPS.forEach(function(c){ counts[c.cls] = (counts[c.cls]||0) + 1; });
+  $("clslist").innerHTML = CLASSES.length ? CLASSES.map(function(c){
+    return '<div class="clsrow"><span class="sw" style="background:'+COLS[c.colour]+'"></span>'
+      + '<span class="nm">'+esc(c.name)+'</span>'
+      + '<span class="tag" style="font-size:10.5px;color:#9b9e96">'+(counts[c.id]||0)+" collected</span>"
+      + '<button class="lb sm'+(c.on?" on":"")+'" data-on="'+c.id+'">'+(c.on?"on":"off")+"</button>"
+      + '<button class="lb sm warn" data-cdel="'+c.id+'">\u00d7</button></div>';
+  }).join("") : '<p style="margin:0">None yet. A class is the thing you are hunting for this week.</p>';
+  var onCls = CLASSES.filter(function(c){ return c.on; })[0];
+  $("labbtn").innerHTML = (onCls ? '<span class="dot" style="background:'+COLS[onCls.colour]+'"></span>' : "")
+    + "Composer";
+  $("clschars").value = CTXCHARS;
+}
+function paintCaps(){
+  var box = $("caps");
+  if (box.style.display === "none") return;
+  box.innerHTML = CAPS.length ? CAPS.map(function(c){
+    return '<div class="cap" style="border-color:'+COLS[c.colour]+'">'
+      + '<div class="hit">'+esc(c.hit)+"</div>"
+      + '<div class="ctx">'+esc(c.sentence)+"</div>"
+      + '<div class="src">'+esc(c.clsName)+" \u00b7 "+esc(c.textName)+" \u00b7 \u00b1"+c.chars+" chars kept</div></div>";
+  }).join("") : '<p style="margin:0">Nothing collected yet.</p>';
+}
+function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets(); paintClasses(); paintCaps(); }
+
+/* A class appears in the slot list as a real slot, so it can be reordered and
+   unticked like any other. */
+function syncClassSlots(){
+  Object.keys(SLOTS).forEach(function(k){
+    if (k.indexOf("__cls_") === 0 && !CLASSES.some(function(c){ return "__cls_"+c.id === k; }))
+      delete SLOTS[k];
+  });
+  CLASSES.forEach(function(c){
+    SLOTS["__cls_"+c.id] = {label:c.name, icon:"target", showLabel:true,
+                            kind:"class", classId:c.id, wired:true};
+  });
+  keep();
+}
 
 $("labbtn").onclick = function(){ $("labdr").classList.add("on"); paintAll(); };
 $("labclose").onclick = function(){ $("labdr").classList.remove("on"); };
@@ -644,15 +877,49 @@ $("plist").onclick = function(e){
   var ps = load("presets", []) || [];
   var u = e.target.getAttribute && e.target.getAttribute("data-use");
   var d = e.target.getAttribute && e.target.getAttribute("data-del");
-  if (u){ var p = ps[+u]; if (p){ SLOTS = p.slots; COMP = p.comp; picked = null; keep(); paintAll(); } return; }
+  if (u){ var p = ps[+u]; if (p){ SLOTS = p.slots; COMP = p.comp; picked = null;
+          syncClassSlots(); keep(); paintAll(); } return; }
   if (d){ ps.splice(+d,1); saveL("presets", ps); paintPresets(); }
 };
 $("reset").onclick = function(){
-  SLOTS = defaults(); COMP = defaultComp(); picked = null; keep(); paintAll();
+  SLOTS = defaults(); COMP = defaultComp(); picked = null; syncClassSlots(); keep(); paintAll();
 };
 
+$("clsadd").onclick = function(){
+  var n = $("clsname").value.trim(); if (!n){ $("clsname").focus(); return; }
+  CLASSES.push({id:"c"+Date.now().toString(36), name:n, colour:$("clscol").value, on:true});
+  saveL("classes", CLASSES); $("clsname").value = ""; syncClassSlots(); paintAll();
+};
+$("clslist").onclick = function(e){
+  var on = e.target.getAttribute && e.target.getAttribute("data-on");
+  var del = e.target.getAttribute && e.target.getAttribute("data-cdel");
+  if (on){ CLASSES.forEach(function(c){ if (c.id===on) c.on = !c.on; });
+           saveL("classes", CLASSES); paintClasses(); return; }
+  if (del){ CLASSES = CLASSES.filter(function(c){ return c.id !== del; });
+            saveL("classes", CLASSES); syncClassSlots(); paintAll(); }
+};
+$("clschars").onchange = function(){
+  CTXCHARS = Math.max(0, Math.min(400, parseInt(this.value,10) || 0));
+  saveL("ctxchars", CTXCHARS); this.value = CTXCHARS;
+};
+$("capshow").onclick = function(){
+  var box = $("caps");
+  box.style.display = box.style.display === "none" ? "" : "none";
+  this.textContent = box.style.display === "none" ? "Show what's collected" : "Hide";
+  paintCaps();
+};
+$("capcopy").onclick = function(){
+  var t = CAPS.map(function(c){
+    return c.clsName + "\t" + c.hit + "\t" + c.sentence + "\t" + c.ctx + "\t" + c.textName;
+  }).join("\n");
+  try{ navigator.clipboard.writeText(t); this.textContent = "Copied"; }catch(e){}
+  var b = this; setTimeout(function(){ b.textContent = "Copy"; }, 1500);
+};
+$("capclear").onclick = function(){ CAPS = []; saveL("caps", CAPS); paintAll(); };
+
+syncClassSlots();
 paintAll();
-say("Composer ready \u2014 the bar you see is the reader\u2019s own, built from parts");
+say("Composer ready");
 };
 </script>
 
