@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-15a (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-15b (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -350,6 +350,10 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labai .t .sp{flex:1}
   #labai .body{white-space:pre-wrap;max-height:260px;overflow-y:auto}
   #labai .err{color:#8a3f3f}
+  #labai .acts{display:flex;gap:6px;align-items:center;margin-top:9px;padding-top:8px;border-top:1px solid #eee;font-size:11.5px;color:#6B7178}
+  #labai .acts label{display:flex;gap:4px;align-items:center;cursor:pointer}
+  .lab-note{text-decoration:underline dotted #7a8f5c;text-underline-offset:4px;text-decoration-thickness:1.5px;cursor:help}
+  .lab-note:hover{background:rgba(122,143,92,.14);border-radius:2px}
 
   /* A span held while a several-part item is being built. */
   .lab-held{outline:1.5px dashed #4a6f9e;outline-offset:2px;border-radius:3px;
@@ -413,6 +417,10 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div class="r"><button class="lb sm" id="aitest">Test it</button>
       <button class="lb sm warn" id="aiforget">Forget the key</button></div>
     <div id="aistatus" style="font-size:11.5px;color:#6B7178;margin-top:7px"></div>
+    <div class="r" style="margin-top:9px"><label class="inl">Saved</label>
+      <span id="notescount" style="flex:1;font-size:11.5px;color:#6B7178"></span>
+      <button class="lb sm" id="notescopy">Copy all</button>
+      <button class="lb sm warn" id="notesclear">Clear</button></div>
   </div>
 
   <div class="card">
@@ -518,9 +526,9 @@ function defaults(){ return {
   collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"}
 };}
 function defaultComp(){ return {
-  subword:["add","translate","highlight"], word:["add","translate","highlight"],
-  phrase:["add","translate","highlight"], sentence:["add","translate","highlight"],
-  beyond:["add","translate","highlight"], multi:["add","translate","highlight"]
+  subword:["add","translate","highlight","examples"], word:["add","translate","highlight","examples"],
+  phrase:["add","translate","highlight","examples"], sentence:["add","translate","highlight"],
+  beyond:["add","translate","highlight"], multi:["add","translate","highlight","examples"]
 };}
 
 /* The two that were confusable, named for what they are. "More than one
@@ -560,8 +568,22 @@ function mergeSlots(stored){
   return stored;
 }
 var COMP  = load("comp", null) || defaultComp();
+/* Examples existed as a slot but was in no arrangement, so it never reached the
+   bar. Put it into the arrangements it suits, once per browser; take it out
+   again in the composer and it stays out. */
+(function(){
+  if ((load("compV", 1) || 1) >= 2) return;
+  ["subword","word","phrase","multi"].forEach(function(k){
+    COMP[k] = COMP[k] || [];
+    if (COMP[k].indexOf("examples") < 0) COMP[k].push("examples");
+  });
+  saveL("comp", COMP); saveL("compV", 2);
+})();
 var CLASSES = load("classes", []) || [];
 var CAPS = load("caps", []) || [];
+/* Saved AI answers. Browser-only, like CAPS: nothing here reaches the database
+   until the shape settles and gets its own table (START-HERE.md §6). */
+var NOTES = load("notes", []) || [];
 var CTXCHARS = load("ctxchars", 75);
 var SHOWMARKS = load("showmarks", true);
 var PLAY = load("play", "off");          // off | cover | blank
@@ -675,6 +697,19 @@ function labPaint(){
     paintRange(root, p.start, p.end, "lab-held", "part " + (i+1) + " of this item"); });
   if (!SHOWMARKS) return;
   var tid = ui.readerTextId;
+  // saved AI answers, one span per piece carrying every note id for it
+  var byRange = {};
+  NOTES.forEach(function(n){
+    if (n.textId !== tid || !n.marked) return;
+    (n.ranges || []).forEach(function(r){
+      var k = r.start + ":" + r.end; (byRange[k] = byRange[k] || []).push(n.id); });
+  });
+  Object.keys(byRange).forEach(function(k){
+    var a = k.split(":"), root2 = root;
+    paintRange(root2, +a[0], +a[1], "lab-note", "");
+    root.querySelectorAll('.lab-note:not([data-notes])').forEach(function(sp){
+      sp.setAttribute("data-notes", byRange[k].join(",")); });
+  });
   CAPS.forEach(function(c){
     if (c.textId !== tid) return;
     var cls = CLASSES.filter(function(x){ return x.id === c.cls; })[0];
@@ -802,16 +837,80 @@ async function askAI(promptText){
   }
 }
 
-function showAI(title, html, isErr){
+/* The answer panel. Sits ABOVE what was picked (above the bar, which is itself
+   above the selection), and drops below only when there is no room up there.
+   With `save` it offers Save, and whether to mark the words in the text. */
+function showAI(title, html, isErr, anchor, save, existing){
   var box = $("labai");
   box.className = "on";
+  var acts = "";
+  if (save) acts = '<div class="acts"><button class="lb sm" id="aisave">Save</button>'
+    + '<label><input type="checkbox" id="aimark" checked> mark it in the text</label></div>';
+  if (existing) acts = '<div class="acts"><span style="flex:1">saved '
+    + esc(new Date(existing.when).toLocaleDateString()) + '</span>'
+    + '<button class="lb sm" id="aicopy">Copy</button>'
+    + '<button class="lb sm warn" id="aidel">Remove</button></div>';
   box.innerHTML = '<div class="t">' + esc(title) + '<span class="sp"></span>'
     + '<button class="lb sm" id="aiclose">close</button></div>'
-    + '<div class="body' + (isErr ? " err" : "") + '">' + html + "</div>";
-  var r = ttEl ? ttEl.getBoundingClientRect() : {left:40, bottom:80};
+    + '<div class="body' + (isErr ? " err" : "") + '">' + html + "</div>" + acts;
+  var r = anchor || (ttEl ? ttEl.getBoundingClientRect() : null)
+        || (LAST && LAST.rect) || {left:40, top:120, bottom:120};
   box.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 356)) + "px";
-  box.style.top  = Math.min(window.innerHeight - 120, (r.bottom || 80) + 10) + "px";
+  var h = box.offsetHeight;
+  var top = r.top - h - 8;
+  if (top < 8) top = Math.min(window.innerHeight - h - 8, (r.bottom || 80) + 8);
+  box.style.top = Math.max(8, top) + "px";
   var c = $("aiclose"); if (c) c.onclick = function(){ box.className = ""; };
+  if (save) $("aisave").onclick = function(){
+    var n = { id:"n" + Date.now().toString(36), slot:save.slot, label:save.label,
+      term:save.about.term, textId:save.about.textId, ranges:save.about.ranges,
+      text:save.text, marked:$("aimark").checked, model:load("aimodel","gemini-flash-latest"),
+      when:Date.now() };
+    NOTES.unshift(n); saveL("notes", NOTES);
+    this.textContent = "Saved"; this.disabled = true; $("aimark").disabled = true;
+    say(save.label + " saved for " + n.term + (n.marked ? ", marked" : ""));
+    labPaint(); paintNotesCount();
+  };
+  if (existing){
+    $("aicopy").onclick = function(){
+      try{ navigator.clipboard.writeText(existing.text); this.textContent = "Copied"; }catch(e){} };
+    $("aidel").onclick = function(){
+      NOTES = NOTES.filter(function(x){ return x.id !== existing.id; }); saveL("notes", NOTES);
+      box.className = ""; say(existing.label + " removed for " + existing.term);
+      labPaint(); paintNotesCount();
+    };
+  }
+}
+
+/* Hovering a marked item shows what was saved for it. The panel stays while the
+   pointer is on it, so its buttons can be reached. */
+var noteTimer = null;
+document.addEventListener("mouseover", function(e){
+  var el = e.target.closest && e.target.closest(".lab-note");
+  if (e.target.closest && e.target.closest("#labai")){ clearTimeout(noteTimer); return; }
+  if (!el){ return; }
+  clearTimeout(noteTimer);
+  var ids = (el.getAttribute("data-notes") || "").split(",");
+  var ns = NOTES.filter(function(n){ return ids.indexOf(n.id) >= 0; });
+  if (!ns.length) return;
+  var n = ns[0];
+  var more = ns.length > 1 ? "\n\n(+" + (ns.length-1) + " more saved for this)" : "";
+  showAI(n.label + " \u00b7 " + n.term, esc(n.text + more), false, el.getBoundingClientRect(), null, n);
+}, true);
+document.addEventListener("mouseout", function(e){
+  var from = e.target.closest && (e.target.closest(".lab-note") || e.target.closest("#labai"));
+  if (!from) return;
+  var to = e.relatedTarget;
+  if (to && to.closest && (to.closest("#labai") || to.closest(".lab-note"))) return;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(function(){
+    var box = $("labai"); if (box.querySelector("#aidel")) box.className = ""; }, 450);
+}, true);
+
+function paintNotesCount(){
+  var el = $("notescount"); if (!el) return;
+  var here = NOTES.filter(function(n){ return n.textId === ui.readerTextId; }).length;
+  el.textContent = NOTES.length ? NOTES.length + " saved (" + here + " in this text)" : "None saved yet.";
 }
 
 /* ── the bar ──────────────────────────────────────────────────────────── */
@@ -936,11 +1035,16 @@ function slotNode(id, ghost){
     b2.onclick = async function(e){
       e.stopPropagation();
       var q = fillPrompt(s.prompt);
-      showAI(s.label, "asking\u2026", false);
-      say(s.label + " \u2014 asked");
+      // what it was asked about, fixed now: the selection can move while we wait
+      var about = { term: heldTerm(), textId: ui.readerTextId,
+        ranges: heldRanges().map(function(x){ return {start:x.start, end:x.end}; }) };
+      var anchor = ttEl ? ttEl.getBoundingClientRect() : null;
+      showAI(s.label + " \u00b7 " + about.term, "asking\u2026", false, anchor);
+      say(s.label + " \u2014 asked (" + load("aimodel","gemini-flash-latest") + ")");
       var r = await askAI(q);
-      if (r.err){ showAI(s.label, esc(r.err), true); say(s.label + " \u2014 " + r.err); }
-      else { showAI(s.label, esc(r.text), false); }
+      if (r.err){ showAI(s.label, esc(r.err), true, anchor); say(s.label + " \u2014 " + r.err); }
+      else { showAI(s.label + " \u00b7 " + about.term, esc(r.text.trim()), false, anchor,
+                    {label:s.label, slot:id, text:r.text.trim(), about:about}); }
     };
     return b2;
   }
@@ -1532,6 +1636,15 @@ $("capcopy").onclick = function(){
 };
 $("capclear").onclick = function(){ CAPS = []; saveL("caps", CAPS); paintAll(); };
 
+$("notescopy").onclick = function(){
+  var t = NOTES.map(function(n){ return n.label + "\t" + n.term + "\t" + n.text.replace(/\n/g," / "); }).join("\n");
+  try{ navigator.clipboard.writeText(t); this.textContent = "Copied"; }catch(e){}
+  var b = this; setTimeout(function(){ b.textContent = "Copy all"; }, 1500);
+};
+$("notesclear").onclick = function(){
+  if (!confirm("Remove every saved AI answer?")) return;
+  NOTES = []; saveL("notes", NOTES); paintNotesCount(); labPaint(); };
+paintNotesCount();
 syncClassSlots();
 paintAll();
 labPaint();
