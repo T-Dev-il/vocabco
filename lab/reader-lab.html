@@ -399,9 +399,13 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       the repository, not in the database. Anyone who opens this page on your
       machine can use it, and nobody else can.</p>
     <div class="r"><label class="inl">Key</label>
-      <input type="password" id="aikey" placeholder="begins with AIza" style="flex:1"></div>
+      <input type="password" id="aikey" placeholder="AIza\u2026 or AQ.\u2026" style="flex:1"></div>
     <div class="r"><label class="inl">Model</label>
       <input type="text" id="aimodel" style="flex:1"></div>
+    <div class="r"><label class="inl">Sent as</label>
+      <button class="lb sm authb" data-auth="header">header</button>
+      <button class="lb sm authb" data-auth="query">?key=</button>
+      <button class="lb sm authb" data-auth="bearer">bearer</button></div>
     <div class="r"><button class="lb sm" id="aitest">Test it</button>
       <button class="lb sm warn" id="aiforget">Forget the key</button></div>
     <div id="aistatus" style="font-size:11.5px;color:#6B7178;margin-top:7px"></div>
@@ -705,7 +709,20 @@ document.addEventListener("click", function(e){
    and stays in their browser. A slot carries its own prompt, so Translate,
    Define and Examples are three different questions rather than one tool with
    three labels. */
-var AI_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
+var AI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/* Google is retiring the old AIza "traffic keys" in favour of AQ "authentication
+   keys", and AI Studio now issues only the AQ kind \u2014 but the Generative
+   Language REST endpoint has not caught up and refuses them, whichever way they
+   are sent. The key is real; the endpoint will not take it. So how it is sent is
+   a setting rather than an assumption, and the test says which half failed:
+   authenticating at all, or generating. */
+function authBits(url, key){
+  var mode = load("aiauth", "header");
+  if (mode === "query") return {url: url + (url.indexOf("?")<0?"?":"&") + "key=" + encodeURIComponent(key), headers:{}};
+  if (mode === "bearer") return {url: url, headers:{"Authorization":"Bearer " + key}};
+  return {url: url, headers:{"x-goog-api-key": key}};
+}
 
 function fillPrompt(tpl){
   var b = bodyText(), rs = heldRanges();
@@ -725,9 +742,10 @@ async function askAI(promptText){
   var key = load("aikey", ""), model = load("aimodel", "gemini-3.5-flash");
   if (!key) return {err:"No key yet. Put one in the composer, under Tools that ask an AI."};
   try{
-    var res = await fetch(AI_URL + encodeURIComponent(model) + ":generateContent", {
-      method:"POST",
-      headers:{"Content-Type":"application/json", "x-goog-api-key":key},
+    var a = authBits(AI_BASE + "/" + encodeURIComponent(model) + ":generateContent", key);
+    a.headers["Content-Type"] = "application/json";
+    var res = await fetch(a.url, {
+      method:"POST", headers:a.headers,
       body: JSON.stringify({contents:[{parts:[{text:promptText}]}]})
     });
     var j = null;
@@ -736,13 +754,17 @@ async function askAI(promptText){
       var msg = (j && j.error && j.error.message) || ("HTTP " + res.status + " " + res.statusText);
       // The commonest cause by far is the wrong kind of string. AI Studio hands
       // out several; only the one beginning AIza is an API key.
-      if (/api key not valid|API_KEY_INVALID/i.test(msg) && key.indexOf("AIza") !== 0)
-        msg += "\n\nThat string does not look like an API key. A Gemini API key "
-             + "begins with AIza. In AI Studio use Get API key \u2192 Create API key, "
-             + "and copy the whole thing.";
+      if (/api key not valid|API_KEY_INVALID|ACCESS_TOKEN_TYPE_UNSUPPORTED|UNAUTHENTICATED/i.test(msg)
+          && key.indexOf("AQ.") === 0)
+        msg += "\n\nThe key itself is fine. AI Studio now issues only AQ keys, and this "
+             + "REST endpoint still refuses them however they are sent. Two ways round it: "
+             + "make an AIza key in the Google Cloud console instead (APIs & Services \u2192 "
+             + "Credentials \u2192 Create credentials \u2192 API key, on a project with the "
+             + "Generative Language API switched on), or try the other two settings under "
+             + "How it is sent.";
       if (/not found|is not supported/i.test(msg))
-        msg += "\n\nThe model name may be the problem rather than the key. Use the "
-             + "name AI Studio shows for the model you want.";
+        msg += "\n\nThe model name is the likelier problem here, not the key. Use the name "
+             + "AI Studio shows for the model you want.";
       return {err:msg};
     }
     var cand = (j && j.candidates && j.candidates[0]) || null;
@@ -905,17 +927,47 @@ function slotNode(id, ghost){
   return b2;
 }
 
-/* One item, several spans. addReaderTerm returns the EXISTING id for a term
-   already saved, so calling it once per part gives one item with a mark on
-   each \u2014 the store's duplicate handling does the joining. */
+/* One item, several spans.
+
+   The first attempt called addReaderTerm once per piece and let the store's
+   duplicate handling join them. It does not join them: each call saves, waits
+   for the server, and refreshes S, and the piece earliest in the text came back
+   from that refresh without its termId \u2014 so its chip rendered with no
+   data-rterm, which is why it would not select with the others and could not be
+   unsaved. The staggered one-chip-at-a-time appearance was the same thing seen
+   from the outside: three round trips, three renders.
+
+   So: one call for the first piece, to mint the id the reader's own way, then
+   the remaining marks written next to it carrying that same id, then one render
+   and one save. Same mark shape, same fields, one item. */
 async function applyToParts(what, colour){
-  var rs = parts.slice(), term = heldTerm();
-  for (var i=0; i<rs.length; i++){
-    if (what === "add") await addReaderTerm(term, "saved", rs[i]);
-    else await addReaderHighlight(term, colour || "yellow", rs[i]);
+  var rs = parts.slice().sort(function(a,b){ return a.start - b.start; });
+  var term = heldTerm(), kind = (what === "add") ? "saved" : "hl";
+  parts = []; labHide();                      // the dashed outlines go now
+
+  var id = (what === "add")
+    ? await addReaderTerm(term, "saved", rs[0])
+    : await addReaderHighlight(term, colour || "yellow", rs[0]);
+
+  var text = S.texts[ui.readerTextId];        // re-read: the store refreshes S
+  if (!text){ say("The text moved out from under that"); return; }
+  text.marks = text.marks || [];
+  for (var i=1; i<rs.length; i++){
+    var r = rs[i];
+    var already = text.marks.some(function(m){
+      return m.type === kind && m.start === r.start && m.end === r.end; });
+    if (already) continue;
+    text.marks.push(kind === "saved"
+      ? {type:"saved", start:r.start, end:r.end, termId: id || null}
+      : {type:"hl", start:r.start, end:r.end, color: colour || "yellow", highlightId: id || null});
   }
-  say((what === "add" ? "Add" : "Highlight") + " on " + rs.length + " parts, as one item: " + term);
-  parts = []; labHide(); labPaint();          // the dashed outlines go with them
+  text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
+  render();
+  try{ await VocabStore.set({texts:S.texts}); }
+  catch(e){ console.warn("[lab] could not save the extra pieces", e); }
+  say((what === "add" ? "Add" : "Highlight") + " on " + rs.length
+      + " pieces, one item: " + term + (id ? "" : " (no id came back \u2014 pieces are unlinked)"));
+  labPaint();
 }
 
 async function capture(cls){
@@ -1162,6 +1214,9 @@ function paintClasses(){
   mt.textContent = SHOWMARKS ? "Marks in the text" : "Marks hidden";
   document.querySelectorAll(".playb").forEach(function(x){
     x.classList.toggle("on", x.dataset.play === PLAY); });
+  var am = load("aiauth", "header");
+  document.querySelectorAll(".authb").forEach(function(x){
+    x.classList.toggle("on", x.dataset.auth === am); });
 }
 function paintCaps(){
   var box = $("caps");
@@ -1309,12 +1364,48 @@ $("aikey").onchange = function(){ saveL("aikey", this.value.trim());
 $("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-3.5-flash"); };
 $("aiforget").onclick = function(){ saveL("aikey", ""); $("aikey").value = "";
   $("aistatus").textContent = "Key forgotten."; };
+document.querySelectorAll(".authb").forEach(function(b){
+  b.onclick = function(){
+    saveL("aiauth", b.dataset.auth);
+    document.querySelectorAll(".authb").forEach(function(x){
+      x.classList.toggle("on", x.dataset.auth === b.dataset.auth); });
+  };
+});
+/* Two questions, not one: does the key authenticate at all, and will this model
+   generate? Listing models answers the first even when generating fails, which
+   is exactly the state an AQ key is in. */
+async function listModels(){
+  var key = load("aikey",""); if (!key) return {err:"No key yet."};
+  try{
+    var a = authBits(AI_BASE, key);
+    var res = await fetch(a.url, {headers:a.headers});
+    var j = null; try{ j = await res.json(); }catch(e){}
+    if (!res.ok) return {err:(j&&j.error&&j.error.message) || ("HTTP "+res.status)};
+    var names = (j.models||[]).filter(function(m){
+      return (m.supportedGenerationMethods||m.supported_actions||[]).indexOf("generateContent") >= 0; })
+      .map(function(m){ return String(m.name||"").replace("models/",""); });
+    return {names:names};
+  }catch(e){ return {err:String(e && e.message || e)}; }
+}
 $("aitest").onclick = async function(){
-  $("aistatus").textContent = "asking\u2026";
+  var st = $("aistatus");
+  st.style.whiteSpace = "pre-wrap";
+  st.style.color = "#6B7178";
+  st.textContent = "checking the key\u2026";
+  var l = await listModels();
+  if (l.err){
+    st.style.color = "#8a3f3f";
+    st.textContent = "The key did not authenticate \u2014 " + l.err;
+    return;
+  }
+  st.textContent = "Key authenticates. " + l.names.length + " models can generate"
+    + (l.names.length ? " (e.g. " + l.names.slice(0,3).join(", ") + ")" : "")
+    + ".\nNow trying " + load("aimodel","gemini-3.5-flash") + "\u2026";
   var r = await askAI("Reply with exactly: ok");
-  $("aistatus").style.whiteSpace = "pre-wrap";
-  $("aistatus").style.color = r.err ? "#8a3f3f" : "#4a7a35";
-  $("aistatus").textContent = r.err ? ("Failed \u2014 " + r.err) : ("Answered: " + r.text.trim());
+  st.style.color = r.err ? "#8a3f3f" : "#4a7a35";
+  st.textContent = (r.err ? "Key authenticates, but generating failed \u2014 " + r.err
+                          : "Working. It answered: " + r.text.trim())
+    + (l.names.length ? "\n\nModels this key can use: " + l.names.slice(0,8).join(", ") : "");
 };
 $("marktoggle").onclick = function(){
   SHOWMARKS = !SHOWMARKS; saveL("showmarks", SHOWMARKS);
