@@ -402,6 +402,8 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <input type="password" id="aikey" placeholder="AIza\u2026 or AQ.\u2026" style="flex:1"></div>
     <div class="r"><label class="inl">Model</label>
       <input type="text" id="aimodel" style="flex:1"></div>
+    <p style="margin-top:5px">Test it prints the models this key may use. <b>gemini-flash-latest</b>
+      follows whatever the current flash model is, so it does not go stale.</p>
     <div class="r"><label class="inl">Sent as</label>
       <button class="lb sm authb" data-auth="header">header</button>
       <button class="lb sm authb" data-auth="query">?key=</button>
@@ -739,7 +741,7 @@ function fillPrompt(tpl){
 }
 
 async function askAI(promptText){
-  var key = load("aikey", ""), model = load("aimodel", "gemini-3.5-flash");
+  var key = load("aikey", ""), model = load("aimodel", "gemini-flash-latest");
   if (!key) return {err:"No key yet. Put one in the composer, under Tools that ask an AI."};
   try{
     var a = authBits(AI_BASE + "/" + encodeURIComponent(model) + ":generateContent", key);
@@ -1358,10 +1360,14 @@ document.querySelectorAll(".playb").forEach(function(b){
   };
 });
 $("aikey").value = load("aikey", "");
-$("aimodel").value = load("aimodel", "gemini-3.5-flash");
+// gemini-3.5-flash was a guess of mine and is not a real model name. Anyone who
+// has it stored got it from that default, not from a choice, so it is replaced
+// rather than left to fail. gemini-flash-latest tracks the current flash model.
+if ((load("aimodel","") || "").indexOf("gemini-3.5") === 0) saveL("aimodel", "gemini-flash-latest");
+$("aimodel").value = load("aimodel", "gemini-flash-latest");
 $("aikey").onchange = function(){ saveL("aikey", this.value.trim());
   $("aistatus").textContent = this.value ? "Key kept in this browser." : "No key."; };
-$("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-3.5-flash"); };
+$("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-flash-latest"); };
 $("aiforget").onclick = function(){ saveL("aikey", ""); $("aikey").value = "";
   $("aistatus").textContent = "Key forgotten."; };
 document.querySelectorAll(".authb").forEach(function(b){
@@ -1400,7 +1406,7 @@ $("aitest").onclick = async function(){
   }
   st.textContent = "Key authenticates. " + l.names.length + " models can generate"
     + (l.names.length ? " (e.g. " + l.names.slice(0,3).join(", ") + ")" : "")
-    + ".\nNow trying " + load("aimodel","gemini-3.5-flash") + "\u2026";
+    + ".\nNow trying " + load("aimodel","gemini-flash-latest") + "\u2026";
   var r = await askAI("Reply with exactly: ok");
   st.style.color = r.err ? "#8a3f3f" : "#4a7a35";
   st.textContent = (r.err ? "Key authenticates, but generating failed \u2014 " + r.err
