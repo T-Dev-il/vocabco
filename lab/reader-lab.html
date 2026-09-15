@@ -294,7 +294,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .sel-tt .tt-part{font-size:10.5px;color:#4a6f9e;padding:5px 7px;border-radius:5px;
     border:1px dashed #9ab0c9;background:#f4f8fc;white-space:nowrap;max-width:120px;
     overflow:hidden;text-overflow:ellipsis}
-  .sel-tt .tt-part b{color:#8a3f3f;margin-left:4px}
+  .sel-tt .tt-part b{color:#8a3f3f;margin-left:4px;flex:none}
+  .sel-tt .tt-part .tt-pw{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    max-width:96px;display:inline-block}
 
   /* ── annotation forms ────────────────────────────────────────────────
      Painted by the lab over the reader's rendering, never saved. Each is a
@@ -397,7 +399,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       the repository, not in the database. Anyone who opens this page on your
       machine can use it, and nobody else can.</p>
     <div class="r"><label class="inl">Key</label>
-      <input type="password" id="aikey" placeholder="paste it here" style="flex:1"></div>
+      <input type="password" id="aikey" placeholder="begins with AIza" style="flex:1"></div>
     <div class="r"><label class="inl">Model</label>
       <input type="text" id="aimodel" style="flex:1"></div>
     <div class="r"><button class="lb sm" id="aitest">Test it</button>
@@ -731,7 +733,17 @@ async function askAI(promptText){
     var j = null;
     try{ j = await res.json(); }catch(e){}
     if (!res.ok){
-      return {err:(j && j.error && j.error.message) || ("HTTP " + res.status + " " + res.statusText)};
+      var msg = (j && j.error && j.error.message) || ("HTTP " + res.status + " " + res.statusText);
+      // The commonest cause by far is the wrong kind of string. AI Studio hands
+      // out several; only the one beginning AIza is an API key.
+      if (/api key not valid|API_KEY_INVALID/i.test(msg) && key.indexOf("AIza") !== 0)
+        msg += "\n\nThat string does not look like an API key. A Gemini API key "
+             + "begins with AIza. In AI Studio use Get API key \u2192 Create API key, "
+             + "and copy the whole thing.";
+      if (/not found|is not supported/i.test(msg))
+        msg += "\n\nThe model name may be the problem rather than the key. Use the "
+             + "name AI Studio shows for the model you want.";
+      return {err:msg};
     }
     var cand = (j && j.candidates && j.candidates[0]) || null;
     var txt = cand && cand.content && cand.content.parts
@@ -764,11 +776,15 @@ function heldRanges(){
   if (parts.length) return parts.slice();
   return (LAST && LAST.range) ? [LAST.range] : [];
 }
-/* A held piece carries its own text, taken when it was held. Looking it up
-   afterwards went wrong as soon as anything re-rendered. */
-function makePart(r){
-  var b = bodyText();
-  return {start:r.start, end:r.end, text:b.slice(r.start, r.end).trim()};
+/* A held piece keeps the text the selection itself reported, not a slice taken
+   from the body by character offset. The slice came back empty whenever the
+   offsets and the body disagreed, which is why the held pieces showed as bare
+   crosses with no word in them. The selection is never wrong about its own
+   text, so it is the source. */
+function makePart(r, text){
+  var t = (text || "").trim();
+  if (!t){ try{ t = bodyText().slice(r.start, r.end).trim(); }catch(e){} }
+  return {start:r.start, end:r.end, text:t};
 }
 function heldTerm(){
   if (!parts.length) return LAST ? LAST.term : "";
@@ -850,7 +866,7 @@ function slotNode(id, ghost){
     b2.title = "Hold Ctrl or Cmd and select the next piece";
     b2.onclick = function(e){
       e.stopPropagation();
-      if (LAST && LAST.range && !parts.length) parts.push(makePart(LAST.range));
+      if (LAST && LAST.range && !parts.length) parts.push(makePart(LAST.range, LAST.term));
       try{ window.getSelection().removeAllRanges(); }catch(err){}
       say(parts.length + " part held \u2014 Ctrl-select the next");
       labHide();
@@ -946,7 +962,11 @@ function labShow(rect, term, savedId, hlId){
   CLASSES.filter(function(c){ return c.on; }).forEach(function(c){
     var n = slotNode("__cls_" + c.id); if (n) ttEl.appendChild(n);
   });
+  // Classes are offered above and nowhere else. Without this they could arrive
+  // twice — once from the class list and once from the slot list — and turning
+  // one off in either place left the other still putting it in the bar.
   (COMP[extent] || []).forEach(function(id){
+    if (id.indexOf("__cls_") === 0) return;
     var n = slotNode(id); if (n) ttEl.appendChild(n);
   });
   // The modifier as a disclosure: held, the bar grows the slot; let go and it
@@ -962,7 +982,8 @@ function labShow(rect, term, savedId, hlId){
     parts.forEach(function(pr, i){
       var chip = document.createElement("button");
       chip.className = "tt-part";
-      chip.innerHTML = esc(pr.text || b.slice(pr.start, pr.end).trim()) + " <b>\u00d7</b>";
+      var label = pr.text || b.slice(pr.start, pr.end).trim() || ("piece " + (i+1));
+      chip.innerHTML = '<span class="tt-pw">' + esc(label) + '</span><b>\u00d7</b>';
       chip.title = "Drop this piece";
       chip.onclick = function(ev){
         ev.stopPropagation();
@@ -1009,12 +1030,16 @@ window.reopenTT = labReopen;
 document.addEventListener("mouseup", function(e){
   if (!(e.ctrlKey || e.metaKey)) return;
   if (ttEl && ttEl.contains(e.target)) return;
+  // Read what the selection says before anything clears it.
+  var selText = "";
+  try{ selText = window.getSelection().toString(); }catch(err){}
   setTimeout(function(){
     var r = ui.lastSelRange;
     if (!r) return;
-    if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start) parts.push(makePart(LAST.range));
+    if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start)
+      parts.push(makePart(LAST.range, LAST.term));
     var dup = parts.some(function(p){ return p.start === r.start && p.end === r.end; });
-    if (!dup) parts.push(makePart(r));
+    if (!dup) parts.push(makePart(r, selText));
     parts.sort(function(a,b){ return a.start - b.start; });
     try{ window.getSelection().removeAllRanges(); }catch(err){}
     var rect = LAST ? LAST.rect : {left:20, top:80};
@@ -1056,7 +1081,8 @@ function paintExtents(){
 }
 function paintSlots(){
   var list = COMP[extent] || [];
-  var ids = Object.keys(SLOTS).sort(function(a,b){
+  var ids = Object.keys(SLOTS).filter(function(k){ return k.indexOf("__cls_") !== 0; })
+                              .sort(function(a,b){
     var ia=list.indexOf(a), ib=list.indexOf(b);
     if (ia>=0 && ib>=0) return ia-ib;
     if (ia>=0) return -1; if (ib>=0) return 1; return 0; });
@@ -1248,8 +1274,16 @@ $("clslist").onclick = function(e){
   var on = g("data-on"), show = g("data-show"), del = g("data-cdel");
   if (on){ CLASSES.forEach(function(c){ if (c.id===on) c.on = !c.on; });
            saveL("classes", CLASSES); paintClasses(); return; }
-  if (show){ CLASSES.forEach(function(c){ if (c.id===show) c.show = !c.show; });
-             saveL("classes", CLASSES); paintClasses(); labPaint(); return; }
+  if (show){
+    CLASSES.forEach(function(c){
+      if (c.id !== show) return;
+      c.show = !c.show;
+      // Hidden means hidden: a class you cannot see should not be offered
+      // either. Turning it back on leaves the bar switch where you left it.
+      if (!c.show) c.on = false;
+    });
+    saveL("classes", CLASSES); paintClasses(); labPaint(); return;
+  }
   if (del){ CLASSES = CLASSES.filter(function(c){ return c.id !== del; });
             saveL("classes", CLASSES); syncClassSlots(); paintAll(); labPaint(); }
 };
@@ -1278,6 +1312,8 @@ $("aiforget").onclick = function(){ saveL("aikey", ""); $("aikey").value = "";
 $("aitest").onclick = async function(){
   $("aistatus").textContent = "asking\u2026";
   var r = await askAI("Reply with exactly: ok");
+  $("aistatus").style.whiteSpace = "pre-wrap";
+  $("aistatus").style.color = r.err ? "#8a3f3f" : "#4a7a35";
   $("aistatus").textContent = r.err ? ("Failed \u2014 " + r.err) : ("Answered: " + r.text.trim());
 };
 $("marktoggle").onclick = function(){
