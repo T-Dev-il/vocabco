@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/index.html — build stamp: lab · 2026-09-14.  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-15a (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -401,7 +401,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div class="r"><label class="inl">Key</label>
       <input type="password" id="aikey" placeholder="AIza\u2026 or AQ.\u2026" style="flex:1"></div>
     <div class="r"><label class="inl">Model</label>
-      <input type="text" id="aimodel" style="flex:1"></div>
+      <select id="aimodelpick" style="flex:1"></select></div>
+    <div class="r" id="aimodelother" style="display:none"><label class="inl"></label>
+      <input type="text" id="aimodel" placeholder="exact model name" style="flex:1"></div>
     <p style="margin-top:5px">Test it prints the models this key may use. <b>gemini-flash-latest</b>
       follows whatever the current flash model is, so it does not go stale.</p>
     <div class="r"><label class="inl">Sent as</label>
@@ -536,7 +538,27 @@ var EXTENTS = [
    note:"One item whose pieces are NOT next to each other \u2014 steht \u2026 auf, ne \u2026 pas. Hold Ctrl or Cmd and select the second piece. The only kind you cannot arrive at by dragging."}
 ];
 
-var SLOTS = load("slots", null) || defaults();
+var SLOTS = mergeSlots(load("slots", null));
+/* Stored slots used to REPLACE the defaults, so a slot added to defaults() after
+   someone's first visit never reached them. Now: anything in defaults() this
+   browser has never seen is added; anything it has seen and you deleted stays
+   deleted; a stored slot that is still shape-only picks up the wiring when the
+   default has since been wired. Your own edits to labels and icons are kept. */
+function mergeSlots(stored){
+  var d = defaults();
+  if (!stored){ saveL("seenDefaults", Object.keys(d)); return d; }
+  var seen = load("seenDefaults", []) || [];
+  Object.keys(d).forEach(function(k){
+    if (!stored[k]){ if (seen.indexOf(k) < 0) stored[k] = d[k]; return; }
+    if (d[k].wired && !stored[k].wired && stored[k].kind === "none"){
+      stored[k].kind = d[k].kind; stored[k].wired = true;
+      if (d[k].prompt && !stored[k].prompt) stored[k].prompt = d[k].prompt;
+    }
+  });
+  saveL("seenDefaults", Object.keys(d));
+  saveL("slots", stored);
+  return stored;
+}
 var COMP  = load("comp", null) || defaultComp();
 var CLASSES = load("classes", []) || [];
 var CAPS = load("caps", []) || [];
@@ -929,46 +951,90 @@ function slotNode(id, ghost){
   return b2;
 }
 
-/* One item, several spans.
+/* One item, several spans.  (Contractor 12 — the real cause.)
 
-   The first attempt called addReaderTerm once per piece and let the store's
-   duplicate handling join them. It does not join them: each call saves, waits
-   for the server, and refreshes S, and the piece earliest in the text came back
-   from that refresh without its termId \u2014 so its chip rendered with no
-   data-rterm, which is why it would not select with the others and could not be
-   unsaved. The staggered one-chip-at-a-time appearance was the same thing seen
-   from the outside: three round trips, three renders.
+   Every VocabStore.set() ends by telling app.js "something changed", and app.js
+   answers by REPLACING S with a fresh copy from the store — asynchronously, a
+   moment later. addReaderTerm does three saves in a row, and writes the new id
+   into S between them. One of those late replacements lands after the id was
+   written and swaps in a copy taken before it: the id is gone. The piece that
+   loses it is always the one handed to addReaderTerm, which is the earliest in
+   the text. The stagger was the same thing: that piece rendered at once, the
+   rest only after two trips to the server.
 
-   So: one call for the first piece, to mint the id the reader's own way, then
-   the remaining marks written next to it carrying that same id, then one render
-   and one save. Same mark shape, same fields, one item. */
+   So addReaderTerm is not used here. Order is reversed: mint the id FIRST,
+   before any mark exists, let the store's replacement of S land, then write
+   every piece with that id in one go, render once, save once. Nothing is in S
+   that a replacement could wipe. */
+function settle(ms){ return new Promise(function(r){ setTimeout(r, ms || 60); }); }
+function marksWithId(tid, kind, id){
+  var t = S.texts[tid]; if (!t || !id) return 0;
+  return (t.marks||[]).filter(function(m){
+    return m.type === kind && (kind === "saved" ? m.termId : m.highlightId) === id; }).length;
+}
 async function applyToParts(what, colour){
+  var t0 = Date.now(), ms = function(){ return "+" + (Date.now()-t0) + "ms"; };
   var rs = parts.slice().sort(function(a,b){ return a.start - b.start; });
   var term = heldTerm(), kind = (what === "add") ? "saved" : "hl";
-  parts = []; labHide();                      // the dashed outlines go now
+  var tid = ui.readerTextId, text0 = S.texts[tid];
+  parts = []; labHide();
+  if (!text0){ say("The text moved out from under that"); return; }
+  var body = text0.body || "";
+  colour = colour || "yellow";
+  say("Several parts: " + rs.length + " pieces, " + term + " " + ms());
 
-  var id = (what === "add")
-    ? await addReaderTerm(term, "saved", rs[0])
-    : await addReaderHighlight(term, colour || "yellow", rs[0]);
+  // 1. the id, before any mark exists
+  var id = null, fresh = false;
+  try{
+    if (kind === "saved"){
+      var s0 = rs[0].start, e0 = rs[rs.length-1].end;
+      var res = await VocabStore.addTerm({ term: term, sourceUrl: "", sourceTitle: text0.name,
+        context: (typeof makeContext === "function") ? makeContext(body, s0, e0 - s0, 75) : "" });
+      id = res && res.id; fresh = !!(res && res.ok);
+    } else {
+      var olds = (text0.marks||[]).filter(function(m){
+        return m.type === "hl" && rs.some(function(r){ return m.start < r.end && m.end > r.start; }); });
+      var dead = olds.map(function(m){ return m.highlightId; }).filter(Boolean);
+      if (dead.length) await VocabStore.removeHighlights(dead);
+      var rh = await VocabStore.addHighlight({ text: term, color: colour, note: "", sourceUrl: "", sourceTitle: text0.name });
+      id = rh && rh.id;
+    }
+  }catch(e){ say("Could not create the item \u2014 " + (e && e.message || e)); return; }
+  say("  id " + (id || "NONE") + (fresh ? " (new)" : " (already existed)") + " " + ms());
+  if (!id){ say("No id came back, so nothing was marked"); return; }
 
-  var text = S.texts[ui.readerTextId];        // re-read: the store refreshes S
+  // 2. let app.js finish swapping S before touching it
+  await settle();
+
+  // 3. every piece at once, one render, one save
+  var text = S.texts[tid];
   if (!text){ say("The text moved out from under that"); return; }
-  text.marks = text.marks || [];
-  for (var i=1; i<rs.length; i++){
-    var r = rs[i];
-    var already = text.marks.some(function(m){
-      return m.type === kind && m.start === r.start && m.end === r.end; });
-    if (already) continue;
+  text.marks = (text.marks||[]).filter(function(m){
+    return !rs.some(function(r){
+      var over = m.start < r.end && m.end > r.start;
+      return kind === "hl" ? (m.type === "hl" && over)
+                           : (m.type === "saved" && m.start === r.start && m.end === r.end);
+    });
+  });
+  rs.forEach(function(r){
     text.marks.push(kind === "saved"
-      ? {type:"saved", start:r.start, end:r.end, termId: id || null}
-      : {type:"hl", start:r.start, end:r.end, color: colour || "yellow", highlightId: id || null});
-  }
+      ? {type:"saved", start:r.start, end:r.end, termId:id}
+      : {type:"hl", start:r.start, end:r.end, color:colour, highlightId:id});
+  });
   text.updatedAt = Date.now(); text.lastActiveAt = Date.now();
+  var patch = {texts: S.texts};
+  // is_disjoint already exists in the items table, for exactly this
+  if (fresh && S.terms && S.terms[id]){ S.terms[id].isDisjoint = true; patch.terms = S.terms; }
   render();
-  try{ await VocabStore.set({texts:S.texts}); }
-  catch(e){ console.warn("[lab] could not save the extra pieces", e); }
-  say((what === "add" ? "Add" : "Highlight") + " on " + rs.length
-      + " pieces, one item: " + term + (id ? "" : " (no id came back \u2014 pieces are unlinked)"));
+  say("  all " + rs.length + " drawn together " + ms());
+  try{ await VocabStore.set(patch); }
+  catch(e){ say("Saving the pieces failed \u2014 " + (e && e.message || e)); return; }
+
+  // 4. check it stuck, after the store has had its say again
+  await settle(300);
+  var n = marksWithId(tid, kind, id);
+  say((n === rs.length ? "  OK: " : "  PROBLEM: ") + n + " of " + rs.length
+      + " pieces carry the id after saving " + ms());
   labPaint();
 }
 
@@ -1364,10 +1430,37 @@ $("aikey").value = load("aikey", "");
 // has it stored got it from that default, not from a choice, so it is replaced
 // rather than left to fail. gemini-flash-latest tracks the current flash model.
 if ((load("aimodel","") || "").indexOf("gemini-3.5") === 0) saveL("aimodel", "gemini-flash-latest");
-$("aimodel").value = load("aimodel", "gemini-flash-latest");
+/* The model menu. Starts from a short known list, and refills itself from what
+   Google says this key may use whenever a key is present. "Other…" takes any
+   name by hand. Speech, image and embedding models are left out: the tools
+   here only send text and read text back. */
+var KNOWN_MODELS = ["gemini-flash-latest","gemini-flash-lite-latest","gemini-3.6-flash",
+                    "gemini-2.5-pro","gemma-4-31b-it","gemma-4-26b-a4b-it"];
+function paintModels(list){
+  var cur = load("aimodel", "gemini-flash-latest");
+  var names = (list && list.length ? list : KNOWN_MODELS).filter(function(n){
+    return !/tts|image|embed|audio|live/i.test(n); });
+  if (names.indexOf(cur) < 0) names.unshift(cur);
+  var sel = $("aimodelpick");
+  sel.innerHTML = names.map(function(n){
+    return '<option value="'+esc(n)+'"'+(n===cur?" selected":"")+'>'+esc(n)+'</option>'; }).join("")
+    + '<option value="__other">Other\u2026</option>';
+  $("aimodel").value = cur;
+}
+paintModels(load("aimodels", null));
+$("aimodelpick").onchange = function(){
+  var other = this.value === "__other";
+  $("aimodelother").style.display = other ? "" : "none";
+  if (other){ $("aimodel").focus(); return; }
+  saveL("aimodel", this.value);
+  say("Model: " + this.value);
+};
+(async function(){ if (!load("aikey","")) return;
+  var l = await listModels(); if (l.names && l.names.length){ saveL("aimodels", l.names); paintModels(l.names); } })();
 $("aikey").onchange = function(){ saveL("aikey", this.value.trim());
   $("aistatus").textContent = this.value ? "Key kept in this browser." : "No key."; };
-$("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-flash-latest"); };
+$("aimodel").onchange = function(){ saveL("aimodel", this.value.trim() || "gemini-flash-latest");
+  $("aimodelother").style.display = "none"; paintModels(load("aimodels", null)); };
 $("aiforget").onclick = function(){ saveL("aikey", ""); $("aikey").value = "";
   $("aistatus").textContent = "Key forgotten."; };
 document.querySelectorAll(".authb").forEach(function(b){
@@ -1407,6 +1500,7 @@ $("aitest").onclick = async function(){
   st.textContent = "Key authenticates. " + l.names.length + " models can generate"
     + (l.names.length ? " (e.g. " + l.names.slice(0,3).join(", ") + ")" : "")
     + ".\nNow trying " + load("aimodel","gemini-flash-latest") + "\u2026";
+  if (l.names.length){ saveL("aimodels", l.names); paintModels(l.names); }
   var r = await askAI("Reply with exactly: ok");
   st.style.color = r.err ? "#8a3f3f" : "#4a7a35";
   st.textContent = (r.err ? "Key authenticates, but generating failed \u2014 " + r.err
