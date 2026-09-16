@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-16d (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-16e (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -500,11 +500,13 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .bc{border-top:1px solid #eceee8;padding:5px 0;font-size:12px}
   .bc summary{cursor:pointer;color:#3d4247}
   .bc .bcp{width:100%;min-height:150px;border:1px solid #D9DBD5;border-radius:6px;padding:6px 8px;font:11.5px/1.45 ui-monospace,Consolas,monospace}
-  #labai .pf-flag{position:absolute;z-index:4;width:20px;height:20px;border-radius:50%;border:0;padding:0;
-    font:12px/20px var(--pfui);text-align:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .15s;
-    background:rgba(127,127,127,.16);color:inherit}
-  #labai .pf-flag.on{opacity:.8;pointer-events:auto}
-  #labai .pf-flag:hover{opacity:1;background:#c0564d;color:#fff}
+  #labai .pf-flag{position:absolute;z-index:4;width:30px;height:30px;border:0;padding:0;background:none;
+    display:grid;place-items:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .15s;color:inherit}
+  #labai .pf-flag span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+    font:12px/1 var(--pfui);background:rgba(127,127,127,.2);transition:background .12s,color .12s}
+  #labai .pf-flag.on{opacity:.9;pointer-events:auto}
+  #labai .pf-flag:hover span{background:#c0564d;color:#fff}
+  #labai .pf-flagon{background:rgba(192,86,77,.08);border-radius:3px}
   #labai .pf-flagged{box-shadow:inset 2px 0 0 #c0564d}
   #labai .pf-state{opacity:.7}
   .mg{border-top:1px solid #eceee8;padding:4px 0;font-size:12px}
@@ -1239,26 +1241,41 @@ function slotSaid(v, slot, i){
   return x == null ? "" : String(x);
 }
 
-/* The flag: one small button that follows the pointer from slot to slot. */
+/* The flag. It was hard to hit because it chased the pointer: moving towards
+   it crossed empty space or a neighbouring slot, and it vanished or jumped.
+   Now it stays on the last slot you pointed at until you rest on another one
+   for a moment, only leaves when the pointer leaves the panel, and has a
+   bigger target than it looks. The slot it belongs to is tinted. */
 function pfFlagWire(card, v, live, note){
   var fl = card.querySelector(".pf-flag");
   if (!fl){ fl = document.createElement("button"); fl.className = "pf-flag"; fl.type = "button";
     fl.title = "Flag this as wrong"; fl.setAttribute("aria-label", "Flag this as wrong");
-    fl.textContent = "\u2691"; card.appendChild(fl); }
-  var target = null;
-  card.onmouseover = function(e){
-    if (e.target === fl) return;
-    var el = e.target.closest && e.target.closest("[data-slot]");
-    if (!el || !card.contains(el) || el.querySelector(".ld") || el.classList.contains("ld")) { fl.classList.remove("on"); target = null; return; }
-    target = el;
-    var cr = card.getBoundingClientRect(), er = el.getBoundingClientRect();
-    fl.style.top = (er.top - cr.top + card.scrollTop + Math.min(er.height, 26) / 2 - 10) + "px";
-    fl.style.left = Math.min(cr.width - 26, er.right - cr.left + 2) + "px";
+    fl.innerHTML = "<span>\u2691</span>"; card.appendChild(fl); }
+  var target = null, pending = null;
+  function place(el){
+    if (target && target !== el) target.classList.remove("pf-flagon");
+    target = el; el.classList.add("pf-flagon");
+    var a = el.querySelector(".pf-t") || el, rs = a.getClientRects();
+    var r = rs.length ? rs[rs.length - 1] : el.getBoundingClientRect(), cr = card.getBoundingClientRect();
+    fl.style.top = (r.top - cr.top + card.scrollTop + r.height / 2 - 15) + "px";
+    fl.style.left = Math.max(4, Math.min(cr.width - 34, r.right - cr.left)) + "px";
     fl.classList.add("on");
+  }
+  card.onmouseover = function(e){
+    if (fl.contains(e.target)){ clearTimeout(pending); return; }
+    var el = e.target.closest && e.target.closest("[data-slot]");
+    if (!el || !card.contains(el) || el === target) { clearTimeout(pending); return; }
+    if (el.classList.contains("ld") || el.querySelector(".ld")) return;
+    clearTimeout(pending);
+    if (!target) place(el);
+    else pending = setTimeout(function(){ place(el); }, 280);   // a pause, not a pass-through
   };
-  card.onmouseleave = function(){ fl.classList.remove("on"); };
+  card.onmouseleave = function(){
+    clearTimeout(pending); fl.classList.remove("on");
+    if (target) target.classList.remove("pf-flagon"); target = null;
+  };
   fl.onclick = function(e){
-    e.stopPropagation();
+    e.stopPropagation(); e.preventDefault();
     if (!target) return;
     var slot = target.dataset.slot, i = +(target.dataset.i || 0);
     var said = slotSaid(v, slot, i);
@@ -1266,9 +1283,7 @@ function pfFlagWire(card, v, live, note){
     if (should === null) return;                          // cancelled: nothing logged
     var about = live ? live.about : (note && note.about) || null;
     var meta = live ? live.meta : v.meta;
-    var entry = logFromProfile(v, about, meta, slot, {said: said, should_be: should.trim()});
-    if (!about && note){ entry.sentence = note.sentence || ""; entry.selection = note.selection || ""; }
-    logMistake(entry);
+    logMistake(logFromProfile(v, about, meta, slot, {said: said, should_be: should.trim()}));
     say("Flagged " + slot + " on " + (v.item || "?"));
     target.classList.add("pf-flagged");
   };
@@ -2255,8 +2270,9 @@ function slotNode(id, ghost){
       e.stopPropagation();
       if (LAST && LAST.range && !parts.length) parts.push(makePart(LAST.range, LAST.term));
       try{ window.getSelection().removeAllRanges(); }catch(err){}
-      say(parts.length + " part held \u2014 Ctrl-select the next");
-      labHide();
+      HOLDING = true;                        // the next selection joins, no Ctrl needed
+      labHide(); labPaint();
+      say(parts.length + " part" + (parts.length > 1 ? "s" : "") + " held \u2014 select the next piece (Esc or a plain click lets go)");
     };
     return b2;
   }
@@ -2500,13 +2516,23 @@ window.reopenTT = labReopen;
 /* Ctrl or Cmd while making the next selection is what joins the two. Chrome
    cannot hold two ranges in one native selection, so the page holds the first
    itself either way. */
+/* "Another part" on the bar does what Ctrl does, for exactly one selection:
+   HOLDING keeps the held pieces through the next press and joins what comes. */
+var HOLDING = false;
 document.addEventListener("mouseup", function(e){
-  if (!(e.ctrlKey || e.metaKey)) return;
+  var mod = e.ctrlKey || e.metaKey;
+  if (!mod && !HOLDING) return;
   if (ttEl && ttEl.contains(e.target)) return;
+  if ($("labai").contains(e.target) || $("labdr").contains(e.target)) return;
   // Read what the selection says before anything clears it.
   var selText = "";
   try{ selText = window.getSelection().toString(); }catch(err){}
   setTimeout(function(){
+    if (!mod && HOLDING && !selText.trim()){          // a plain click, nothing selected: let go
+      HOLDING = false; parts = []; labPaint(); say("Pieces let go"); return;
+    }
+    if (!selText.trim()) return;
+    HOLDING = false;
     var r = ui.lastSelRange;
     if (!r) return;
     if (!parts.length && LAST && LAST.range && LAST.range.start !== r.start)
@@ -2522,6 +2548,7 @@ document.addEventListener("mouseup", function(e){
 }, true);
 
 document.addEventListener("keydown", function(e){
+  if (e.key === "Escape" && HOLDING){ HOLDING = false; parts = []; labPaint(); labHide(); say("Pieces let go"); return; }
   if ((e.key === "Control" || e.key === "Meta") && ttEl && !revealed && LAST){
     revealed = true; labShow(LAST.rect, LAST.term, LAST.savedId, LAST.hlId);
   }
@@ -2538,7 +2565,7 @@ document.addEventListener("mousedown", function(e){
   if ($("labdr").contains(e.target) || e.target.id === "labbtn") return;
   // A press anywhere else gives up on a part-built item — unless the modifier
   // is down, which is how the next piece gets selected.
-  if (parts.length && !(e.ctrlKey || e.metaKey)){ parts = []; labPaint(); say("Pieces let go"); }
+  if (parts.length && !(e.ctrlKey || e.metaKey) && !HOLDING){ parts = []; labPaint(); say("Pieces let go"); }
   if (ttEl) labHide();
 });
 
