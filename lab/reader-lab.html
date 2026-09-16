@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-16b (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-16c (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -357,7 +357,14 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labai.pf{padding:0;background:none;border:0;box-shadow:none;max-width:none;width:396px;
     --pfg:'Cormorant Garamond',Georgia,serif;--pfh:'Architects Daughter','Segoe Print',cursive;
     --pfs:'Source Serif 4',Georgia,serif;--pfui:Inter,system-ui,sans-serif;--ease:cubic-bezier(.2,.75,.2,1)}
-  #labai .pf-card{position:relative;max-height:var(--pfmax,70vh);overflow-y:auto;overscroll-behavior:contain;text-align:left}
+  #labai .pf-card{position:relative;max-height:var(--pfmax,70vh);overflow-y:auto;overscroll-behavior:contain;text-align:left;
+    scrollbar-width:none;--fadebg:#F1EEE4}
+  #labai .pf-card::-webkit-scrollbar{display:none}
+  #labai .pf-fade{position:sticky;bottom:-20px;height:34px;margin:-34px -30px -20px;pointer-events:none;opacity:0;
+    transition:opacity .25s;background:linear-gradient(rgba(0,0,0,0),var(--fadebg) 85%)}
+  #labai .pf-more .pf-fade{opacity:1}
+  #labai .pf-graphite{--fadebg:#222326}
+  #labai .pf-hc{--fadebg:#FFFFFE}
   #labai .pf-t{display:inline}
   #labai .pf-t.ld{display:inline-block;min-width:var(--w);height:.8em;vertical-align:middle}
   #labai .pf-onp{font-size:12.5px;font-style:italic}
@@ -490,6 +497,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   @media (prefers-reduced-motion:reduce){
     #labai .pf-card *,#labai .pf-card *::before,#labai .pf-card *::after{animation:none!important;transition-duration:.01ms!important}
     #labai .pf-draw path{stroke-dashoffset:0}}
+  .bc{border-top:1px solid #eceee8;padding:5px 0;font-size:12px}
+  .bc summary{cursor:pointer;color:#3d4247}
+  .bc .bcp{width:100%;min-height:150px;border:1px solid #D9DBD5;border-radius:6px;padding:6px 8px;font:11.5px/1.45 ui-monospace,Consolas,monospace}
   .lab-note{text-decoration:underline dotted #7a8f5c;text-underline-offset:4px;text-decoration-thickness:1.5px;cursor:help}
   .lab-note:hover{background:rgba(122,143,92,.14);border-radius:2px}
 
@@ -584,6 +594,15 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <span id="notescount" style="flex:1;font-size:11.5px;color:#6B7178"></span>
       <button class="lb sm" id="notescopy">Copy all</button>
       <button class="lb sm warn" id="notesclear">Clear</button></div>
+  </div>
+
+  <div class="card">
+    <h3>Profile bench</h3>
+    <p>Which calls run, what each one asks, and on which model. Editing a prompt
+      makes it a new version; the version travels with every answer.</p>
+    <div class="r"><label class="inl">Preset</label><span id="benchpreset"></span></div>
+    <div id="benchcalls"></div>
+    <p style="margin-top:8px"><b>Slots:</b> <span id="benchslots"></span></p>
   </div>
 
   <div class="card">
@@ -980,7 +999,9 @@ function fillPrompt(tpl){
 var AISTATS = {calls:0, limited:0};
 async function askAI(promptText, opts){
   opts = opts || {};
-  if (!opts.schema) return askAIOnce(promptText, null);
+  var prov = PROVIDERS[opts.provider || "gemini"];
+  if (!prov) return {err:"no provider called '" + opts.provider + "' is set up"};
+  if (!opts.schema) return prov.ask(promptText, null, opts.model);
   var modes = [
     {mode:"schema", gc:{responseMimeType:"application/json", responseSchema:opts.schema}},
     {mode:"json-only", gc:{responseMimeType:"application/json"}},
@@ -990,7 +1011,7 @@ async function askAI(promptText, opts){
   modes = modes.slice(Math.max(0, names.indexOf(start)));
   var last = null;
   for (var i=0; i<modes.length; i++){
-    var r = await askAIOnce(promptText, modes[i].gc);
+    var r = await prov.ask(promptText, modes[i].gc, opts.model);
     r.mode = modes[i].mode;
     if (!r.err){ if (modes[i].mode !== start) saveL("aischemaMode", modes[i].mode); return r; }
     last = r;
@@ -999,8 +1020,8 @@ async function askAI(promptText, opts){
   }
   return last;
 }
-async function askAIOnce(promptText, gc){
-  var key = load("aikey", ""), model = load("aimodel", "gemini-flash-latest");
+async function askAIOnce(promptText, gc, modelOverride){
+  var key = load("aikey", ""), model = modelOverride || load("aimodel", "gemini-flash-latest");
   var t0 = Date.now(); AISTATS.calls++;
   if (!key) return {err:"No key yet. Put one in the composer, under Tools that ask an AI."};
   try{
@@ -1115,6 +1136,21 @@ document.addEventListener("mouseout", function(e){
     var box = $("labai"); if (box.querySelector("#aidel")) box.className = ""; }, 450);
 }, true);
 
+/* After a save: is the mark actually on the page, and if not, why not.
+   (Saved items were reported as unmarked; this says where it stops.) */
+function reportMark(n){
+  var root = document.getElementById("r-render");
+  var drawn = root ? Array.prototype.filter.call(root.querySelectorAll(".lab-note"), function(sp){
+    return (sp.getAttribute("data-notes") || "").split(",").indexOf(n.id) >= 0; }).length : 0;
+  var why = !n.marked ? "the mark box was unticked"
+    : !SHOWMARKS ? "\"Marks hidden\" is switched on in the composer"
+    : !root ? "the reader's text was not found on the page"
+    : n.textId !== ui.readerTextId ? "saved for text " + n.textId + " but text " + ui.readerTextId + " is open"
+    : !(n.ranges || []).length ? "no positions were stored"
+    : !root.querySelector(".w[data-c]") ? "the reader's word spans carry no positions"
+    : drawn ? "" : "positions " + n.ranges.map(function(r){ return r.start + "\u2013" + r.end; }).join(", ") + " matched no words";
+  say(drawn ? "  marked in the text (" + drawn + " piece" + (drawn > 1 ? "s" : "") + ")" : "  NOT MARKED: " + why);
+}
 function paintNotesCount(){
   var el = $("notescount"); if (!el) return;
   var here = NOTES.filter(function(n){ return n.textId === ui.readerTextId; }).length;
@@ -1178,50 +1214,254 @@ var SCHEMA2B = {type:"OBJECT", properties:{examples:{type:"ARRAY", items:{type:"
   properties:{text:{type:"STRING"}, tr:{type:"STRING"}}, required:["text","tr"]}}},
   required:["examples"]};
 
-function prompt1(a){
-  var L = load("learnlang", "English"), lvl = load("level", "B1");
-  return "A learner of German selected part of a German text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
-  + "Selected: \"" + a.term + "\"\nSentence: \"" + a.sentence + "\"\nWider context: \"" + a.context + "\"\n"
-  + "Learner's language: " + L + ". Level: " + lvl + ".\n\n"
-  + "Fill `best` with the most likely reading:\n"
-  + "- item: the dictionary form. Verbs as the infinitive, with a separable prefix joined on (aufstehen) and \"sich\" in front of reflexive verbs (sich freuen). Nouns in the nominative singular WITHOUT an article. Idioms in their citation form (jemandem die Daumen drücken).\n"
-  + "- on_page: every piece of that item exactly as it is written in the sentence, in reading order, one word per entry.\n"
-  + "- A piece the learner did NOT select belongs in on_page (and in `added`) only when the word cannot carry this meaning without it: a separable prefix, a reflexive pronoun, a fixed part of an idiom.\n"
-  + "- dropped: selected words that are not part of the item.\n"
-  + "- companions: words in the sentence that usually go with the item but are not part of it, such as the preposition in \"warten auf\". Exact text. Do not also put them in on_page.\n"
-  + "- pos: one of noun, verb, adjective, adverb, preposition, conjunction, pronoun, article, particle, idiom, other.\n"
-  + "- meaning: the meaning in this context, in " + L + ", a few words.\n\n"
-  + "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ. "
-  + levelRule(lvl) + " Give an empty list when the reading is clear.\n"
-  + "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
-  + "Answer with JSON only.";
+/* ── the profile bench (profile-bench-brief.md) ─────────────────────────
+   Three plain lists decide everything a profile does:
+
+     SLOT_DEFS    what an item can hold, and what KIND of thing fills it
+     CALL_DEFAULTS  what fills the slots: one entry per AI call, each with its
+                  own provider, model and prompt (edits live in localStorage
+                  under "calls" and bump prompt_version)
+     PRESET_DEFAULTS  which calls run, and how the panel shows each slot
+
+   A new slot kind (a dictionary, a teacher, a link) is one more entry in
+   SLOT_KINDS plus slots that name it; nothing else has to change.
+   No call assumes Gemini: PROVIDERS maps a provider name to the function that
+   talks to it, and each call names its provider. */
+var SLOT_KINDS = {
+  ai:    {about:"filled by one of the calls below"},
+  link:  {about:"no AI: a link built from the item, opened in a new tab"},
+  empty: {about:"kept, not filled yet"}
+};
+var SLOT_DEFS = [
+  {id:"pieces",       label:"On the page",      kind:"ai"},
+  {id:"item",         label:"Lexical item",     kind:"ai"},
+  {id:"pos",          label:"Part of speech",   kind:"ai"},
+  {id:"meaning",      label:"Meaning",          kind:"ai"},
+  {id:"alternatives", label:"Other options",    kind:"ai"},
+  {id:"companions",   label:"Usually with",     kind:"ai"},
+  {id:"ipa",          label:"Pronunciation",    kind:"ai"},
+  {id:"gloss",        label:"Short gloss",      kind:"ai"},
+  {id:"register",     label:"Register",         kind:"ai"},
+  {id:"gender",       label:"Gender",           kind:"ai", applies_to:["noun"]},
+  {id:"plural",       label:"Plural",           kind:"ai", applies_to:["noun"]},
+  {id:"participle",   label:"Perfect",          kind:"ai", applies_to:["verb"]},
+  {id:"splits",       label:"Splits",           kind:"ai", applies_to:["verb"]},
+  {id:"note",         label:"Note",             kind:"ai"},
+  {id:"examples",     label:"Examples",         kind:"ai"},
+  {id:"audio",        label:"Audio",            kind:"empty"}
+];
+
+var PROVIDERS = {
+  gemini: {label:"Google Gemini", ask: function(prompt, gc, model){ return askAIOnce(prompt, gc, model); }}
+};
+
+var CALL_DEFAULTS = {
+  identify: {id:"identify", label:"Find the item", state:"s1", schema:SCHEMA1,
+    fills:["item","pieces","pos","meaning","alternatives","companions"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"A learner of German selected part of a German text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
++ "Selected: \"{{selection}}\"\nSentence: \"{{sentence}}\"\nWider context: \"{{context}}\"\n"
++ "Learner's language: {{learner_language}}. Level: {{level}}.\n\n"
++ "Fill `best` with the most likely reading:\n"
++ "- item: the dictionary form. Verbs as the infinitive, with a separable prefix joined on (aufstehen) and \"sich\" in front of reflexive verbs (sich freuen). Nouns in the nominative singular WITHOUT an article. Idioms in their citation form (jemandem die Daumen drücken).\n"
++ "- on_page: every piece of that item exactly as it is written in the sentence, in reading order, one word per entry.\n"
++ "- A piece the learner did NOT select belongs in on_page (and in `added`) only when the word cannot carry this meaning without it: a separable prefix, a reflexive pronoun, a fixed part of an idiom.\n"
++ "- dropped: selected words that are not part of the item.\n"
++ "- companions: words in the sentence that usually go with the item but are not part of it, such as the preposition in \"warten auf\". Exact text. Do not also put them in on_page.\n"
++ "- pos: one of noun, verb, adjective, adverb, preposition, conjunction, pronoun, article, particle, idiom, other.\n"
++ "- meaning: the meaning in this context, in {{learner_language}}, a few words.\n\n"
++ "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ. "
++ "{{level_rule}} Give an empty list when the reading is clear.\n"
++ "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
++ "Answer with JSON only."},
+  grammar: {id:"grammar", label:"Grammar", state:"s2a", schema:SCHEMA2A,
+    fills:["gender","plural","participle","splits","register","note","ipa","gloss"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"German lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
++ "As used in: \"{{sentence}}\"\n\n"
++ "Return:\n"
++ "- gender: for nouns, the article for THIS meaning (der, die or das); otherwise null.\n"
++ "- plural: for nouns, the plural with its article (die Seen), or \"no plural\"; otherwise null.\n"
++ "- participle: for verbs, the past participle with its helper verb (ist aufgestanden, hat gewartet); otherwise null.\n"
++ "- splits: for separable verbs, how it splits in a main clause (ich stehe \u2026 auf); otherwise null.\n"
++ "- register: informal, neutral or formal.\n"
++ "- ipa: the pronunciation of \"{{item}}\" in IPA, between slashes.\n"
++ "- gloss: a short plain explanation in {{learner_language}} that adds something beyond the meaning; an EMPTY STRING if it would only repeat it.\n"
++ "- meaning: the meaning in this context in {{learner_language}}, a few words.\n"
++ "- note: leave this an EMPTY STRING unless there is something genuinely worth a learner's attention "
++ "(an irregular form, a stress difference that changes the meaning, a false friend, a gender that differs by meaning). "
++ "Most items have no note. If you write one: at most 20 words, in {{learner_language}}.\n\n"
++ "Answer with JSON only."},
+  examples: {id:"examples", label:"Examples", state:"s2b", schema:SCHEMA2B,
+    fills:["examples"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"Write 4 German example sentences using \"{{item}}\" with exactly this meaning: \"{{meaning}}\".\n"
++ "It was met in: \"{{sentence}}\"\n"
++ "Level {{level}}. Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
++ "For each, give `text` (German) and `tr` (translation into {{learner_language}}).\n"
++ "In `text`, wrap each word that belongs to the item in double asterisks, e.g. Wann **stehst** du **auf**?\n\n"
++ "Answer with JSON only."}
+};
+
+var PRESET_DEFAULTS = {
+  beginner: {id:"beginner", label:"Beginner", calls:["identify","grammar","examples"], show:{}, options:{}}
+};
+
+function callDef(id){
+  var o = (load("calls", {}) || {})[id] || {};
+  var c = Object.assign({}, CALL_DEFAULTS[id], o);
+  c.prompt_version = Math.max(CALL_DEFAULTS[id].prompt_version, o.prompt_version || 0);
+  return c;
 }
-function prompt2A(a, it){
-  var L = load("learnlang", "English");
-  return "German lexical item: \"" + it.item + "\" (" + it.pos + "), meaning here: \"" + (it.meaning || "?") + "\".\n"
-  + "As used in: \"" + a.sentence + "\"\n\n"
-  + "Return:\n"
-  + "- gender: for nouns, the article for THIS meaning (der, die or das); otherwise null.\n"
-  + "- plural: for nouns, the plural with its article (die Seen), or \"no plural\"; otherwise null.\n"
-  + "- participle: for verbs, the past participle with its helper verb (ist aufgestanden, hat gewartet); otherwise null.\n"
-  + "- splits: for separable verbs, how it splits in a main clause (ich stehe \u2026 auf); otherwise null.\n"
-  + "- register: informal, neutral or formal.\n"
-  + "- ipa: the pronunciation of \"" + it.item + "\" in IPA, between slashes.\n"
-  + "- gloss: a short plain explanation in " + L + " that adds something beyond the meaning; an EMPTY STRING if it would only repeat it.\n"
-  + "- meaning: the meaning in this context in " + L + ", a few words.\n"
-  + "- note: leave this an EMPTY STRING unless there is something genuinely worth a learner's attention "
-  + "(an irregular form, a stress difference that changes the meaning, a false friend, a gender that differs by meaning). "
-  + "Most items have no note. If you write one: at most 20 words, in " + L + ".\n\n"
-  + "Answer with JSON only.";
+function callModel(c){ return c.model || load("aimodel", "gemini-flash-latest"); }
+function setCall(id, patch){
+  var all = load("calls", {}) || {}, cur = all[id] || {};
+  if ("prompt" in patch && patch.prompt !== callDef(id).prompt)
+    patch.prompt_version = callDef(id).prompt_version + 1;     // every prompt edit is a new version
+  all[id] = Object.assign(cur, patch); saveL("calls", all);
 }
-function prompt2B(a, it){
-  var L = load("learnlang", "English"), lvl = load("level", "B1");
-  return "Write 4 German example sentences using \"" + it.item + "\" with exactly this meaning: \"" + (it.meaning || "") + "\".\n"
-  + "It was met in: \"" + a.sentence + "\"\n"
-  + "Level " + lvl + ". Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
-  + "For each, give `text` (German) and `tr` (translation into " + L + ").\n"
-  + "In `text`, wrap each word that belongs to the item in double asterisks, e.g. Wann **stehst** du **auf**?\n\n"
-  + "Answer with JSON only.";
+function resetCallPrompt(id){
+  var all = load("calls", {}) || {}, cur = all[id] || {}, v = callDef(id).prompt_version;
+  if (cur.prompt !== undefined){ delete cur.prompt; cur.prompt_version = v + 1; }  // going back is also a change
+  all[id] = cur; saveL("calls", all);
+}
+function presets(){ return Object.assign({}, PRESET_DEFAULTS, load("presetsPF", {}) || {}); }
+function activePreset(){ var p = presets(); return p[load("pfpreset", "beginner")] || p.beginner; }
+
+function fillVars(tpl, v){ return tpl.replace(/\{\{(\w+)\}\}/g, function(m, k){ return k in v ? v[k] : m; }); }
+function callVars(P){
+  var L = load("learnlang", "English"), lvl = load("level", "B1"), it = P.item || {};
+  return { selection:P.about.term, sentence:P.about.sentence, context:P.about.context,
+    learner_language:L, level:lvl, level_rule:levelRule(lvl),
+    item:it.item || "", pos:it.pos || "", meaning:it.meaning || "" };
+}
+
+/* What each call does with its answer. */
+var CALL_APPLY = {
+  identify: function(P, j){
+    var best = j.best || {};
+    P.item = { item: best.item || P.about.term, on_page: best.on_page || [P.about.term],
+      added: best.added || [], dropped: best.dropped || [], companions: best.companions || [],
+      pos: best.pos || "", meaning: best.meaning || "" };
+    P.alts = (j.alternatives || []).slice();
+    // the learner's own selection is always one of the options
+    if (!j.selection_ok && P.item.item.toLowerCase() !== P.about.term.toLowerCase())
+      P.alts.push({item: P.about.term, on_page: P.about.term.split(/\s+/), kind: "different_meaning",
+        pos: "", meaning: "", mine: true});
+    locate(P);
+    return P.item.item + " (" + P.item.pos + ")" + (P.alts.length ? ", " + P.alts.length + " other option(s)" : "");
+  },
+  grammar: function(P, j, it){
+    if (!it.meaning && j.meaning) it.meaning = j.meaning;
+    return "";
+  },
+  examples: function(P, j){ return (j.examples || []).length + " sentences"; }
+};
+var CALL_VALUE = {
+  identify: function(j){ return j; },
+  grammar:  function(j){ return j; },
+  examples: function(j){ return (j.examples || []).slice(0, 4); }
+};
+
+/* Run one call on the live profile. Other calls are untouched. */
+async function runCall(P, id){
+  var c = callDef(id), key = c.state, it = P.item;
+  var prov = PROVIDERS[c.provider];
+  if (P[key] && P[key].state !== "waiting") P.gen++;       // a re-run blanks the panel again
+  P[key] = slotW(); paintProfile();
+  var model = callModel(c);
+  P.meta = P.meta || {};
+  P.meta[id] = {provider:c.provider, model:model, prompt_version:c.prompt_version, preset:activePreset().id};
+  var r = prov ? await askAI(fillVars(c.prompt, callVars(P)), {schema:c.schema, model:model, provider:c.provider})
+               : {err:"no provider called '" + c.provider + "' is set up"};
+  if (P !== PF || P.run !== PF_RUN) return false;
+  if (id !== "identify" && it !== P.item) return false;     // the item changed while we waited
+  P.times[key] = r.ms; if (r.mode) P.mode = r.mode;
+  P.meta[id].mode = r.mode;
+  if (r.err){ P[key] = slotF(r.err); say("  " + c.label + " failed: " + r.err); paintProfile(); return false; }
+  var j;
+  try{ j = parseJSONish(r.text); }
+  catch(e){ P[key] = slotF("reply was not JSON: " + e.message); say("  " + c.label + ": reply was not JSON"); paintProfile(); return false; }
+  P[key] = slotV(CALL_VALUE[id](j));
+  var what = CALL_APPLY[id](P, j, it);
+  say("  " + c.label + " v" + c.prompt_version + " (" + model + "): " + (what ? what + ", " : "") + r.ms + "ms");
+  paintProfile();
+  return true;
+}
+
+async function runStage1(P){
+  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); paintProfile();
+  var ok = await runCall(P, "identify");
+  if (P !== PF) return;
+  if (!ok){ P.s2a = slotF("waits on finding the item"); P.s2b = slotF("waits on finding the item"); paintProfile(); return; }
+  runStage2(P);
+}
+
+function locate(P){
+  var f = findPieces(P.about, P.item.on_page);
+  P.ranges = f.ranges.length ? f.ranges : P.about.ranges;
+  P.missing = f.missing;
+  if (f.missing.length) say("  not found on the page: " + f.missing.join(", "));
+  labPaint();
+}
+
+/* Everything after identify, side by side, as the preset says. */
+function runStage2(P){
+  var t0 = Date.now();
+  var calls = activePreset().calls.filter(function(id){ return id !== "identify" && CALL_DEFAULTS[id]; });
+  ["grammar","examples"].forEach(function(id){
+    if (calls.indexOf(id) < 0) P[CALL_DEFAULTS[id].state] = slotV(id === "examples" ? [] : {});
+  });
+  Promise.all(calls.map(function(id){ return runCall(P, id); })).then(function(){
+    if (P === PF) say("  all calls back " + (Date.now() - P.t0) + "ms after the click");
+  });
+}
+
+/* Re-run just one call, from the bench card. */
+async function rerunCall(id){
+  if (!PF){ say("Open a profile first (select a word, press Profile)"); return; }
+  var before = PF.item && PF.item.item;
+  var ok = await runCall(PF, id);
+  if (ok && id === "identify" && PF.item.item !== before){
+    say("  the item changed, so grammar and examples run again too");
+    runStage2(PF);
+  }
+}
+
+function paintBench(){
+  var host = $("benchcalls"); if (!host) return;
+  var models = (load("aimodels", null) || KNOWN_MODELS).filter(function(n){ return !/tts|image|embed|audio|live/i.test(n); });
+  host.innerHTML = Object.keys(CALL_DEFAULTS).map(function(id){
+    var c = callDef(id), edited = ((load("calls", {}) || {})[id] || {}).prompt !== undefined;
+    return '<details class="bc" data-call="' + id + '"><summary><b>' + esc(c.label) + "</b> \u00b7 v" + c.prompt_version
+      + (edited ? " (edited)" : "") + " \u00b7 " + esc(c.provider) + " \u00b7 " + esc(callModel(c)) + (c.model ? "" : " (default)") + "</summary>"
+      + '<div class="r"><label class="inl">Model</label><select class="bcm" style="flex:1">'
+      + '<option value="">the default model above</option>'
+      + models.map(function(m){ return '<option value="' + esc(m) + '"' + (m === c.model ? " selected" : "") + ">" + esc(m) + "</option>"; }).join("")
+      + (c.model && models.indexOf(c.model) < 0 ? '<option selected value="' + esc(c.model) + '">' + esc(c.model) + "</option>" : "")
+      + "</select></div>"
+      + '<p style="margin:4px 0">Fills: ' + esc(c.fills.join(", ")) + "</p>"
+      + '<textarea class="bcp" spellcheck="false">' + esc(c.prompt) + "</textarea>"
+      + '<p style="margin:3px 0">{{selection}} {{sentence}} {{context}} {{learner_language}} {{level}} {{level_rule}} {{item}} {{pos}} {{meaning}}</p>'
+      + '<div class="r"><button class="lb sm bcs">Save prompt</button>'
+      + '<button class="lb sm warn bcr">Back to the original</button>'
+      + '<button class="lb sm bcx">Re-run on the open item</button></div></details>';
+  }).join("");
+  host.querySelectorAll(".bc").forEach(function(d){
+    var id = d.dataset.call;
+    d.querySelector(".bcm").onchange = function(){ setCall(id, {model:this.value}); say(id + " model: " + (this.value || "default")); reopen(); };
+    d.querySelector(".bcs").onclick = function(){ setCall(id, {prompt:d.querySelector(".bcp").value}); say(id + " prompt saved, now v" + callDef(id).prompt_version); reopen(); };
+    d.querySelector(".bcr").onclick = function(){ if (!confirm("Put the original prompt back?")) return; resetCallPrompt(id); say(id + " prompt back to the original, now v" + callDef(id).prompt_version); reopen(); };
+    d.querySelector(".bcx").onclick = function(){ rerunCall(id); };
+    function reopen(){ paintBench(); var n = host.querySelector('[data-call="' + id + '"]'); if (n) n.open = true; }
+  });
+  var ps = presets(), cur = activePreset().id;
+  $("benchpreset").innerHTML = Object.keys(ps).map(function(k){
+    return '<button class="lb sm' + (k === cur ? " on" : "") + '" data-p="' + esc(k) + '">' + esc(ps[k].label) + "</button>"; }).join("");
+  $("benchpreset").querySelectorAll("[data-p]").forEach(function(b){
+    b.onclick = function(){ saveL("pfpreset", b.dataset.p); paintBench(); say("Preset: " + b.dataset.p); }; });
+  $("benchslots").textContent = SLOT_DEFS.map(function(s){
+    return s.label + (s.kind !== "ai" ? " (" + s.kind + ")" : "") + (s.applies_to ? " [" + s.applies_to.join("/") + "]" : ""); }).join(" \u00b7 ");
 }
 
 /* Pieces as text → ranges on the page. Searches only the sentence around the
@@ -1262,71 +1502,11 @@ function startProfile(label){
   PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: ttEl ? ttEl.getBoundingClientRect() : null,
     item: {item:a.term, on_page:[a.term], added:[], companions:[], pos:"", meaning:""},
     s1: slotW(), s2a: slotW(), s2b: slotW(), alts: [], altsOpen: false,
-    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: load("aimodel","gemini-flash-latest") };
+    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: callModel(callDef("identify")) };
   labHide();
   paintProfile();
   say("Profile: " + a.term + " \u2014 stage 1");
   runStage1(PF);
-}
-
-async function runStage1(P){
-  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); paintProfile();
-  var r = await askAI(prompt1(P.about), {schema: SCHEMA1});
-  if (P !== PF || P.run !== PF_RUN) return;
-  P.times.s1 = r.ms; P.mode = r.mode || P.mode;
-  if (r.err){ P.s1 = slotF(r.err); P.s2a = slotF("waits on stage 1"); P.s2b = slotF("waits on stage 1");
-    say("  stage 1 failed: " + r.err); paintProfile(); return; }
-  var j;
-  try{ j = parseJSONish(r.text); }catch(e){ P.s1 = slotF("reply was not JSON: " + e.message); paintProfile(); return; }
-  var best = j.best || {};
-  P.s1 = slotV(j);
-  P.item = { item: best.item || P.about.term, on_page: best.on_page || [P.about.term],
-    added: best.added || [], dropped: best.dropped || [], companions: best.companions || [],
-    pos: best.pos || "", meaning: best.meaning || "" };
-  P.alts = (j.alternatives || []).slice();
-  // the learner's own selection is always one of the options
-  if (!j.selection_ok && P.item.item.toLowerCase() !== P.about.term.toLowerCase())
-    P.alts.push({item: P.about.term, on_page: P.about.term.split(/\s+/), kind: "different_meaning",
-      pos: "", meaning: "", mine: true});
-  locate(P);
-  say("  stage 1: " + P.item.item + " (" + P.item.pos + ") in " + r.ms + "ms, " + P.mode
-      + (P.alts.length ? ", " + P.alts.length + " other option(s)" : ""));
-  paintProfile();
-  runStage2(P);
-}
-
-function locate(P){
-  var f = findPieces(P.about, P.item.on_page);
-  P.ranges = f.ranges.length ? f.ranges : P.about.ranges;
-  P.missing = f.missing;
-  if (f.missing.length) say("  not found on the page: " + f.missing.join(", "));
-  labPaint();
-}
-
-function runStage2(P){
-  var it = P.item;
-  P.gen++; P.s2a = slotW(); P.s2b = slotW(); paintProfile();
-  var tA = Date.now();
-  // side by side, not one after the other
-  askAI(prompt2A(P.about, it), {schema: SCHEMA2A}).then(function(r){
-    if (P !== PF || it !== P.item) return;
-    P.times.s2a = r.ms;
-    if (r.err){ P.s2a = slotF(r.err); say("  grammar failed: " + r.err); }
-    else try{ var j = parseJSONish(r.text); P.s2a = slotV(j);
-      if (!it.meaning && j.meaning) it.meaning = j.meaning;
-      say("  grammar in " + r.ms + "ms"); }
-    catch(e){ P.s2a = slotF("reply was not JSON: " + e.message); }
-    paintProfile();
-  });
-  askAI(prompt2B(P.about, it), {schema: SCHEMA2B}).then(function(r){
-    if (P !== PF || it !== P.item) return;
-    P.times.s2b = r.ms;
-    if (r.err){ P.s2b = slotF(r.err); say("  examples failed: " + r.err); }
-    else try{ var j = parseJSONish(r.text); P.s2b = slotV((j.examples || []).slice(0, 4));
-      say("  examples in " + r.ms + "ms (both done " + (Date.now() - P.t0) + "ms after the click)"); }
-    catch(e){ P.s2b = slotF("reply was not JSON: " + e.message); }
-    paintProfile();
-  });
 }
 
 function pickAlt(i){
@@ -1451,7 +1631,7 @@ function pfSkeleton(look){
             + '<div class="pf-note" hidden>' + pfPiece("grammar","note","12em") + "</div>"
             + '<div class="pf-fail" data-fail="grammar" hidden></div>';
   var sig  = '<div class="pf-sig">' + pfPiece("sig","sig","6em") + "</div>";
-  var tools = '<div class="pf-tools"></div>';
+  var tools = '<div class="pf-tools"></div><div class="pf-fade"></div>';
   var top  = '<button class="pf-x" data-pf="close" aria-label="Close">\u00d7</button>';
   if (!hand)
     return '<div class="pf-card pf-lq pf-' + look.style + " pf-f-" + look.frame + (look.align === "center" ? " pf-center" : "")
@@ -1506,6 +1686,11 @@ function pfOnPage(v, live){
     return h;
   }).join(" \u2026 ");
 }
+/* "neutral" next to a German noun reads like neuter (das). Say it in words
+   that cannot be mistaken for a gender. */
+function registerWords(r){
+  return {informal:"casual speech", neutral:"everyday speech", formal:"formal speech"}[r] || (r ? r + " speech" : "");
+}
 function pfBold(t){ return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
 function pfFacts(v){
   var f = [];
@@ -1534,7 +1719,7 @@ function pfFillSlot(card, slot, v, anim, live){
   }
   if (slot === "grammar"){
     sec("grammar");
-    put("register", esc(v.register || ""));
+    put("register", esc(registerWords(v.register)));
     put("ipa", esc(v.ipa || ""));
     var gl = card.querySelector(".pf-gl");
     if (v.gloss){ gl.hidden = false; put("gl", esc(v.gloss)); } else gl.hidden = true;
@@ -1646,6 +1831,8 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
     box.dataset.pfkey = key; box.dataset.pflook = JSON.stringify(look);
     box._shown = {};
     pfPlace(box, anchor);
+    var cd = box.querySelector(".pf-card");
+    cd.addEventListener("scroll", function(){ pfMore(cd); }, {passive:true});
     if (!instant) pfDoodle(box.querySelector(".pf-card"), live);
     else { var l = box.querySelector(".pf-loader"); if (l) l.classList.add("off"); }
   }
@@ -1666,6 +1853,11 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
   if (settled && !shown.sig){ pfFillSlot(card, "sig", v, !instant, live); shown.sig = true; }
   pfControls(card, v, live, note);
   pfWire(box, v, live, note);
+  pfMore(card);
+  setTimeout(function(){ pfMore(card); }, 1400);   // after the examples have typed in
+}
+function pfMore(card){
+  card.classList.toggle("pf-more", card.scrollHeight - card.scrollTop - card.clientHeight > 6);
 }
 
 function pfWire(box, v, live, note){
@@ -1693,9 +1885,10 @@ function pfWire(box, v, live, note){
         marked: !live.markOff, model: live.model, when: Date.now() };
       NOTES.unshift(n); saveL("notes", NOTES);
       live.saved = true;
-      say("Profile saved: " + snap.item + (n.marked ? ", marked" : ""));
+      say("Profile saved: " + snap.item);
       pfControls(card, v, live, null); pfWire(box, v, live, null);
       labPaint(); paintNotesCount();
+      reportMark(n);
     };
   } else if (note){
     $("aicopy").onclick = function(){
@@ -2486,6 +2679,7 @@ document.querySelectorAll(".lvlb").forEach(function(b){
 });
 $("schemareset").onclick = function(){ saveL("aischemaMode", "schema"); paintLevel(); };
 paintLevel();
+paintBench();
 paintNotesCount();
 syncClassSlots();
 paintAll();
