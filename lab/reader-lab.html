@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-16c (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-16d (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -500,6 +500,17 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .bc{border-top:1px solid #eceee8;padding:5px 0;font-size:12px}
   .bc summary{cursor:pointer;color:#3d4247}
   .bc .bcp{width:100%;min-height:150px;border:1px solid #D9DBD5;border-radius:6px;padding:6px 8px;font:11.5px/1.45 ui-monospace,Consolas,monospace}
+  #labai .pf-flag{position:absolute;z-index:4;width:20px;height:20px;border-radius:50%;border:0;padding:0;
+    font:12px/20px var(--pfui);text-align:center;cursor:pointer;opacity:0;pointer-events:none;transition:opacity .15s;
+    background:rgba(127,127,127,.16);color:inherit}
+  #labai .pf-flag.on{opacity:.8;pointer-events:auto}
+  #labai .pf-flag:hover{opacity:1;background:#c0564d;color:#fff}
+  #labai .pf-flagged{box-shadow:inset 2px 0 0 #c0564d}
+  #labai .pf-state{opacity:.7}
+  .mg{border-top:1px solid #eceee8;padding:4px 0;font-size:12px}
+  .mg summary{cursor:pointer}
+  .me{padding:3px 0 3px 10px;border-left:2px solid #eceee8;margin:3px 0}
+  .me small{display:block;color:#9b9e96}
   .lab-note{text-decoration:underline dotted #7a8f5c;text-underline-offset:4px;text-decoration-thickness:1.5px;cursor:help}
   .lab-note:hover{background:rgba(122,143,92,.14);border-radius:2px}
 
@@ -603,6 +614,17 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div class="r"><label class="inl">Preset</label><span id="benchpreset"></span></div>
     <div id="benchcalls"></div>
     <p style="margin-top:8px"><b>Slots:</b> <span id="benchslots"></span></p>
+    <h3 style="margin-top:14px">Mistake log</h3>
+    <p>Hover any part of a profile panel and press ⚑ to flag it. Failed calls and
+      rate limits are written here by themselves.</p>
+    <div class="r"><span id="mlogcount" style="flex:1;font-size:11.5px;color:#6B7178"></span>
+      <label class="inl">group by</label>
+      <button class="lb sm mlb" data-by="call">call</button>
+      <button class="lb sm mlb" data-by="slot">slot</button></div>
+    <div id="mlog"></div>
+    <div class="r" style="margin-top:6px"><button class="lb sm" id="mlogjson">Export JSON</button>
+      <button class="lb sm" id="mlogcsv">Export CSV</button>
+      <button class="lb sm warn" id="mlogclear">Clear</button></div>
   </div>
 
   <div class="card">
@@ -891,9 +913,9 @@ function labPaint(){
     paintRange(root, p.start, p.end, "lab-held", "part " + (i+1) + " of this item"); });
   if (PF && PF.textId === ui.readerTextId && $("labai").className.indexOf("on") >= 0)
     (PF.ranges || []).forEach(function(r){ paintRange(root, r.start, r.end, "lab-prev", "part of " + PF.item.item); });
-  if (!SHOWMARKS) return;
   var tid = ui.readerTextId;
-  // saved AI answers, one span per piece carrying every note id for it
+  // saved AI answers, one span per piece carrying every note id for it.
+  // These are not focus-class marks, so "Marks hidden" does not touch them.
   var byRange = {};
   NOTES.forEach(function(n){
     if (n.textId !== tid || !n.marked) return;
@@ -906,6 +928,7 @@ function labPaint(){
     root.querySelectorAll('.lab-note:not([data-notes])').forEach(function(sp){
       sp.setAttribute("data-notes", byRange[k].join(",")); });
   });
+  if (!SHOWMARKS) return;
   CAPS.forEach(function(c){
     if (c.textId !== tid) return;
     var cls = CLASSES.filter(function(x){ return x.id === c.cls; })[0];
@@ -1069,7 +1092,7 @@ async function askAIOnce(promptText, gc, modelOverride){
    With `save` it offers Save, and whether to mark the words in the text. */
 function showAI(title, html, isErr, anchor, save, existing){
   var box = $("labai");
-  box.className = "on"; box.dataset.pfkey = ""; box.style.bottom = "";
+  box.className = "on"; box.dataset.pfkey = ""; box.style.bottom = ""; box.dataset.pinned = "";
   if (PF){ PF = null; labPaint(); }
   var acts = "";
   if (save) acts = '<div class="acts"><button class="lb sm" id="aisave">Save</button>'
@@ -1133,7 +1156,10 @@ document.addEventListener("mouseout", function(e){
   if (to && to.closest && (to.closest("#labai") || to.closest(".lab-note"))) return;
   clearTimeout(noteTimer);
   noteTimer = setTimeout(function(){
-    var box = $("labai"); if (box.querySelector("#aidel")) box.className = ""; }, 450);
+    var box = $("labai");
+    if (box.dataset.pinned === "1") return;
+    if (box.querySelector("#aidel") || (box.dataset.pfkey || "").indexOf("saved|") === 0){ box.className = ""; box.dataset.pfkey = ""; }
+  }, 450);
 }, true);
 
 /* After a save: is the mark actually on the page, and if not, why not.
@@ -1143,7 +1169,6 @@ function reportMark(n){
   var drawn = root ? Array.prototype.filter.call(root.querySelectorAll(".lab-note"), function(sp){
     return (sp.getAttribute("data-notes") || "").split(",").indexOf(n.id) >= 0; }).length : 0;
   var why = !n.marked ? "the mark box was unticked"
-    : !SHOWMARKS ? "\"Marks hidden\" is switched on in the composer"
     : !root ? "the reader's text was not found on the page"
     : n.textId !== ui.readerTextId ? "saved for text " + n.textId + " but text " + ui.readerTextId + " is open"
     : !(n.ranges || []).length ? "no positions were stored"
@@ -1151,6 +1176,201 @@ function reportMark(n){
     : drawn ? "" : "positions " + n.ranges.map(function(r){ return r.start + "\u2013" + r.end; }).join(", ") + " matched no words";
   say(drawn ? "  marked in the text (" + drawn + " piece" + (drawn > 1 ? "s" : "") + ")" : "  NOT MARKED: " + why);
 }
+/* ── auto-save ──────────────────────────────────────────────────────────
+   A profile saves itself the moment its calls are back, marked in the text.
+   Re-running a call or picking another option updates the same saved entry.
+   "Remove" takes it away and keeps it away for this panel. */
+function autoSave(P){
+  var settled = P.s1.state === "done" && P.s2a.state !== "waiting" && P.s2b.state !== "waiting";
+  if (!settled || P.removed) return;
+  var snap = profileSnapshot(P);
+  var ranges = P.ranges.map(function(r){ return {start:r.start, end:r.end}; });
+  var n = P.noteId && NOTES.filter(function(x){ return x.id === P.noteId; })[0];
+  if (n){
+    if (JSON.stringify(n.profile) === JSON.stringify(snap) && JSON.stringify(n.ranges) === JSON.stringify(ranges)) return;
+    n.profile = snap; n.ranges = ranges; n.term = snap.item; n.text = snap.item + " \u2014 " + snap.meaning;
+    n.updated = Date.now(); saveL("notes", NOTES);
+    say("  saved profile updated: " + snap.item); labPaint(); return;
+  }
+  n = { id:"n" + Date.now().toString(36), slot:"profile", label:"Profile",
+    term:snap.item, textId:P.textId, ranges:ranges, text: snap.item + " \u2014 " + snap.meaning,
+    profile:snap, marked:!P.markOff, model:P.model, when:Date.now(),
+    about:{term:P.about.term, sentence:P.about.sentence} };
+  NOTES.unshift(n); saveL("notes", NOTES);
+  P.noteId = n.id; P.saved = true;
+  say("Profile saved: " + snap.item);
+  labPaint(); paintNotesCount(); reportMark(n);
+}
+function noteById(id){ return NOTES.filter(function(x){ return x.id === id; })[0]; }
+
+/* ── the mistake log (profile-bench-brief.md §3) ───────────────────────
+   Browser-only for now, like the notes: it is for the developer. Flags are
+   pressed by hand; failed calls and rate limits are written automatically. */
+var MISTAKES = load("mistakes", []) || [];
+function slotCall(slot){
+  var ids = Object.keys(CALL_DEFAULTS);
+  for (var i=0; i<ids.length; i++) if (CALL_DEFAULTS[ids[i]].fills.indexOf(slot) >= 0) return ids[i];
+  return "";
+}
+function logMistake(e){
+  e.at = new Date().toISOString();
+  MISTAKES.unshift(e);
+  if (MISTAKES.length > 3000) MISTAKES.length = 3000;
+  saveL("mistakes", MISTAKES);
+  paintMistakes();
+}
+function logFromProfile(v, about, meta, slot, extra){
+  var call = slotCall(slot), m = (meta || {})[call] || {};
+  return Object.assign({
+    kind: "flag", sentence: about ? about.sentence : (v.sentence || ""),
+    selection: about ? about.term : (v.selection || ""),
+    item: v.item || "", slot: slot, call: call,
+    provider: m.provider || "", model: m.model || "", prompt_version: m.prompt_version || "",
+    preset: m.preset || activePreset().id
+  }, extra || {});
+}
+/* What a slot said, as plain text, for the log. */
+function slotSaid(v, slot, i){
+  if (slot === "examples"){ var e = (v.examples || [])[i]; return e ? e.text.replace(/\*\*/g, "") + " | " + e.tr : ""; }
+  if (slot === "pieces") return (v.pieces || []).join(" \u2026 ");
+  if (slot === "alternatives") return (v.alternatives || []).map(function(a){ return a.item; }).join(", ");
+  if (slot === "companions") return (v.companions || []).join(", ");
+  var x = v[slot === "item" ? "item" : slot];
+  return x == null ? "" : String(x);
+}
+
+/* The flag: one small button that follows the pointer from slot to slot. */
+function pfFlagWire(card, v, live, note){
+  var fl = card.querySelector(".pf-flag");
+  if (!fl){ fl = document.createElement("button"); fl.className = "pf-flag"; fl.type = "button";
+    fl.title = "Flag this as wrong"; fl.setAttribute("aria-label", "Flag this as wrong");
+    fl.textContent = "\u2691"; card.appendChild(fl); }
+  var target = null;
+  card.onmouseover = function(e){
+    if (e.target === fl) return;
+    var el = e.target.closest && e.target.closest("[data-slot]");
+    if (!el || !card.contains(el) || el.querySelector(".ld") || el.classList.contains("ld")) { fl.classList.remove("on"); target = null; return; }
+    target = el;
+    var cr = card.getBoundingClientRect(), er = el.getBoundingClientRect();
+    fl.style.top = (er.top - cr.top + card.scrollTop + Math.min(er.height, 26) / 2 - 10) + "px";
+    fl.style.left = Math.min(cr.width - 26, er.right - cr.left + 2) + "px";
+    fl.classList.add("on");
+  };
+  card.onmouseleave = function(){ fl.classList.remove("on"); };
+  fl.onclick = function(e){
+    e.stopPropagation();
+    if (!target) return;
+    var slot = target.dataset.slot, i = +(target.dataset.i || 0);
+    var said = slotSaid(v, slot, i);
+    var should = prompt("Flagging \u201c" + (said || slot) + "\u201d (" + slot + ").\nWhat should it have said? (optional)", "");
+    if (should === null) return;                          // cancelled: nothing logged
+    var about = live ? live.about : (note && note.about) || null;
+    var meta = live ? live.meta : v.meta;
+    var entry = logFromProfile(v, about, meta, slot, {said: said, should_be: should.trim()});
+    if (!about && note){ entry.sentence = note.sentence || ""; entry.selection = note.selection || ""; }
+    logMistake(entry);
+    say("Flagged " + slot + " on " + (v.item || "?"));
+    target.classList.add("pf-flagged");
+  };
+}
+
+function paintMistakes(){
+  var host = $("mlog"); if (!host) return;
+  var by = load("mlogby", "call");
+  document.querySelectorAll(".mlb").forEach(function(b){ b.classList.toggle("on", b.dataset.by === by); });
+  var flags = MISTAKES.filter(function(m){ return m.kind === "flag"; }).length;
+  $("mlogcount").textContent = MISTAKES.length ? flags + " flagged, " + (MISTAKES.length - flags) + " failed or rate-limited" : "Empty.";
+  var groups = {};
+  MISTAKES.forEach(function(m){
+    var k = by === "call" ? (m.call || "?") + (m.kind === "flag" ? "" : " \u00b7 " + m.kind)
+                          : (m.kind === "flag" ? (m.slot || "?") : m.kind + " (" + (m.call || "?") + ")");
+    (groups[k] = groups[k] || []).push(m);
+  });
+  host.innerHTML = Object.keys(groups).sort(function(a, b){ return groups[b].length - groups[a].length; }).map(function(k){
+    return '<details class="mg"><summary><b>' + esc(k) + "</b> \u00b7 " + groups[k].length + "</summary>"
+      + groups[k].slice(0, 60).map(function(m){
+        return '<div class="me">' + (m.kind === "flag"
+          ? "<b>" + esc(m.item) + "</b> " + esc(by === "call" ? m.slot + ": " : "") + esc(m.said || "")
+            + (m.should_be ? " \u2192 <i>" + esc(m.should_be) + "</i>" : "")
+          : esc(m.item || m.selection || "") + " \u2014 " + esc(String(m.error || "").slice(0, 90)))
+          + '<small>' + esc(m.model || "") + (m.prompt_version ? " v" + m.prompt_version : "") + " \u00b7 "
+          + esc(m.preset || "") + " \u00b7 " + esc((m.at || "").slice(0, 16).replace("T", " ")) + "</small></div>";
+      }).join("") + (groups[k].length > 60 ? '<div class="me"><small>\u2026 and ' + (groups[k].length - 60) + " more in the export</small></div>" : "")
+      + "</details>";
+  }).join("");
+}
+function downloadFile(name, text, type){
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type:type}));
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+var MLOG_COLS = ["at","kind","sentence","selection","item","slot","said","should_be","call","provider","model","prompt_version","preset","status","error"];
+function exportMistakes(kind){
+  var stamp = new Date().toISOString().slice(0, 10);
+  if (kind === "json") return downloadFile("mistake-log-" + stamp + ".json", JSON.stringify(MISTAKES, null, 2), "application/json");
+  var q = function(x){ x = x == null ? "" : String(x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  var csv = MLOG_COLS.join(",") + "\n" + MISTAKES.map(function(m){ return MLOG_COLS.map(function(c){ return q(m[c]); }).join(","); }).join("\n");
+  downloadFile("mistake-log-" + stamp + ".csv", "\ufeff" + csv, "text/csv");
+}
+
+/* ── the blank-page bug: record it when it happens ──────────────────────
+   Clicking a marked word was reported to throw the reader onto a new, empty
+   text. The reader does that whenever it cannot find the open text
+   (ensureReaderText). The lab keeps the last few presses, and writes them to
+   the log the moment the open text changes or a blank one is made. */
+var TRAIL = [];
+function trail(what){ TRAIL.push(new Date().toISOString().slice(11, 23) + " " + what); if (TRAIL.length > 8) TRAIL.shift(); }
+function describe(el){
+  if (!el || !el.tagName) return "?";
+  var s = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "")
+    + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).slice(0, 3).join(".") : "");
+  var w = el.closest && el.closest(".w"); if (w) s += " in word \u201c" + w.textContent.slice(0, 20) + "\u201d";
+  return s;
+}
+["click","dblclick","mousedown"].forEach(function(t){
+  document.addEventListener(t, function(e){ trail(t + " " + describe(e.target) + (e.detail > 1 ? " x" + e.detail : "")); }, true);
+});
+document.addEventListener("keydown", function(e){ if (e.key.length > 1 || e.ctrlKey || e.metaKey) trail("key " + (e.ctrlKey ? "Ctrl+" : "") + e.key); }, true);
+(function(){
+  var seenText = ui.readerTextId, seenView = ui.view;
+  setInterval(function(){
+    if (ui.readerTextId === seenText && ui.view === seenView) return;
+    var t = S.texts[ui.readerTextId];
+    if (seenView === "reader" && ui.view === "reader" && seenText && t && t._draft && !t.body){
+      say("BLANK TEXT OPENED (was " + seenText + ", which is " + (S.texts[seenText] ? "still there" : "GONE from memory") + "). Last presses:");
+      TRAIL.forEach(function(x){ say("    " + x); });
+    }
+    seenText = ui.readerTextId; seenView = ui.view;
+  }, 250);
+})();
+["ensureReaderText","createNewText"].forEach(function(fn){
+  if (typeof window[fn] !== "function" || window["__lab_" + fn]) return;
+  var orig = window[fn]; window["__lab_" + fn] = orig;
+  window[fn] = function(){
+    var had = ui.readerTextId, exists = !!(had && S.texts[had]);
+    if (fn === "createNewText" || !exists){
+      say(fn + " made a new blank text (open text was " + (had || "none") + (had ? (exists ? ", present" : ", MISSING") : "") + "). Last presses:");
+      TRAIL.forEach(function(x){ say("    " + x); });
+    }
+    return orig.apply(this, arguments);
+  };
+});
+
+/* A click on a profile mark opens its panel, and goes no further. */
+document.addEventListener("click", function(e){
+  var el = e.target.closest && e.target.closest(".lab-note");
+  if (!el || window.getSelection().toString().trim()) return;
+  e.stopPropagation(); e.preventDefault();
+  var ids = (el.getAttribute("data-notes") || "").split(",");
+  var n = NOTES.filter(function(x){ return ids.indexOf(x.id) >= 0; })[0];
+  if (!n) return;
+  clearTimeout(noteTimer);
+  if (n.profile) showProfile(n.profile, el.getBoundingClientRect(), n);
+  else showAI(n.label + " \u00b7 " + n.term, esc(n.text), false, el.getBoundingClientRect(), null, n);
+  $("labai").dataset.pinned = "1";          // opened by a click: stays until closed
+}, true);
+
 function paintNotesCount(){
   var el = $("notescount"); if (!el) return;
   var here = NOTES.filter(function(n){ return n.textId === ui.readerTextId; }).length;
@@ -1378,10 +1598,17 @@ async function runCall(P, id){
   if (id !== "identify" && it !== P.item) return false;     // the item changed while we waited
   P.times[key] = r.ms; if (r.mode) P.mode = r.mode;
   P.meta[id].mode = r.mode;
-  if (r.err){ P[key] = slotF(r.err); say("  " + c.label + " failed: " + r.err); paintProfile(); return false; }
+  if (r.err){
+    P[key] = slotF(r.err); say("  " + c.label + " failed: " + r.err);
+    logMistake(logFromProfile(P.item || {}, P.about, P.meta, c.fills[0],
+      {kind: r.status === 429 ? "rate_limit" : "failed", slot:"", call:id, status:r.status || "", error:r.err}));
+    paintProfile(); return false; }
   var j;
   try{ j = parseJSONish(r.text); }
-  catch(e){ P[key] = slotF("reply was not JSON: " + e.message); say("  " + c.label + ": reply was not JSON"); paintProfile(); return false; }
+  catch(e){ P[key] = slotF("reply was not JSON: " + e.message); say("  " + c.label + ": reply was not JSON");
+    logMistake(logFromProfile(P.item || {}, P.about, P.meta, c.fills[0],
+      {kind:"failed", slot:"", call:id, error:"not JSON: " + String(r.text).slice(0, 200)}));
+    paintProfile(); return false; }
   P[key] = slotV(CALL_VALUE[id](j));
   var what = CALL_APPLY[id](P, j, it);
   say("  " + c.label + " v" + c.prompt_version + " (" + model + "): " + (what ? what + ", " : "") + r.ms + "ms");
@@ -1554,7 +1781,7 @@ function profileSnapshot(P){
     examples: P.s2b.state === "done" ? P.s2b.value : [],
     alternatives: P.alts.filter(function(x){ return !x.mine; })
       .map(function(x){ return {item:x.item, kind:x.kind, meaning:x.meaning}; }),
-    by:"ai", model:P.model, learnerLang:load("learnlang","English"), level:load("level","B1") };
+    by:"ai", model:P.model, meta:P.meta || {}, learnerLang:load("learnlang","English"), level:load("level","B1") };
 }
 
 /* ── the panel's look (panel-design-picks.md, panel-picks.html) ──────────
@@ -1614,23 +1841,23 @@ function pfPiece(slot, k, w, tag){
 }
 function pfSkeleton(look){
   var hand = look.style === "hand";
-  var onp  = '<div class="pf-onp">' + pfPiece("item","onp","5em") + "</div>";
-  var hw   = '<div class="pf-hw">' + pfPiece("item","hw","4.2em", hand ? "div" : "span") + "</div>";
+  var onp  = '<div class="pf-onp" data-slot="pieces">' + pfPiece("item","onp","5em") + "</div>";
+  var hw   = '<div class="pf-hw" data-slot="item">' + pfPiece("item","hw","4.2em", hand ? "div" : "span") + "</div>";
   var row  = '<div class="pf-row"><button class="pf-play ld" data-pf="say" aria-label="Play pronunciation">' + PF_PLAY + "</button>"
-           + pfPiece("grammar","ipa","4em")
-           + '<span class="pf-dim">' + pfPiece("item","pos","3em") + "</span>"
-           + '<span class="pf-dim">' + pfPiece("grammar","register","3.6em") + "</span></div>";
+           + '<span data-slot="ipa">' + pfPiece("grammar","ipa","4em") + "</span>"
+           + '<span class="pf-dim" data-slot="pos">' + pfPiece("item","pos","3em") + "</span>"
+           + '<span class="pf-dim" data-slot="register">' + pfPiece("grammar","register","3.6em") + "</span></div>";
   var fail1 = '<div class="pf-fail" data-fail="item" hidden></div>';
   var extra = '<div class="pf-extra"></div>';
-  var mean = '<div class="pf-mean">' + pfPiece("item","mean","7em") + "</div>"
-           + '<div class="pf-gl" hidden>' + pfPiece("grammar","gl","9em") + "</div>";
+  var mean = '<div class="pf-mean" data-slot="meaning">' + pfPiece("item","mean","7em") + "</div>"
+           + '<div class="pf-gl" data-slot="gloss" hidden>' + pfPiece("grammar","gl","9em") + "</div>";
   var ex   = '<ul class="pf-ex">' + [0,1,2].map(function(i){
-      return '<li data-pf="ex" tabindex="0">' + pfPiece("ex","ex" + i, (15 - i*2) + "em") + '<span class="pf-tr"></span></li>'; }).join("")
+      return '<li data-pf="ex" data-slot="examples" data-i="' + i + '" tabindex="0">' + pfPiece("ex","ex" + i, (15 - i*2) + "em") + '<span class="pf-tr"></span></li>'; }).join("")
            + '</ul><div class="pf-fail" data-fail="ex" hidden></div>';
   var facts = '<div class="pf-facts">' + pfPiece("grammar","facts","10em") + "</div>"
-            + '<div class="pf-note" hidden>' + pfPiece("grammar","note","12em") + "</div>"
+            + '<div class="pf-note" data-slot="note" hidden>' + pfPiece("grammar","note","12em") + "</div>"
             + '<div class="pf-fail" data-fail="grammar" hidden></div>';
-  var sig  = '<div class="pf-sig">' + pfPiece("sig","sig","6em") + "</div>";
+  var sig  = "";
   var tools = '<div class="pf-tools"></div><div class="pf-fade"></div>';
   var top  = '<button class="pf-x" data-pf="close" aria-label="Close">\u00d7</button>';
   if (!hand)
@@ -1645,7 +1872,7 @@ function pfSkeleton(look){
     + '<div class="pf-sec pending" data-sec="item">' + mean + "</div>" + PF_WAVE
     + '<div class="pf-sec pending" data-sec="ex">' + ex + "</div>" + PF_WAVE
     + '<div class="pf-sec pending" data-sec="grammar">' + facts + "</div>"
-    + '<div class="pf-sec pending" data-sec="sig">' + sig + "</div>" + tools + "</div>";
+    + tools + "</div>";
 }
 
 function pfReduced(){ try{ return matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){ return false; } }
@@ -1694,10 +1921,10 @@ function registerWords(r){
 function pfBold(t){ return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
 function pfFacts(v){
   var f = [];
-  if (v.gender) f.push(["Gender", v.gender]);
-  if (v.plural) f.push(["Plural", v.plural]);
-  if (v.participle) f.push(["Perfect", v.participle]);
-  if (v.splits) f.push(["Splits", v.splits]);
+  if (v.gender) f.push(["Gender", v.gender, "gender"]);
+  if (v.plural) f.push(["Plural", v.plural, "plural"]);
+  if (v.participle) f.push(["Perfect", v.participle, "participle"]);
+  if (v.splits) f.push(["Splits", v.splits, "splits"]);
   return f;
 }
 
@@ -1726,7 +1953,7 @@ function pfFillSlot(card, slot, v, anim, live){
     var f = pfFacts(v);
     card.querySelector(".pf-facts").hidden = !f.length;
     if (f.length) put("facts", f.map(function(p){
-      return "<span><small>" + esc(p[0]) + "</small><em>" + esc(p[1]) + "</em></span>"; }).join(""));
+      return '<span data-slot="' + p[2] + '"><small>' + esc(p[0]) + "</small><em>" + esc(p[1]) + "</em></span>"; }).join(""));
     var nt = card.querySelector(".pf-note");
     if (v.note){ nt.hidden = false; put("note", esc(v.note)); } else nt.hidden = true;
   }
@@ -1781,7 +2008,7 @@ function pfUnplace(box){ box.style.bottom = ""; }
 function pfControls(card, v, live, note){
   var ex = card.querySelector(".pf-extra"), h = "";
   if (live && live.alts.length){
-    h += '<button class="pf-link" data-pf="alts">other options (' + live.alts.length + ")</button>";
+    h += '<button class="pf-link" data-pf="alts" data-slot="alternatives">other options (' + live.alts.length + ")</button>";
     if (live.altsOpen) h += '<div class="pf-alts">' + live.alts.map(function(x, i){
       return '<button data-alt="' + i + '"><b>' + esc(x.item) + "</b>"
         + (x.meaning ? " \u2014 " + esc(x.meaning) : "")
@@ -1789,23 +2016,24 @@ function pfControls(card, v, live, note){
     }).join("") + "</div>";
   }
   (v.companions || []).forEach(function(c){
-    h += '<div class="pf-comp">usually with <b>' + esc(c) + "</b>"
+    h += '<div class="pf-comp" data-slot="companions">usually with <b>' + esc(c) + "</b>"
       + (live ? ' <button class="pf-link" data-comp="' + esc(c) + '">add it</button>' : "") + "</div>";
   });
   ex.innerHTML = h;
   var t = card.querySelector(".pf-tools");
-  if (live){
-    var settled = live.s1.state !== "waiting" && live.s2a.state !== "waiting" && live.s2b.state !== "waiting";
-    t.innerHTML = '<button class="pf-link" id="pfsave"' + (settled && live.s1.state === "done" && !live.saved ? "" : " disabled") + ">"
-      + (live.saved ? "saved" : "Save") + "</button>"
-      + '<label><input type="checkbox" id="aimark"' + (live.markOff ? "" : " checked") + (live.saved ? " disabled" : "") + "> mark it in the text</label>"
-      + '<span class="pf-time">' + esc(live.model) + (live.mode ? " \u00b7 " + esc(live.mode) : "")
-      + (live.times.s1 ? " \u00b7 " + live.times.s1 : "") + (live.times.s2a ? " / " + live.times.s2a : "")
-      + (live.times.s2b ? " / " + live.times.s2b : "") + (live.times.s1 ? " ms" : "") + "</span>";
-  } else if (note){
-    t.innerHTML = '<span class="pf-time">saved ' + esc(new Date(note.when).toLocaleDateString())
-      + " \u00b7 " + esc(v.level || "") + " \u00b7 " + esc(v.model || "") + "</span>"
-      + '<button class="pf-link" id="aicopy">Copy</button><button class="pf-link warn" id="aidel">Remove</button>';
+  var n = live ? (live.noteId && noteById(live.noteId)) : note;
+  if (live || note){
+    var marked = n ? n.marked : !(live && live.markOff);
+    t.innerHTML = '<span class="pf-state">' + (n ? "saved" : live && !live.removed ? "saves when ready" : "not saved") + "</span>"
+      + (n ? '<button class="pf-link warn" id="pfremove">Remove</button>' : "")
+      + (note ? '<button class="pf-link" id="aicopy">Copy</button>' : "")
+      + '<label><input type="checkbox" id="aimark"' + (marked ? " checked" : "") + (live && live.removed ? " disabled" : "") + "> mark it in the text</label>"
+      + '<span class="pf-time">' + (live
+          ? esc(live.model) + (live.mode ? " \u00b7 " + esc(live.mode) : "")
+            + (live.times.s1 ? " \u00b7 " + live.times.s1 : "") + (live.times.s2a ? " / " + live.times.s2a : "")
+            + (live.times.s2b ? " / " + live.times.s2b : "") + (live.times.s1 ? " ms" : "")
+          : esc(new Date(note.when).toLocaleDateString()) + " \u00b7 " + esc(v.level || "") + " \u00b7 " + esc(v.model || ""))
+      + "</span>";
   }
 }
 
@@ -1826,7 +2054,7 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
   pfFont(look.style === "hand" ? "hand" : "lacq");
   var fresh = box.dataset.pfkey !== key || box.dataset.pflook !== JSON.stringify(look);
   if (fresh){
-    box.className = "on pf";
+    box.className = "on pf"; box.dataset.pinned = "";
     box.innerHTML = pfSkeleton(look);
     box.dataset.pfkey = key; box.dataset.pflook = JSON.stringify(look);
     box._shown = {};
@@ -1850,7 +2078,11 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
     if (op && !op.querySelector(".pf-ch")) op.innerHTML = pfOnPage(v, live);
   }
   var settled = ["item","grammar","ex"].every(function(sl){ return states[sl] !== "waiting"; });
-  if (settled && !shown.sig){ pfFillSlot(card, "sig", v, !instant, live); shown.sig = true; }
+  if (settled && !shown.sig){
+    shown.sig = true;
+    var ldr = card.querySelector(".pf-loader");
+    if (ldr) setTimeout(function(){ ldr.classList.add("off"); }, instant ? 0 : 900);
+  }
   pfControls(card, v, live, note);
   pfWire(box, v, live, note);
   pfMore(card);
@@ -1876,30 +2108,26 @@ function pfWire(box, v, live, note){
     card.querySelectorAll("[data-comp]").forEach(function(b){ b.onclick = function(){ addCompanion(b.dataset.comp); }; });
     card.querySelectorAll("[data-retry]").forEach(function(b){
       b.onclick = function(){ if (b.dataset.retry === "item") runStage1(live); else runStage2(live); }; });
-    var mk = $("aimark"); if (mk) mk.onchange = function(){ live.markOff = !mk.checked; };
-    var sv = $("pfsave"); if (sv) sv.onclick = function(){
-      var snap = profileSnapshot(live);
-      var n = { id:"n" + Date.now().toString(36), slot:"profile", label:"Profile",
-        term:snap.item, textId:live.textId, ranges:live.ranges.map(function(r){ return {start:r.start, end:r.end}; }),
-        text: snap.item + " \u2014 " + snap.meaning, profile: snap,
-        marked: !live.markOff, model: live.model, when: Date.now() };
-      NOTES.unshift(n); saveL("notes", NOTES);
-      live.saved = true;
-      say("Profile saved: " + snap.item);
-      pfControls(card, v, live, null); pfWire(box, v, live, null);
-      labPaint(); paintNotesCount();
-      reportMark(n);
-    };
-  } else if (note){
-    $("aicopy").onclick = function(){
-      var t = v.item + " \u2014 " + v.meaning + "\n" + (v.examples || []).map(function(e){
-        return e.text.replace(/\*\*/g, "") + " \u2014 " + e.tr; }).join("\n");
-      try{ navigator.clipboard.writeText(t); this.textContent = "copied"; }catch(e){} };
-    $("aidel").onclick = function(){
-      NOTES = NOTES.filter(function(x){ return x.id !== note.id; }); saveL("notes", NOTES);
-      box.className = ""; box.dataset.pfkey = ""; say("Profile removed: " + v.item);
-      labPaint(); paintNotesCount(); };
   }
+  var n = live ? (live.noteId && noteById(live.noteId)) : note;
+  var mk = $("aimark");
+  if (mk) mk.onchange = function(){
+    if (live) live.markOff = !mk.checked;
+    if (n){ n.marked = mk.checked; saveL("notes", NOTES); labPaint(); if (n.marked) reportMark(n); }
+  };
+  var rm = $("pfremove");
+  if (rm) rm.onclick = function(){
+    NOTES = NOTES.filter(function(x){ return x.id !== n.id; }); saveL("notes", NOTES);
+    say("Profile removed: " + (v.item || n.term)); labPaint(); paintNotesCount();
+    if (live){ live.noteId = null; live.saved = false; live.removed = true; pfControls(card, v, live, null); pfWire(box, v, live, null); }
+    else { box.className = ""; box.dataset.pfkey = ""; }
+  };
+  var cp = $("aicopy");
+  if (cp) cp.onclick = function(){
+    var t = v.item + " \u2014 " + v.meaning + "\n" + (v.examples || []).map(function(e){
+      return e.text.replace(/\*\*/g, "") + " \u2014 " + e.tr; }).join("\n");
+    try{ navigator.clipboard.writeText(t); this.textContent = "copied"; }catch(e){} };
+  pfFlagWire(card, v, live, note);
 }
 
 function paintProfile(){
@@ -1909,6 +2137,7 @@ function paintProfile(){
   var states = { item: st(P.s1), grammar: P.s1.state === "failed" ? "waiting" : st(P.s2a),
     ex: P.s1.state === "failed" ? "waiting" : st(P.s2b),
     itemErr: P.s1.err, grammarErr: P.s2a.err, exErr: P.s2b.err };
+  autoSave(P);
   pfRender($("labai"), "live|" + P.run + "|" + P.gen, v, states, P, null, P.anchor, false);
   try{ paintLevel(); }catch(e){}
 }
@@ -2680,6 +2909,11 @@ document.querySelectorAll(".lvlb").forEach(function(b){
 $("schemareset").onclick = function(){ saveL("aischemaMode", "schema"); paintLevel(); };
 paintLevel();
 paintBench();
+document.querySelectorAll(".mlb").forEach(function(b){ b.onclick = function(){ saveL("mlogby", b.dataset.by); paintMistakes(); }; });
+$("mlogjson").onclick = function(){ exportMistakes("json"); };
+$("mlogcsv").onclick = function(){ exportMistakes("csv"); };
+$("mlogclear").onclick = function(){ if (!confirm("Empty the mistake log?")) return; MISTAKES = []; saveL("mistakes", MISTAKES); paintMistakes(); };
+paintMistakes();
 paintNotesCount();
 syncClassSlots();
 paintAll();
