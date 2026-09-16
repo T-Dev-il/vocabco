@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-17a (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-17b (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -509,6 +509,11 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labai .pf-lq .pf-sw b{font:600 16px var(--pfg);color:var(--hw)}
   #labai .pf-hc .pf-nu small{font:400 14px var(--pfh)}
   #labai .pf-hide{display:none!important}
+  #labai .pf-blank{color:transparent!important;border-radius:3px;cursor:pointer;
+    background:rgba(127,127,127,.14);box-shadow:inset 0 -1.5px 0 rgba(127,127,127,.55);padding:0 .15em}
+  #labai .pf-blank *{color:transparent!important}
+  #labai .pf-blank.show,#labai .pf-blank.show *{color:inherit!important}
+  #labai .pf-blank.show{background:none}
   #labai .pf-cz{cursor:pointer}
   #labai .pf-cz:not(.pf-open)>*{display:none!important}
   #labai .pf-cz:not(.pf-open)::before{content:attr(data-label);font:11.5px var(--pfui);opacity:.7;
@@ -525,6 +530,14 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labai .pf-state{opacity:.7}
   .mg{border-top:1px solid #eceee8;padding:4px 0;font-size:12px}
   .pshow .r{margin:1px 0}
+  .bcu{display:block;font-size:10.5px;color:#9b9e96;margin-left:12px}
+  .pcmp{border-collapse:collapse;font-size:11.5px;margin-top:6px;width:100%}
+  .pcmp th,.pcmp td{border-bottom:1px solid #eceee8;padding:3px 6px;text-align:left;vertical-align:top}
+  .pcmp th{font-weight:600;color:#3d4247}
+  .pcmp th.cur{text-decoration:underline;text-underline-offset:3px}
+  .pcmp td.dim{color:#b3b6ae}
+  .pcmp tr.diff td,.pcmp tr.diff th{background:#fbf6e6}
+  .pcmp small{color:#9b9e96}
   .mg summary{cursor:pointer}
   .me{padding:3px 0 3px 10px;border-left:2px solid #eceee8;margin:3px 0}
   .me small{display:block;color:#9b9e96}
@@ -629,6 +642,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <p>Which calls run, what each one asks, and on which model. Editing a prompt
       makes it a new version; the version travels with every answer.</p>
     <div class="r"><label class="inl">Preset</label><span id="benchpreset"></span></div>
+    <div id="presetcmp" style="overflow-x:auto"></div>
     <details id="presetedit" class="bc"><summary>Edit this preset</summary><div id="presetbody"></div></details>
     <div id="benchcalls"></div>
     <p style="margin-top:8px"><b>Slots:</b> <span id="benchslots"></span></p>
@@ -1226,9 +1240,9 @@ function noteById(id){ return NOTES.filter(function(x){ return x.id === id; })[0
    Browser-only for now, like the notes: it is for the developer. Flags are
    pressed by hand; failed calls and rate limits are written automatically. */
 var MISTAKES = load("mistakes", []) || [];
-function slotCall(slot){
+function slotCall(slot){      // the job (group) that fills a slot
   var ids = Object.keys(CALL_DEFAULTS);
-  for (var i=0; i<ids.length; i++) if (CALL_DEFAULTS[ids[i]].fills.indexOf(slot) >= 0) return ids[i];
+  for (var i=0; i<ids.length; i++) if (CALL_DEFAULTS[ids[i]].fills.indexOf(slot) >= 0) return groupOf(ids[i]);
   return "";
 }
 function logMistake(e){
@@ -1243,7 +1257,7 @@ function logFromProfile(v, about, meta, slot, extra){
   return Object.assign({
     kind: "flag", sentence: about ? about.sentence : (v.sentence || ""),
     selection: about ? about.term : (v.selection || ""),
-    item: v.item || "", slot: slot, call: call,
+    item: v.item || "", slot: slot, call: m.call || call,
     provider: m.provider || "", model: m.model || "", prompt_version: m.prompt_version || "",
     preset: m.preset || activePreset().id
   }, extra || {});
@@ -1470,7 +1484,7 @@ var SCHEMA_NU = {type:"OBJECT", properties:{
   connotation:{type:"STRING"}, region:{type:"STRING"}},
   required:["synonyms","collocations","connotation","region"]};
 var SCHEMA2B = {type:"OBJECT", properties:{examples:{type:"ARRAY", items:{type:"OBJECT",
-  properties:{text:{type:"STRING"}, tr:{type:"STRING"}}, required:["text","tr"]}}},
+  properties:{text:{type:"STRING"}, tr:{type:"STRING"}, pieces:{type:"ARRAY", items:{type:"STRING"}}}, required:["text","tr"]}}},
   required:["examples"]};
 
 /* ── the profile bench (profile-bench-brief.md) ─────────────────────────
@@ -1519,7 +1533,7 @@ var PROVIDERS = {
 };
 
 var CALL_DEFAULTS = {
-  identify: {id:"identify", label:"Find the item", state:"s1", schema:SCHEMA1,
+  identify: {id:"identify", group:"identify", label:"Find the item", variant:"meaning as a translation", state:"s1", schema:SCHEMA1,
     fills:["item","pieces","pos","meaning","alternatives","companions"],
     provider:"gemini", model:"", prompt_version:2, prompt:
 "A learner of German selected part of a German text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
@@ -1532,12 +1546,12 @@ var CALL_DEFAULTS = {
 + "- dropped: selected words that are not part of the item.\n"
 + "- companions: words in the sentence that usually go with the item but are not part of it, such as the preposition in \"warten auf\". Exact text. Do not also put them in on_page.\n"
 + "- pos: one of noun, verb, adjective, adverb, preposition, conjunction, pronoun, article, particle, idiom, other.\n"
-+ "- meaning: the meaning in this context, in {{meaning_language}}, a few words.\n\n"
++ "- meaning: the meaning in this context, in {{learner_language}}, a few words.\n\n"
 + "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ. "
 + "{{level_rule}} Give an empty list when the reading is clear.\n"
 + "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
 + "Answer with JSON only."},
-  grammar: {id:"grammar", label:"Grammar", state:"s2a", schema:SCHEMA2A,
+  grammar: {id:"grammar", group:"grammar", label:"Grammar", variant:"", state:"s2a", schema:SCHEMA2A,
     fills:["gender","plural","participle","splits","register","note","ipa","gloss"],
     provider:"gemini", model:"", prompt_version:2, prompt:
 "German lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
@@ -1549,54 +1563,87 @@ var CALL_DEFAULTS = {
 + "- splits: for separable verbs, how it splits in a main clause (ich stehe \u2026 auf); otherwise null.\n"
 + "- register: informal, neutral or formal.\n"
 + "- ipa: the pronunciation of \"{{item}}\" in IPA, between slashes.\n"
-+ "- gloss: a short plain explanation in {{meaning_language}} that adds something beyond the meaning; an EMPTY STRING if it would only repeat it.\n"
-+ "- meaning: the meaning in this context in {{meaning_language}}, a few words.\n"
++ "- gloss: a short plain explanation in {{learner_language}} that adds something beyond the meaning; an EMPTY STRING if it would only repeat it.\n"
++ "- meaning: the meaning in this context in {{learner_language}}, a few words.\n"
 + "- note: leave this an EMPTY STRING unless there is something genuinely worth a learner's attention "
 + "(an irregular form, a stress difference that changes the meaning, a false friend, a gender that differs by meaning). "
 + "Most items have no note. If you write one: at most 20 words, in {{learner_language}}.\n\n"
 + "Answer with JSON only."},
-  examples: {id:"examples", label:"Examples", state:"s2b", schema:SCHEMA2B,
+  examples: {id:"examples", group:"examples", label:"Examples", variant:"simple", state:"s2b", schema:SCHEMA2B,
     fills:["examples"],
-    provider:"gemini", model:"", prompt_version:2, prompt:
+    provider:"gemini", model:"", prompt_version:3, prompt:
 "Write 4 German example sentences using \"{{item}}\" with exactly this meaning: \"{{meaning}}\".\n"
 + "It was met in: \"{{sentence}}\"\n"
-+ "Level {{level}}. {{example_rule}}\n"
++ "Level {{level}}. Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
 + "For each, give `text` (German) and `tr` (translation into {{learner_language}}).\n"
-+ "In `text`, wrap each word that belongs to the item in double asterisks, e.g. Wann **stehst** du **auf**?\n\n"
++ "In `text`, wrap each word that belongs to the item in double asterisks, e.g. Wann **stehst** du **auf**?\n"
++ "Also give `pieces`: the words of the item exactly as they are written in that sentence, in order (for Wann stehst du auf? that is [\"stehst\", \"auf\"]).\n\n"
 + "Answer with JSON only."},
-  nuance: {id:"nuance", label:"Nuance", state:"s3", schema:SCHEMA_NU,
+  nuance: {id:"nuance", group:"nuance", label:"Nuance", variant:"", state:"s3", schema:SCHEMA_NU,
     fills:["synonyms","collocations","connotation","region"],
     provider:"gemini", model:"", prompt_version:1, prompt:
 "German lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
 + "As used in: \"{{sentence}}\"\n"
 + "The learner is at level {{level}}.\n\n"
 + "Return only what is genuinely worth an advanced learner's attention. EVERY field may be empty, and most items leave most of them empty. Do not invent something to fill a field.\n"
-+ "- synonyms: up to 3 near-synonyms with the same meaning. For each, `difference`: why one would choose \"{{item}}\" rather than that word, or the other way round (formality, typical context, strength). Under 15 words, in {{explain_language}}. An empty list if there are no useful ones.\n"
++ "- synonyms: up to 3 near-synonyms with the same meaning. For each, `difference`: why one would choose \"{{item}}\" rather than that word, or the other way round (formality, typical context, strength). Under 15 words, in {{learner_language}}. An empty list if there are no useful ones.\n"
 + "- collocations: up to 4 typical word partners, written as short German phrases (eine Entscheidung treffen). An empty list if none stand out.\n"
-+ "- connotation: an EMPTY STRING unless the word carries something a learner could miss: old-fashioned, slightly negative, ironic, childish, bureaucratic. Under 12 words, in {{explain_language}}.\n"
-+ "- region: an EMPTY STRING unless the word is regional (Austrian, Swiss, southern, northern). Under 12 words, in {{explain_language}}.\n\n"
++ "- connotation: an EMPTY STRING unless the word carries something a learner could miss: old-fashioned, slightly negative, ironic, childish, bureaucratic. Under 12 words, in {{learner_language}}.\n"
++ "- region: an EMPTY STRING unless the word is regional (Austrian, Swiss, southern, northern). Under 12 words, in {{learner_language}}.\n\n"
 + "Answer with JSON only."}
 };
 
+/* Variants. A job such as "examples" can be done more than one way; each way
+   is its own call, with its own prompt, model and version, listed on its own
+   in the bench. A preset picks at most one call per job, so every difference
+   between presets is a visible choice rather than a hidden setting. */
+(function(){
+  var id = CALL_DEFAULTS.identify, ex = CALL_DEFAULTS.examples;
+  var de = Object.assign({}, id, {id:"identify_de", variant:"meaning as a German definition", prompt_version:1,
+    prompt: id.prompt.replace("- meaning: the meaning in this context, in {{learner_language}}, a few words.",
+      "- meaning: a short, simple GERMAN definition of the meaning in this context (not a translation), under 12 words.")});
+  var rich = Object.assign({}, ex, {id:"examples_rich", variant:"rich", prompt_version:1,
+    prompt: ex.prompt.replace("Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
+      "Each 12 to 22 words, natural and clearly varied: different tenses, persons and sentence types (questions, subordinate clauses), not copies of the original sentence.")});
+  if (de.prompt === id.prompt || rich.prompt === ex.prompt) console.warn("[lab] a variant prompt did not change");
+  var ordered = {identify:id, identify_de:de, grammar:CALL_DEFAULTS.grammar, examples:ex, examples_rich:rich, nuance:CALL_DEFAULTS.nuance};
+  Object.keys(CALL_DEFAULTS).forEach(function(k){ delete CALL_DEFAULTS[k]; });
+  Object.assign(CALL_DEFAULTS, ordered);
+})();
+var GROUPS = [
+  {id:"identify", label:"Find the item", required:true},
+  {id:"grammar",  label:"Grammar"},
+  {id:"examples", label:"Examples"},
+  {id:"nuance",   label:"Nuance"}
+];
+function groupOf(id){ return (CALL_DEFAULTS[id] || {}).group || id; }
+function callName(id){ var c = CALL_DEFAULTS[id]; return c ? c.label + (c.variant ? " \u00b7 " + c.variant : "") : id; }
+function variantsOf(g){ return Object.keys(CALL_DEFAULTS).filter(function(id){ return groupOf(id) === g; }); }
+function presetCall(pr, g){ return (pr.calls || []).filter(function(id){ return groupOf(id) === g && CALL_DEFAULTS[id]; })[0] || null; }
+function identifyId(){ return presetCall(activePreset(), "identify") || "identify"; }
+
 /* show: full | collapsed | hidden for any slot id (missing means full).
-   Collapsed slots are still fetched and stored: practice needs them.
-   options: meaning_in  learner_language | target_language
-            example_length  short | long
-            explain_in  learner_language | target_language   (nuance) */
+   Collapsed slots are still fetched and stored: practice needs them. */
 var PRESET_DEFAULTS = {
-  beginner: {id:"beginner", label:"Beginner", calls:["identify","grammar","examples"], show:{},
-    options:{meaning_in:"learner_language", example_length:"short", explain_in:"learner_language"}},
-  advanced: {id:"advanced", label:"Advanced", calls:["identify","grammar","examples","nuance"],
-    show:{gender:"collapsed", plural:"collapsed", participle:"collapsed", splits:"collapsed",
-          meaning:"full", examples:"full", synonyms:"full"},
-    options:{meaning_in:"target_language", example_length:"long", explain_in:"learner_language"}}
+  beginner: {id:"beginner", label:"Beginner", calls:["identify","grammar","examples"], show:{}},
+  advanced: {id:"advanced", label:"Advanced", calls:["identify_de","grammar","examples_rich","nuance"],
+    show:{gender:"collapsed", plural:"collapsed", participle:"collapsed", splits:"collapsed"}}
 };
 var SHOW_MODES = ["full","collapsed","hidden"];
-var PRESET_OPTIONS = {
-  meaning_in:     {label:"Meaning in", values:{learner_language:"learner's language", target_language:"German (a short definition)"}},
-  example_length: {label:"Examples", values:{short:"short", long:"longer, more varied"}},
-  explain_in:     {label:"Nuance explained in", values:{learner_language:"learner's language", target_language:"German"}}
-};
+/* Presets saved by the previous build carried hidden options; turn them into
+   the variant they meant. */
+function normalisePreset(p){
+  p = JSON.parse(JSON.stringify(p));
+  var o = p.options || {};
+  if (o.meaning_in === "target_language") p.calls = p.calls.map(function(c){ return c === "identify" ? "identify_de" : c; });
+  if (o.example_length === "long") p.calls = p.calls.map(function(c){ return c === "examples" ? "examples_rich" : c; });
+  delete p.options;
+  p.calls = (p.calls || []).filter(function(c){ return CALL_DEFAULTS[c]; });
+  if (!presetCall(p, "identify")) p.calls.unshift("identify");
+  var seen = {};
+  p.calls = p.calls.filter(function(c){ var g = groupOf(c); if (seen[g]) return false; seen[g] = 1; return true; });
+  return p;
+}
 
 function callDef(id){
   var o = (load("calls", {}) || {})[id] || {};
@@ -1616,20 +1663,21 @@ function resetCallPrompt(id){
   if (cur.prompt !== undefined){ delete cur.prompt; cur.prompt_version = v + 1; }  // going back is also a change
   all[id] = cur; saveL("calls", all);
 }
-function presets(){ return Object.assign({}, PRESET_DEFAULTS, load("presetsPF", {}) || {}); }
+function presets(){
+  var all = Object.assign({}, PRESET_DEFAULTS, load("presetsPF", {}) || {});
+  Object.keys(all).forEach(function(k){ all[k] = normalisePreset(all[k]); });
+  return all;
+}
 function activePreset(){ var p = presets(); return p[load("pfpreset", "beginner")] || p.beginner; }
 
 function fillVars(tpl, v){ return tpl.replace(/\{\{(\w+)\}\}/g, function(m, k){ return k in v ? v[k] : m; }); }
-function presetOpt(k){ var o = activePreset().options || {}; return o[k] || PRESET_DEFAULTS.beginner.options[k]; }
 function callVars(P){
   var L = load("learnlang", "English"), lvl = load("level", "B1"), it = P.item || {};
   return { selection:P.about.term, sentence:P.about.sentence, context:P.about.context,
     learner_language:L, level:lvl, level_rule:levelRule(lvl),
-    meaning_language: presetOpt("meaning_in") === "target_language" ? "simple German (a short definition, not a translation)" : L,
-    explain_language: presetOpt("explain_in") === "target_language" ? "simple German" : L,
-    example_rule: presetOpt("example_length") === "long"
-      ? "Each 12 to 22 words, natural and clearly varied: different tenses, persons and sentence types (questions, subordinate clauses), not copies of the original sentence."
-      : "Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
+    // kept so prompts edited in the previous build still fill in
+    meaning_language:L, explain_language:L,
+    example_rule:"Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
     item:it.item || "", pos:it.pos || "", meaning:it.meaning || "" };
 }
 
@@ -1673,15 +1721,17 @@ async function runCall(P, id){
   P[key] = slotW(); paintProfile();
   var model = callModel(c);
   P.meta = P.meta || {};
-  P.meta[id] = {provider:c.provider, model:model, prompt_version:c.prompt_version, preset:activePreset().id};
+  var g = groupOf(id);
+  P.meta[g] = {call:id, provider:c.provider, model:model, prompt_version:c.prompt_version, preset:activePreset().id};
   var sent = fillVars(c.prompt, callVars(P));
-  P.sent = P.sent || {}; P.sent[id] = sent;
+  P.sent = P.sent || {}; P.sent[g] = sent;
+  if (g === "examples") P._exMiss = {};
   var r = prov ? await askAI(sent, {schema:c.schema, model:model, provider:c.provider})
                : {err:"no provider called '" + c.provider + "' is set up"};
   if (P !== PF || P.run !== PF_RUN) return false;
-  if (id !== "identify" && it !== P.item) return false;     // the item changed while we waited
+  if (g !== "identify" && it !== P.item) return false;      // the item changed while we waited
   P.times[key] = r.ms; if (r.mode) P.mode = r.mode;
-  P.meta[id].mode = r.mode;
+  P.meta[g].mode = r.mode;
   if (r.err){
     P[key] = slotF(r.err); say("  " + c.label + " failed: " + r.err);
     logMistake(logFromProfile(P.item || {}, P.about, P.meta, c.fills[0],
@@ -1693,16 +1743,16 @@ async function runCall(P, id){
     logMistake(logFromProfile(P.item || {}, P.about, P.meta, c.fills[0],
       {kind:"failed", slot:"", call:id, error:"not JSON: " + String(r.text).slice(0, 200)}));
     paintProfile(); return false; }
-  P[key] = slotV(CALL_VALUE[id](j));
-  var what = CALL_APPLY[id](P, j, it);
-  say("  " + c.label + " v" + c.prompt_version + " (" + model + "): " + (what ? what + ", " : "") + r.ms + "ms");
+  P[key] = slotV(CALL_VALUE[g](j));
+  var what = CALL_APPLY[g](P, j, it);
+  say("  " + callName(id) + " v" + c.prompt_version + " (" + model + "): " + (what ? what + ", " : "") + r.ms + "ms");
   paintProfile();
   return true;
 }
 
 async function runStage1(P){
   P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); paintProfile();
-  var ok = await runCall(P, "identify");
+  var ok = await runCall(P, identifyId());
   if (P !== PF) return;
   if (!ok){ P.s2a = P.s2b = P.s3 = slotF("waits on finding the item"); paintProfile(); return; }
   runStage2(P);
@@ -1719,11 +1769,12 @@ function locate(P){
 /* Everything after identify, side by side, as the preset says. */
 function runStage2(P){
   var t0 = Date.now();
-  var calls = activePreset().calls.filter(function(id){ return id !== "identify" && CALL_DEFAULTS[id]; });
-  Object.keys(CALL_DEFAULTS).forEach(function(id){
-    if (id === "identify" || calls.indexOf(id) >= 0) return;
-    var k = CALL_DEFAULTS[id].state;
-    if (!P[k] || P[k].state !== "done") P[k] = slotV(id === "examples" ? [] : {});   // not asked for: keep what is there
+  var pr = activePreset();
+  var calls = pr.calls.filter(function(id){ return groupOf(id) !== "identify" && CALL_DEFAULTS[id]; });
+  GROUPS.forEach(function(G){
+    if (G.id === "identify" || presetCall(pr, G.id)) return;
+    var k = CALL_DEFAULTS[variantsOf(G.id)[0]].state;
+    if (!P[k] || P[k].state !== "done") P[k] = slotV(G.id === "examples" ? [] : {});   // not asked for: keep what is there
   });
   Promise.all(calls.map(function(id){ return runCall(P, id); })).then(function(){
     if (P === PF) say("  all calls back " + (Date.now() - P.t0) + "ms after the click");
@@ -1735,23 +1786,23 @@ function runStage2(P){
    examples). Everything else stays; the panel re-lays out by the new show. */
 async function applyPresetToOpen(){
   var P = PF; if (!P || P.s1.state !== "done") { if (P) paintProfile(); return; }
-  var pr = activePreset(), v = callVars(P);
-  var differs = function(id){ return !P.sent || P.sent[id] !== fillVars(callDef(id).prompt, v); };
+  var pr = activePreset();
+  // a job is re-run when the preset now asks for it differently: another variant, or none yet
+  var differs = function(id){ return !P.sent || P.sent[groupOf(id)] !== fillVars(callDef(id).prompt, callVars(P)); };
   P.gen++;
-  if (pr.calls.indexOf("identify") >= 0 && differs("identify")){
-    say("  preset: finding the item again");
-    var before = P.item.item;
-    await runCall(P, "identify");
+  var idc = identifyId();
+  if (differs(idc)){
+    say("  preset: " + callName(idc));
+    await runCall(P, idc);
     if (P !== PF) return;
-    v = callVars(P);
   }
   var todo = pr.calls.filter(function(id){
-    if (id === "identify") return false;
+    var g = groupOf(id); if (g === "identify") return false;
     var st = P[CALL_DEFAULTS[id].state];
-    return !st || st.state !== "done" || differs(id) || (id !== "examples" && st.value && !Object.keys(st.value).length);
+    return !st || st.state !== "done" || differs(id);
   });
-  if (todo.length) say("  preset " + pr.id + ": running " + todo.join(", "));
-  else { say("  preset " + pr.id + ": nothing to re-run, only the layout changes"); paintProfile(); }
+  if (todo.length) say("  preset " + pr.label + ": running " + todo.map(callName).join(", "));
+  else { say("  preset " + pr.label + ": nothing to re-run, only the layout changes"); paintProfile(); }
   todo.forEach(function(id){ runCall(P, id); });
 }
 
@@ -1760,7 +1811,7 @@ async function rerunCall(id){
   if (!PF){ say("Open a profile first (select a word, press Profile)"); return; }
   var before = PF.item && PF.item.item;
   var ok = await runCall(PF, id);
-  if (ok && id === "identify" && PF.item.item !== before){
+  if (ok && groupOf(id) === "identify" && PF.item.item !== before){
     say("  the item changed, so the other calls run again too");
     runStage2(PF);
   }
@@ -1772,17 +1823,15 @@ function savePreset(pr){
 function paintPresetEditor(){
   var host = $("presetbody"); if (!host) return;
   var pr = JSON.parse(JSON.stringify(activePreset()));
-  pr.options = Object.assign({}, PRESET_DEFAULTS.beginner.options, pr.options || {});
   var custom = !!((load("presetsPF", {}) || {})[pr.id]);
-  var h = '<p style="margin:6px 0 3px"><b>Calls</b></p><div class="r" style="flex-wrap:wrap">'
-    + Object.keys(CALL_DEFAULTS).map(function(id){
-      return '<label style="font-size:12px"><input type="checkbox" data-pc="' + id + '"' + (pr.calls.indexOf(id) >= 0 ? " checked" : "")
-        + (id === "identify" ? " disabled" : "") + "> " + esc(CALL_DEFAULTS[id].label) + "</label>"; }).join("") + "</div>";
-  h += '<p style="margin:6px 0 3px"><b>Options</b></p>' + Object.keys(PRESET_OPTIONS).map(function(k){
-    var o = PRESET_OPTIONS[k];
-    return '<div class="r"><label class="inl">' + esc(o.label) + '</label><select data-po="' + k + '" style="flex:1">'
-      + Object.keys(o.values).map(function(v){ return '<option value="' + v + '"' + (pr.options[k] === v ? " selected" : "") + ">" + esc(o.values[v]) + "</option>"; }).join("")
-      + "</select></div>"; }).join("");
+  var h = '<p style="margin:6px 0 3px"><b>Which call does each job</b></p>' + GROUPS.map(function(G){
+    var cur = presetCall(pr, G.id);
+    return '<div class="r"><label class="inl" style="min-width:100px">' + esc(G.label) + "</label>"
+      + variantsOf(G.id).map(function(id){
+        var c = CALL_DEFAULTS[id];
+        return '<button class="lb sm' + (cur === id ? " on" : "") + '" data-pv="' + id + '" data-g="' + G.id + '">' + esc(c.variant || "on") + "</button>"; }).join("")
+      + (G.required ? "" : '<button class="lb sm' + (cur ? "" : " on") + '" data-pv="" data-g="' + G.id + '">off</button>')
+      + "</div>"; }).join("");
   h += '<p style="margin:6px 0 3px"><b>How each slot shows</b></p><div class="pshow">' + SLOT_DEFS.map(function(d){
     var m = (pr.show || {})[d.id] || "full";
     return '<div class="r"><label class="inl" style="min-width:100px">' + esc(d.label) + '</label>'
@@ -1792,13 +1841,12 @@ function paintPresetEditor(){
     + (custom ? '<button class="lb sm warn" id="preset0">' + (PRESET_DEFAULTS[pr.id] ? "Back to the original" : "Delete this preset") + "</button>" : "") + "</div>";
   host.innerHTML = h;
   function commit(msg){ savePreset(pr); say(msg); var open = $("presetedit").open; paintBench(); $("presetedit").open = open; applyPresetToOpen(); }
-  host.querySelectorAll("[data-pc]").forEach(function(c){ c.onchange = function(){
-    var id = c.dataset.pc; pr.calls = pr.calls.filter(function(x){ return x !== id; });
-    if (c.checked) pr.calls.push(id);
+  host.querySelectorAll("[data-pv]").forEach(function(b){ b.onclick = function(){
+    var g = b.dataset.g, id = b.dataset.pv;
+    pr.calls = pr.calls.filter(function(x){ return groupOf(x) !== g; });
+    if (id) pr.calls.push(id);
     pr.calls = Object.keys(CALL_DEFAULTS).filter(function(x){ return pr.calls.indexOf(x) >= 0; });
-    commit("Preset " + pr.id + ": " + id + (c.checked ? " on" : " off")); }; });
-  host.querySelectorAll("[data-po]").forEach(function(sel){ sel.onchange = function(){
-    pr.options[sel.dataset.po] = sel.value; commit("Preset " + pr.id + ": " + sel.dataset.po + " = " + sel.value); }; });
+    commit("Preset " + pr.label + ": " + g + " \u2192 " + (id ? callName(id) : "off")); }; });
   host.querySelectorAll("[data-ps]").forEach(function(b){ b.onclick = function(){
     pr.show = pr.show || {}; pr.show[b.dataset.ps] = b.dataset.m; commit("Preset " + pr.id + ": " + b.dataset.ps + " " + b.dataset.m); }; });
   $("pnew").onclick = function(){
@@ -1815,13 +1863,38 @@ function paintPresetEditor(){
     paintBench(); say("Preset " + pr.id + (PRESET_DEFAULTS[pr.id] ? " back to the original" : " deleted")); applyPresetToOpen();
   };
 }
+/* Every preset next to every other: which call each one uses for each job,
+   and which parts it folds or hides. Nothing about a preset is anywhere else. */
+function paintPresetTable(){
+  var host = $("presetcmp"); if (!host) return;
+  var ps = presets(), keys = Object.keys(ps), cur = activePreset().id;
+  var cell = function(t, dim){ return "<td" + (dim ? ' class="dim"' : "") + ">" + t + "</td>"; };
+  var rows = GROUPS.map(function(G){
+    var vals = keys.map(function(k){ var id = presetCall(ps[k], G.id); return id ? (CALL_DEFAULTS[id].variant || "on") + ' <small>v' + callDef(id).prompt_version + "</small>" : "off"; });
+    var same = vals.every(function(x){ return x === vals[0]; });
+    return "<tr" + (same ? "" : ' class="diff"') + "><th>" + esc(G.label) + "</th>" + vals.map(function(x){ return cell(x, x === "off"); }).join("") + "</tr>";
+  });
+  ["collapsed","hidden"].forEach(function(m){
+    var vals = keys.map(function(k){ var sh = ps[k].show || {};
+      var l = SLOT_DEFS.filter(function(d){ return sh[d.id] === m; }).map(function(d){ return d.label; });
+      return l.length ? esc(l.join(", ")) : "\u2014"; });
+    var same = vals.every(function(x){ return x === vals[0]; });
+    rows.push("<tr" + (same ? "" : ' class="diff"') + "><th>" + (m === "collapsed" ? "Folded" : "Hidden") + "</th>" + vals.map(function(x){ return cell(x, x === "\u2014"); }).join("") + "</tr>");
+  });
+  host.innerHTML = '<table class="pcmp"><tr><th></th>' + keys.map(function(k){
+    return "<th" + (k === cur ? ' class="cur"' : "") + ">" + esc(ps[k].label) + "</th>"; }).join("") + "</tr>" + rows.join("") + "</table>"
+    + '<p style="margin:3px 0 0">Rows in colour differ between presets.</p>';
+}
 function paintBench(){
   var host = $("benchcalls"); if (!host) return;
   var models = (load("aimodels", null) || KNOWN_MODELS).filter(function(n){ return !/tts|image|embed|audio|live/i.test(n); });
+  var ps = presets();
   host.innerHTML = Object.keys(CALL_DEFAULTS).map(function(id){
     var c = callDef(id), edited = ((load("calls", {}) || {})[id] || {}).prompt !== undefined;
-    return '<details class="bc" data-call="' + id + '"><summary><b>' + esc(c.label) + "</b> \u00b7 v" + c.prompt_version
-      + (edited ? " (edited)" : "") + " \u00b7 " + esc(c.provider) + " \u00b7 " + esc(callModel(c)) + (c.model ? "" : " (default)") + "</summary>"
+    var users = Object.keys(ps).filter(function(k){ return ps[k].calls.indexOf(id) >= 0; }).map(function(k){ return ps[k].label; });
+    return '<details class="bc" data-call="' + id + '"><summary><b>' + esc(c.label) + "</b>" + (c.variant ? " \u00b7 " + esc(c.variant) : "")
+      + " \u00b7 v" + c.prompt_version + (edited ? " (edited)" : "") + " \u00b7 " + esc(callModel(c)) + (c.model ? "" : " (default)")
+      + '<span class="bcu">' + (users.length ? "used by " + esc(users.join(", ")) : "not used by any preset") + "</span></summary>"
       + '<div class="r"><label class="inl">Model</label><select class="bcm" style="flex:1">'
       + '<option value="">the default model above</option>'
       + models.map(function(m){ return '<option value="' + esc(m) + '"' + (m === c.model ? " selected" : "") + ">" + esc(m) + "</option>"; }).join("")
@@ -1829,7 +1902,7 @@ function paintBench(){
       + "</select></div>"
       + '<p style="margin:4px 0">Fills: ' + esc(c.fills.join(", ")) + "</p>"
       + '<textarea class="bcp" spellcheck="false">' + esc(c.prompt) + "</textarea>"
-      + '<p style="margin:3px 0">{{selection}} {{sentence}} {{context}} {{learner_language}} {{meaning_language}} {{explain_language}} {{example_rule}} {{level}} {{level_rule}} {{item}} {{pos}} {{meaning}}</p>'
+      + '<p style="margin:3px 0">{{selection}} {{sentence}} {{context}} {{learner_language}} {{level}} {{level_rule}} {{item}} {{pos}} {{meaning}}</p>'
       + '<div class="r"><button class="lb sm bcs">Save prompt</button>'
       + '<button class="lb sm warn bcr">Back to the original</button>'
       + '<button class="lb sm bcx">Re-run on the open item</button></div></details>';
@@ -1848,6 +1921,7 @@ function paintBench(){
   $("benchpreset").querySelectorAll("[data-p]").forEach(function(b){
     b.onclick = function(){ saveL("pfpreset", b.dataset.p); paintBench(); say("Preset: " + b.dataset.p); applyPresetToOpen(); }; });
   paintPresetEditor();
+  paintPresetTable();
   $("benchslots").textContent = SLOT_DEFS.map(function(s){
     return s.label + (s.kind !== "ai" ? " (" + s.kind + ")" : "") + (s.applies_to ? " [" + s.applies_to.join("/") + "]" : ""); }).join(" \u00b7 ");
 }
@@ -1890,7 +1964,7 @@ function startProfile(label){
   PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: ttEl ? ttEl.getBoundingClientRect() : null,
     item: {item:a.term, on_page:[a.term], added:[], companions:[], pos:"", meaning:""},
     s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), alts: [], altsOpen: false,
-    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: callModel(callDef("identify")) };
+    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: callModel(callDef(identifyId())) };
   labHide();
   paintProfile();
   say("Profile: " + a.term + " \u2014 stage 1");
@@ -2090,6 +2164,50 @@ function pfOnPage(v, live){
 function registerWords(r){
   return {informal:"casual speech", neutral:"everyday speech", formal:"formal speech"}[r] || (r ? r + " speech" : "");
 }
+/* Blank the item out of an example. The model says which words are the item
+   (pieces, exact text); they are found here, in order. If one is not found the
+   sentence is shown whole, never dropped, and the miss is logged. */
+function pfBlanking(){ return !!load("pfblank", false); }
+function findInSentence(text, pc, from){
+  var q = pc.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  var tries = [new RegExp("(^|[^\\p{L}])(" + q + ")(?![\\p{L}])", "gu"), new RegExp("(^|[^\\p{L}])(" + q + ")(?![\\p{L}])", "giu")];
+  for (var t=0; t<2; t++){
+    var re = tries[t]; re.lastIndex = from; var m = re.exec(text);
+    if (m) { var st = m.index + m[1].length; return [st, st + m[2].length]; }
+  }
+  return null;
+}
+function pfExampleHTML(e, live, i){
+  if (!pfBlanking()) return pfBold(e.text);
+  var plain = String(e.text || "").replace(/\*\*/g, "");
+  var pcs = (e.pieces && e.pieces.length) ? e.pieces
+          : (String(e.text || "").match(/\*\*(.+?)\*\*/g) || []).map(function(x){ return x.slice(2, -2); });
+  var spans = [], from = 0, miss = [];
+  pcs.forEach(function(pc){
+    pc = String(pc || "").trim(); if (!pc) return;
+    var f = findInSentence(plain, pc, from);
+    if (f){ spans.push(f); from = f[1]; } else miss.push(pc);
+  });
+  if (!spans.length || miss.length){
+    if (live){
+      live._exMiss = live._exMiss || {};
+      if (!live._exMiss[i]){
+        live._exMiss[i] = 1;
+        logMistake(logFromProfile(live.item || {}, live.about, live.meta, "examples",
+          {kind:"piece_missing", said:plain, error: pcs.length ? "not found in the sentence: " + miss.join(", ") : "no pieces returned"}));
+        say("  example " + (i + 1) + " shown whole: " + (pcs.length ? "could not find " + miss.join(", ") : "no pieces came back"));
+      }
+    }
+    return pfBold(e.text);
+  }
+  var h = "", at = 0;
+  spans.forEach(function(sp){
+    h += esc(plain.slice(at, sp[0]))
+      + '<span class="pf-blank" tabindex="0" role="button" aria-label="hidden word, press to show">' + esc(plain.slice(sp[0], sp[1])) + "</span>";
+    at = sp[1];
+  });
+  return h + esc(plain.slice(at));
+}
 function pfBold(t){ return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
 function pfFacts(v){
   var f = [];
@@ -2138,8 +2256,9 @@ function pfFillSlot(card, slot, v, anim, live){
       li.hidden = false;
       li.querySelector(".pf-tr").textContent = e.tr || "";
       var el = li.querySelector(".pf-t");
-      if (!anim || pfReduced()) pfFillPiece(el, pfBold(e.text), false, 0);
-      else setTimeout(function(){ pfFillPiece(el, pfBold(e.text), true, 0); }, i * 350);
+      var html = pfExampleHTML(e, live, i);
+      if (!anim || pfReduced()) pfFillPiece(el, html, false, 0);
+      else setTimeout(function(){ pfFillPiece(el, html, true, 0); }, i * 350);
     });
   }
   if (slot === "nuance"){
@@ -2217,6 +2336,7 @@ function pfControls(card, v, live, note){
       + (n ? '<button class="pf-link warn" id="pfremove">Remove</button>' : "")
       + (note ? '<button class="pf-link" id="aicopy">Copy</button>' : "")
       + '<label><input type="checkbox" id="aimark"' + (marked ? " checked" : "") + (live && live.removed ? " disabled" : "") + "> mark it in the text</label>"
+      + ((v.examples || []).length ? '<button class="pf-link" id="pfblank">' + (pfBlanking() ? "show the item" : "blank the item") + "</button>" : "")
       + '<span class="pf-time">' + (live
           ? esc(live.model) + (live.mode ? " \u00b7 " + esc(live.mode) : "")
             + (live.times.s1 ? " \u00b7 " + live.times.s1 : "") + (live.times.s2a ? " / " + live.times.s2a : "")
@@ -2250,6 +2370,14 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
     pfPlace(box, anchor);
     var cd = box.querySelector(".pf-card");
     cd.addEventListener("scroll", function(){ pfMore(cd); }, {passive:true});
+    cd.addEventListener("click", function(e){
+      var bl = e.target.closest && e.target.closest(".pf-blank");
+      if (!bl) return; e.stopPropagation(); bl.classList.toggle("show");
+    }, true);
+    cd.addEventListener("keydown", function(e){
+      var bl = e.target.closest && e.target.closest(".pf-blank");
+      if (bl && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); e.stopPropagation(); bl.classList.toggle("show"); }
+    }, true);
     if (!instant) pfDoodle(box.querySelector(".pf-card"), live);
     else { var l = box.querySelector(".pf-loader"); if (l) l.classList.add("off"); }
   }
@@ -2284,11 +2412,11 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
 function pfApplyShow(card, v){
   var pr = activePreset(), show = pr.show || {};
   var byCall = {};
-  Object.keys(CALL_DEFAULTS).forEach(function(id){ CALL_DEFAULTS[id].fills.forEach(function(f){ byCall[f] = id; }); });
+  Object.keys(CALL_DEFAULTS).forEach(function(id){ CALL_DEFAULTS[id].fills.forEach(function(f){ byCall[f] = groupOf(id); }); });
   card.querySelectorAll("[data-slot]").forEach(function(el){
-    var slot = el.dataset.slot, call = byCall[slot];
+    var slot = el.dataset.slot, g = byCall[slot];
     var mode = show[slot] || "full";
-    if (call && pr.calls.indexOf(call) < 0) mode = "hidden";
+    if (g && !presetCall(pr, g)) mode = "hidden";
     el.classList.toggle("pf-hide", mode === "hidden");
     var cz = mode === "collapsed";
     if (cz && !el.classList.contains("pf-cz")){
@@ -2300,7 +2428,7 @@ function pfApplyShow(card, v){
     }
     if (!cz && el.classList.contains("pf-cz")){ el.classList.remove("pf-cz", "pf-open"); el.onclick = null; }
   });
-  var nuOn = pr.calls.indexOf("nuance") >= 0;
+  var nuOn = !!presetCall(pr, "nuance");
   card.querySelectorAll('.pf-nu, [data-sec="nuance"]').forEach(function(x){ if (!nuOn) x.hidden = true; });
 }
 function pfMore(card){
@@ -2338,6 +2466,13 @@ function pfWire(box, v, live, note){
     say("Profile removed: " + (v.item || n.term)); labPaint(); paintNotesCount();
     if (live){ live.noteId = null; live.saved = false; live.removed = true; pfControls(card, v, live, null); pfWire(box, v, live, null); }
     else { box.className = ""; box.dataset.pfkey = ""; }
+  };
+  var bk = $("pfblank");
+  if (bk) bk.onclick = function(){
+    saveL("pfblank", !pfBlanking());
+    say("Examples: item " + (pfBlanking() ? "blanked" : "shown"));
+    pfFillSlot(card, "ex", v, false, live);
+    pfControls(card, v, live, note); pfWire(box, v, live, note); pfMore(card);
   };
   var cp = $("aicopy");
   if (cp) cp.onclick = function(){
