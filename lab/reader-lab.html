@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-17b (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-17c (Contractor 12).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -509,6 +509,12 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labai .pf-lq .pf-sw b{font:600 16px var(--pfg);color:var(--hw)}
   #labai .pf-hc .pf-nu small{font:400 14px var(--pfh)}
   #labai .pf-hide{display:none!important}
+  #labai .pf-links{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:12px;font:12px var(--pfui)}
+  #labai .pf-lg{display:inline-flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+  #labai .pf-lg small{font:11px var(--pfui);opacity:.7}
+  #labai .pf-links a{color:inherit;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+  #labai .pf-lq .pf-links,#labai .pf-lq .pf-links a{color:var(--acc)}
+  #labai .pf-center .pf-links{justify-content:center}
   #labai .pf-blank{color:transparent!important;border-radius:3px;cursor:pointer;
     background:rgba(127,127,127,.14);box-shadow:inset 0 -1.5px 0 rgba(127,127,127,.55);padding:0 .15em}
   #labai .pf-blank *{color:transparent!important}
@@ -645,6 +651,8 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div id="presetcmp" style="overflow-x:auto"></div>
     <details id="presetedit" class="bc"><summary>Edit this preset</summary><div id="presetbody"></div></details>
     <div id="benchcalls"></div>
+    <details class="bc"><summary><b>Links</b> \u00b7 services a link slot can open</summary>
+      <div id="linkedit"></div></details>
     <p style="margin-top:8px"><b>Slots:</b> <span id="benchslots"></span></p>
     <h3 style="margin-top:14px">Mistake log</h3>
     <p>Hover any part of a profile panel and press ⚑ to flag it. Failed calls and
@@ -1525,9 +1533,32 @@ var SLOT_DEFS = [
   {id:"collocations", label:"Goes with",        kind:"ai"},
   {id:"connotation",  label:"Feel",             kind:"ai"},
   {id:"region",       label:"Where",            kind:"ai"},
+  {id:"links",        label:"Links",            kind:"link"},
   {id:"audio",        label:"Audio",            kind:"empty"}
 ];
 
+/* Link services. No AI: each is a web address with the item put in. Adding
+   one is one more line here, or one form in the bench (kept in this browser).
+   {{item}} is the dictionary form; {{word}} is the same without a leading
+   "sich", which is what dictionaries file reflexive verbs under. */
+var LINK_DEFAULTS = [
+  {id:"youglish",   label:"YouGlish",   group:"Hear it",  url:"https://youglish.com/pronounce/{{item}}/german", on:true},
+  {id:"forvo",      label:"Forvo",      group:"Hear it",  url:"https://forvo.com/word/{{word}}/#de", on:true},
+  {id:"dwds",       label:"DWDS",       group:"Look it up", url:"https://www.dwds.de/wb/{{word}}", on:true},
+  {id:"wiktionary", label:"Wiktionary", group:"Look it up", url:"https://de.wiktionary.org/wiki/{{word}}", on:true},
+  {id:"duden",      label:"Duden",      group:"Look it up", url:"https://www.duden.de/suchen/dudenonline/{{word}}", on:false}
+];
+function linkServices(){
+  var saved = load("links", null);
+  if (!saved) return LINK_DEFAULTS.map(function(x){ return Object.assign({}, x); });
+  var ids = saved.map(function(x){ return x.id; });
+  LINK_DEFAULTS.forEach(function(d){ if (ids.indexOf(d.id) < 0) saved.push(Object.assign({}, d)); });  // new defaults appear
+  return saved;
+}
+function linkURL(svc, item){
+  var it = String(item || "").trim(), w = it.replace(/^sich\s+/i, "");
+  return svc.url.replace(/\{\{item\}\}/g, encodeURIComponent(it)).replace(/\{\{word\}\}/g, encodeURIComponent(w));
+}
 var PROVIDERS = {
   gemini: {label:"Google Gemini", ask: function(prompt, gc, model){ return askAIOnce(prompt, gc, model); }}
 };
@@ -1571,13 +1602,14 @@ var CALL_DEFAULTS = {
 + "Answer with JSON only."},
   examples: {id:"examples", group:"examples", label:"Examples", variant:"simple", state:"s2b", schema:SCHEMA2B,
     fills:["examples"],
-    provider:"gemini", model:"", prompt_version:3, prompt:
+    provider:"gemini", model:"", prompt_version:4, prompt:
 "Write 4 German example sentences using \"{{item}}\" with exactly this meaning: \"{{meaning}}\".\n"
 + "It was met in: \"{{sentence}}\"\n"
 + "Level {{level}}. Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
 + "For each, give `text` (German) and `tr` (translation into {{learner_language}}).\n"
 + "In `text`, wrap each word that belongs to the item in double asterisks, e.g. Wann **stehst** du **auf**?\n"
-+ "Also give `pieces`: the words of the item exactly as they are written in that sentence, in order (for Wann stehst du auf? that is [\"stehst\", \"auf\"]).\n\n"
++ "Also give `pieces`: ONLY the words that are forms of the item itself, exactly as written in that sentence, in order (for Wann stehst du auf? that is [\"stehst\", \"auf\"]). "
++ "Never include the words the item describes, modifies or goes with: for an adjective, only the adjective (for \"groß\" in mit großer Wahrscheinlichkeit: [\"großer\"]); for a noun, not its article; for a verb, not its object.\n\n"
 + "Answer with JSON only."},
   nuance: {id:"nuance", group:"nuance", label:"Nuance", variant:"", state:"s3", schema:SCHEMA_NU,
     fills:["synonyms","collocations","connotation","region"],
@@ -1602,7 +1634,7 @@ var CALL_DEFAULTS = {
   var de = Object.assign({}, id, {id:"identify_de", variant:"meaning as a German definition", prompt_version:1,
     prompt: id.prompt.replace("- meaning: the meaning in this context, in {{learner_language}}, a few words.",
       "- meaning: a short, simple GERMAN definition of the meaning in this context (not a translation), under 12 words.")});
-  var rich = Object.assign({}, ex, {id:"examples_rich", variant:"rich", prompt_version:1,
+  var rich = Object.assign({}, ex, {id:"examples_rich", variant:"rich", prompt_version:2,
     prompt: ex.prompt.replace("Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
       "Each 12 to 22 words, natural and clearly varied: different tenses, persons and sentence types (questions, subordinate clauses), not copies of the original sentence.")});
   if (de.prompt === id.prompt || rich.prompt === ex.prompt) console.warn("[lab] a variant prompt did not change");
@@ -1885,6 +1917,32 @@ function paintPresetTable(){
     return "<th" + (k === cur ? ' class="cur"' : "") + ">" + esc(ps[k].label) + "</th>"; }).join("") + "</tr>" + rows.join("") + "</table>"
     + '<p style="margin:3px 0 0">Rows in colour differ between presets.</p>';
 }
+function paintLinkEditor(){
+  var host = $("linkedit"); if (!host) return;
+  var list = linkServices();
+  host.innerHTML = list.map(function(x, i){
+    return '<div class="r"><label style="font-size:12px;min-width:120px"><input type="checkbox" data-lk="' + i + '"' + (x.on ? " checked" : "") + "> "
+      + esc(x.label) + '</label><small style="flex:1;color:#9b9e96;overflow-wrap:anywhere">' + esc(x.group || "") + " \u00b7 " + esc(x.url) + "</small>"
+      + (LINK_DEFAULTS.some(function(d){ return d.id === x.id; }) ? "" : '<button class="lb sm warn" data-lkdel="' + i + '">remove</button>') + "</div>";
+  }).join("")
+  + '<div class="r" style="margin-top:6px"><input type="text" id="lkname" placeholder="name" style="width:90px">'
+  + '<input type="text" id="lkgroup" placeholder="heading" style="width:90px">'
+  + '<input type="text" id="lkurl" placeholder="https://\u2026{{word}}\u2026" style="flex:1"><button class="lb sm" id="lkadd">Add</button></div>'
+  + '<p style="margin:3px 0">{{item}} is the dictionary form; {{word}} drops a leading \u201csich\u201d.</p>';
+  function save(l){ saveL("links", l); paintLinkEditor(); var d = host.closest("details"); if (d) d.open = true;
+    if (PF) { var c = $("labai").querySelector(".pf-card"); if (c) pfLinks(c, profileSnapshot(PF)); } }
+  host.querySelectorAll("[data-lk]").forEach(function(c){ c.onchange = function(){
+    var l = linkServices(); l[+c.dataset.lk].on = c.checked; save(l); say("Link " + l[+c.dataset.lk].label + (c.checked ? " on" : " off")); }; });
+  host.querySelectorAll("[data-lkdel]").forEach(function(b){ b.onclick = function(){
+    var l = linkServices(); var gone = l.splice(+b.dataset.lkdel, 1)[0]; save(l); say("Link removed: " + gone.label); }; });
+  $("lkadd").onclick = function(){
+    var name = $("lkname").value.trim(), url = $("lkurl").value.trim();
+    if (!name || !/^https?:\/\//.test(url) || !/\{\{(item|word)\}\}/.test(url)){ say("A link needs a name and an address starting with http that contains {{item}} or {{word}}"); return; }
+    var l = linkServices();
+    l.push({id:"c" + Date.now().toString(36), label:name, group:$("lkgroup").value.trim() || "Links", url:url, on:true});
+    save(l); say("Link added: " + name);
+  };
+}
 function paintBench(){
   var host = $("benchcalls"); if (!host) return;
   var models = (load("aimodels", null) || KNOWN_MODELS).filter(function(n){ return !/tts|image|embed|audio|live/i.test(n); });
@@ -1922,6 +1980,7 @@ function paintBench(){
     b.onclick = function(){ saveL("pfpreset", b.dataset.p); paintBench(); say("Preset: " + b.dataset.p); applyPresetToOpen(); }; });
   paintPresetEditor();
   paintPresetTable();
+  paintLinkEditor();
   $("benchslots").textContent = SLOT_DEFS.map(function(s){
     return s.label + (s.kind !== "ai" ? " (" + s.kind + ")" : "") + (s.applies_to ? " [" + s.applies_to.join("/") + "]" : ""); }).join(" \u00b7 ");
 }
@@ -2102,6 +2161,7 @@ function pfSkeleton(look){
             + '<div class="pf-con" data-slot="connotation" hidden>' + pfPiece("nuance","con","8em") + "</div>"
             + '<div class="pf-rgn" data-slot="region" hidden>' + pfPiece("nuance","rgn","8em") + "</div>"
             + '</div><div class="pf-fail" data-fail="nuance" hidden></div>';
+  var links = '<div class="pf-links" data-slot="links" hidden></div>';
   var sig  = "";
   var tools = '<div class="pf-tools"></div><div class="pf-fade"></div>';
   var top  = '<button class="pf-x" data-pf="close" aria-label="Close">\u00d7</button>';
@@ -2109,7 +2169,7 @@ function pfSkeleton(look){
     return '<div class="pf-card pf-lq pf-' + look.style + " pf-f-" + look.frame + (look.align === "center" ? " pf-center" : "")
       + '" data-fam="lacq"><div class="pf-frame"></div>' + top
       + fail1 + onp + hw + row + extra + '<div class="pf-gap"></div>' + mean + '<div class="pf-gap"></div>'
-      + ex + nuance + facts + sig + tools + "</div>";
+      + ex + nuance + facts + links + sig + tools + "</div>";
   return '<div class="pf-card pf-hc" data-fam="hand">' + top
     + '<div class="pf-loader"><svg viewBox="0 0 130 120" filter="url(#pf-rough)"></svg><div class="pf-cap"></div></div>'
     + fail1
@@ -2117,7 +2177,7 @@ function pfSkeleton(look){
     + '<div class="pf-sec pending" data-sec="item">' + mean + "</div>" + PF_WAVE
     + '<div class="pf-sec pending" data-sec="ex">' + ex + "</div>" + PF_WAVE
     + '<div class="pf-sec pending" data-sec="nuance">' + nuance + "</div>"
-    + '<div class="pf-sec pending" data-sec="grammar">' + facts + "</div>"
+    + '<div class="pf-sec pending" data-sec="grammar">' + facts + "</div>" + links
     + tools + "</div>";
 }
 
@@ -2177,11 +2237,49 @@ function findInSentence(text, pc, from){
   }
   return null;
 }
-function pfExampleHTML(e, live, i){
+/* A second check on the model's pieces. The item can only show up as so many
+   words (one per word of the item, plus a separable prefix for a verb, plus
+   the pronoun of a reflexive). If the model gave more, keep only the ones that
+   look like a form of the item (share at least three letters in a row) and log
+   what was dropped. An adjective's noun is the case this was written for. */
+function foldDE(t){ return String(t || "").toLowerCase().replace(/ß/g, "ss").replace(/ä/g, "a").replace(/ö/g, "o").replace(/ü/g, "u"); }
+function sharesRun(a, b, n){
+  a = foldDE(a); b = foldDE(b);
+  if (a.length < n || b.length < n) return a === b || a.indexOf(b) >= 0 || b.indexOf(a) >= 0;
+  for (var i = 0; i + n <= a.length; i++) if (b.indexOf(a.substr(i, n)) >= 0) return true;
+  return false;
+}
+function trimPieces(pcs, item, pos){
+  var words = String(item || "").split(/\s+/).filter(Boolean);
+  var refl = words[0] && foldDE(words[0]) === "sich";
+  var core = refl ? words.slice(1) : words;
+  var room = core.length + (/^\s*verb\s*$/i.test(pos || "") ? 1 : 0) + (refl ? 1 : 0);
+  if (pcs.length <= room) return {keep:pcs, drop:[]};
+  var PRON = ["mich","dich","sich","uns","euch","mir","dir"];
+  var keep = [], drop = [];
+  pcs.forEach(function(pc){
+    var ok = core.some(function(w){ return sharesRun(pc, w, 3); }) || (refl && PRON.indexOf(foldDE(pc)) >= 0);
+    (ok ? keep : drop).push(pc);
+  });
+  return keep.length ? {keep:keep, drop:drop} : {keep:pcs, drop:[]};
+}
+function pfExampleHTML(e, live, i, v){
   if (!pfBlanking()) return pfBold(e.text);
   var plain = String(e.text || "").replace(/\*\*/g, "");
   var pcs = (e.pieces && e.pieces.length) ? e.pieces
           : (String(e.text || "").match(/\*\*(.+?)\*\*/g) || []).map(function(x){ return x.slice(2, -2); });
+  var src = v || (live && live.item) || {};
+  var tr = trimPieces(pcs, src.item, src.pos);
+  if (tr.drop.length && live){
+    live._exTrim = live._exTrim || {};
+    if (!live._exTrim[i]){
+      live._exTrim[i] = 1;
+      logMistake(logFromProfile(live.item || {}, live.about, live.meta, "examples",
+        {kind:"piece_trimmed", said:plain, error:"dropped from the blank: " + tr.drop.join(", ")}));
+      say("  example " + (i + 1) + ": not blanking " + tr.drop.join(", ") + " (not part of the item)");
+    }
+  }
+  pcs = tr.keep;
   var spans = [], from = 0, miss = [];
   pcs.forEach(function(pc){
     pc = String(pc || "").trim(); if (!pc) return;
@@ -2232,6 +2330,7 @@ function pfFillSlot(card, slot, v, anim, live){
     put("pos", esc(v.pos || ""));
     put("mean", esc(v.meaning || ""));
     card.querySelector(".pf-play").classList.remove("ld");
+    pfLinks(card, v);
     var ld = card.querySelector(".pf-loader"); if (ld) ld.classList.add("corner");
   }
   if (slot === "grammar"){
@@ -2256,7 +2355,7 @@ function pfFillSlot(card, slot, v, anim, live){
       li.hidden = false;
       li.querySelector(".pf-tr").textContent = e.tr || "";
       var el = li.querySelector(".pf-t");
-      var html = pfExampleHTML(e, live, i);
+      var html = pfExampleHTML(e, live, i, v);
       if (!anim || pfReduced()) pfFillPiece(el, html, false, 0);
       else setTimeout(function(){ pfFillPiece(el, html, true, 0); }, i * 350);
     });
@@ -2391,6 +2490,7 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
   });
   // on-page line can change without the slot changing (a companion added)
   if (shown.item === "done"){
+    pfLinks(card, v);
     var op = card.querySelector('.pf-t[data-k="onp"]');
     if (op && !op.querySelector(".pf-ch")) op.innerHTML = pfOnPage(v, live);
   }
@@ -2430,6 +2530,18 @@ function pfApplyShow(card, v){
   });
   var nuOn = !!presetCall(pr, "nuance");
   card.querySelectorAll('.pf-nu, [data-sec="nuance"]').forEach(function(x){ if (!nuOn) x.hidden = true; });
+}
+function pfLinks(card, v){
+  var el = card.querySelector(".pf-links"); if (!el) return;
+  var on = linkServices().filter(function(x){ return x.on; });
+  if (!v.item || !on.length){ el.hidden = true; el.innerHTML = ""; return; }
+  var groups = {};
+  on.forEach(function(x){ (groups[x.group || "Links"] = groups[x.group || "Links"] || []).push(x); });
+  el.innerHTML = Object.keys(groups).map(function(g){
+    return '<span class="pf-lg"><small>' + esc(g) + "</small>" + groups[g].map(function(x){
+      return '<a href="' + esc(linkURL(x, v.item)) + '" target="_blank" rel="noopener">' + esc(x.label) + "</a>"; }).join("") + "</span>";
+  }).join("");
+  el.hidden = false;
 }
 function pfMore(card){
   card.classList.toggle("pf-more", card.scrollHeight - card.scrollTop - card.clientHeight > 6);
