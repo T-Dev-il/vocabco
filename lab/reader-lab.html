@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-18a (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-18b (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -586,6 +586,10 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <span style="font-size:11.5px;color:#6B7178">Add and Profile bounce past a sentence end</span></div>
     <div class="r"><label class="inl">Last selection</label>
       <span id="measline" style="font-size:11.5px;color:#1B1E21">nothing selected yet</span></div>
+    <div class="r"><label class="inl">Routing seen</label>
+      <span id="routesum" style="font-size:11.5px;color:#1B1E21">nothing yet</span></div>
+    <div class="r"><button class="lb sm" id="routecopy">Copy the routing log</button>
+      <button class="lb sm warn" id="routeclear">Clear it</button></div>
     <div class="r" style="margin-top:6px"><button class="lb sm" id="segrun">Run</button>
       <button class="lb sm" id="segcopy">Copy result</button>
       <button class="lb sm warn" id="segreset">Back to Socrates' 23</button></div>
@@ -1560,6 +1564,8 @@ function bounceNotItem(m, anchor){
     + '<br><br><span style="color:#8b9099">' + esc(measureLine(m)) + "</span>",
     false, anchor || null);
   say("Bounced, no call sent \u2014 " + measureLine(m));
+  if (typeof routeSeen === "function")
+    routeSeen({W:m.W, E:m.E, S:m.S, items:0, bounced:true, term:(typeof heldTerm === "function" ? heldTerm() : "")});
 }
 function segRaw(text, lang){
   var sg = new Intl.Segmenter(lang || "de", {granularity:"sentence"});
@@ -1591,8 +1597,12 @@ var SCHEMA1 = (function(){
     pos:{type:"STRING"}, meaning:{type:"STRING"},
     kind:{type:"STRING", enum:["same_meaning","different_meaning"]}},
     required:["item","on_page","pos","meaning"]};
+  // items: the labelling of item-resolution-brief.md §3. The AI says which
+  // selected words belong to which lexical item; plain code counts them.
+  var labelled = {type:"OBJECT", properties:{item:{type:"STRING"}, words:arr}, required:["item","words"]};
   return {type:"OBJECT", properties:{best:reading, alternatives:{type:"ARRAY", items:reading},
-    selection_ok:{type:"BOOLEAN"}}, required:["best","alternatives","selection_ok"]};
+    items:{type:"ARRAY", items:labelled}, selection_ok:{type:"BOOLEAN"}},
+    required:["best","alternatives","items","selection_ok"]};
 })();
 var SCHEMA2A = {type:"OBJECT", properties:{
   gender:{type:"STRING", nullable:true}, plural:{type:"STRING", nullable:true},
@@ -1681,7 +1691,7 @@ var PROVIDERS = {
 var CALL_DEFAULTS = {
   identify: {id:"identify", group:"identify", label:"Find the item", variant:"meaning as a translation", state:"s1", schema:SCHEMA1,
     fills:["item","pieces","pos","meaning","alternatives","companions"],
-    provider:"gemini", model:"", prompt_version:2, prompt:
+    provider:"gemini", model:"", prompt_version:3, prompt:
 "A learner of German selected part of a German text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
 + "Selected: \"{{selection}}\"\nSentence: \"{{sentence}}\"\nWider context: \"{{context}}\"\n"
 + "Learner's language: {{learner_language}}. Level: {{level}}.\n\n"
@@ -1696,6 +1706,10 @@ var CALL_DEFAULTS = {
 + "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ. "
 + "{{level_rule}} Give an empty list when the reading is clear.\n"
 + "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
++ "`items`: label the SELECTION. One entry per distinct lexical item that the selected words belong to, with `words` = the selected words belonging to it, exactly as written. "
++ "Count only words the learner actually selected: not a prefix or a pronoun you added, and not companions. "
++ "A function word that is part of an item (an article with a noun, a preposition inside an idiom) belongs to that item, not to an entry of its own. "
++ "One ordinary word selected gives exactly one entry.\n\n"
 + "Answer with JSON only."},
   grammar: {id:"grammar", group:"grammar", label:"Grammar", variant:"", state:"s2a", schema:SCHEMA2A,
     fills:["gender","plural","participle","splits","register","note","ipa","gloss"],
@@ -1840,8 +1854,15 @@ var CALL_APPLY = {
     if (!j.selection_ok && P.item.item.toLowerCase() !== P.about.term.toLowerCase())
       P.alts.push({item: P.about.term, on_page: P.about.term.split(/\s+/), kind: "different_meaning",
         pos: "", meaning: "", mine: true});
+    // The count, in plain code (item-resolution-brief.md §3). One or two items
+    // carry on; more than two bounce in runStage1.
+    P.labels = (j.items || []).filter(function(x){ return x && (x.words || []).length; });
+    P.itemCount = P.labels.length;
     locate(P);
-    return P.item.item + " (" + P.item.pos + ")" + (P.alts.length ? ", " + P.alts.length + " other option(s)" : "");
+    routeNote(P);
+    return P.item.item + " (" + P.item.pos + ")"
+      + (P.itemCount ? ", " + P.itemCount + " item" + (P.itemCount > 1 ? "s" : "") + " in the selection" : "")
+      + (P.alts.length ? ", " + P.alts.length + " other option(s)" : "");
   },
   grammar: function(P, j, it){
     if (!it.meaning && j.meaning) it.meaning = j.meaning;
@@ -1902,9 +1923,38 @@ async function runStage1(P){
   var ok = await runCall(P, identifyId());
   if (P !== PF) return;
   if (!ok){ P.s2a = P.s2b = P.s3 = slotF("waits on finding the item"); paintProfile(); return; }
+  if (P.itemCount > 2){ bounceTooMany(P); return; }
   runStage2(P);
 }
 
+/* The bounce after a call: the AI labelled more than two items in the
+   selection, so nothing is saved and no list of items is offered — the learner
+   selects again. (item-resolution-brief.md §3 and §5) */
+function bounceTooMany(P){
+  var anchor = P.anchor || null, n = P.itemCount;
+  var names = P.labels.map(function(x){ return x.item; }).filter(Boolean);
+  PF = null; labPaint();
+  showAI("Too many parts",
+    "This selection holds " + n + " separate lexical items, so it cannot be saved as one."
+    + '<br><br><span style="color:#8b9099">Select the one you want.</span>',
+    false, anchor);
+  say("Bounced after the call \u2014 " + n + " items: " + names.join(", "));
+  routeSeen({W:(P.about.term.match(/[\p{L}\p{N}'\u2019-]+/gu)||[]).length, items:n, term:P.about.term, bounced:true});
+}
+/* What the routing decided, against what the call decided. Kept so the
+   developer's questions in selection-routing-brief.md §9 can be answered from
+   real use rather than guessed. */
+function routeSeen(rec){
+  var L = load("routelog", []) || [];
+  L.unshift({when:Date.now(), W:rec.W, E:rec.E || 0, S:rec.S || 1, items:rec.items,
+             bounced:!!rec.bounced, term:String(rec.term || "").slice(0, 60)});
+  if (L.length > 200) L.pop();
+  saveL("routelog", L); paintRoute();
+}
+function routeNote(P){
+  var m = P.about && P.about.meas;
+  routeSeen({W:(m ? m.W : 0), E:(m ? m.E : 0), S:(m ? m.S : 1), items:P.itemCount, term:P.about.term});
+}
 function locate(P){
   var f = findPieces(P.about, P.item.on_page);
   P.ranges = f.ranges.length ? f.ranges : P.about.ranges;
@@ -2131,7 +2181,7 @@ function startProfile(label){
   if (GATE_ON && !meas.item){ bounceNotItem(meas, ttEl ? ttEl.getBoundingClientRect() : null); return; }
   var s0 = rs[0].start, e0 = rs[rs.length-1].end;
   var bounds = sentenceBounds(b, s0, e0);
-  var a = { term: heldTerm(), textId: ui.readerTextId,
+  var a = { term: heldTerm(), textId: ui.readerTextId, meas: meas,
     ranges: rs.map(function(x){ return {start:x.start, end:x.end}; }),
     bounds: bounds,
     sentence: b.slice(bounds.start, bounds.end).replace(/\s+/g, " ").trim(),
@@ -3491,6 +3541,25 @@ $("capclear").onclick = function(){ CAPS = []; saveL("caps", CAPS); paintAll(); 
 
 var GATE_ON = load("gateon", true) !== false;
 var MEAS = null;
+/* The routing log, for selection-routing-brief.md §9: what plain code decided
+   before the call, and how many items the call found. */
+function routeRows(){ return load("routelog", []) || []; }
+function paintRoute(){
+  var n = $("routesum"); if (!n) return;
+  var L = routeRows();
+  if (!L.length){ n.textContent = "nothing yet"; return; }
+  var band = L.filter(function(r){ return r.W >= 4 && r.W <= 8; });
+  var many = band.filter(function(r){ return r.items > 2; }).length;
+  n.textContent = L.length + " selection" + (L.length > 1 ? "s" : "")
+    + " \u00b7 " + L.filter(function(r){ return r.bounced; }).length + " bounced after the call"
+    + " \u00b7 four to eight words: " + band.length + ", of those " + many + " came back as more than two items";
+}
+function routeText(){
+  return routeRows().map(function(r){
+    return new Date(r.when).toISOString().slice(0, 16).replace("T", " ")
+      + "  W " + r.W + " E " + r.E + " S " + r.S + "  \u2192 " + r.items + " item(s)"
+      + (r.bounced ? " BOUNCED" : "") + "  \u201C" + r.term + "\u201D"; }).join("\n");
+}
 function paintMeas(){
   var n = $("measline"); if (!n) return;
   n.textContent = MEAS ? measureLine(MEAS) : "nothing selected yet";
@@ -3572,8 +3641,15 @@ $("gatetoggle").onclick = function(){
   GATE_ON = !GATE_ON; saveL("gateon", GATE_ON); paintGateBtn();
   say("The gate is " + (GATE_ON ? "on" : "off"));
 };
+$("routecopy").onclick = function(){
+  var t = routeText(); if (!t){ say("The routing log is empty"); return; }
+  try{ navigator.clipboard.writeText(t); this.textContent = "Copied"; }catch(e){}
+  var b = this; setTimeout(function(){ b.textContent = "Copy the routing log"; }, 1500);
+};
+$("routeclear").onclick = function(){ saveL("routelog", []); paintRoute(); say("Routing log cleared"); };
 paintGateBtn();
 paintMeas();
+paintRoute();
 $("segin").value = load("segtests", SEG_DEFAULT) || SEG_DEFAULT;
 $("segrun").onclick = segRun;
 $("segreset").onclick = function(){ $("segin").value = SEG_DEFAULT; segRun(); };
