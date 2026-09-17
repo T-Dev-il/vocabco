@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-17c (Contractor 12).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-17f (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -269,6 +269,14 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     border-radius:6px;padding:5px 8px;font:12px inherit;font-family:inherit;background:#fff;
     color:#1B1E21;max-width:100%}
   #labdr label.inl{font-size:11.5px;color:#6B7178;min-width:62px}
+  #segin{width:100%;min-height:150px;border:1px solid #D9DBD5;border-radius:6px;padding:6px 8px;
+    font:11.5px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#1B1E21;resize:vertical;box-sizing:border-box}
+  #segsum{font-size:12px;color:#1B1E21;margin-top:8px}
+  .segrow{border-top:1px solid #ECEDE9;padding:6px 0;font-size:11.5px}
+  .segrow .v{display:inline-block;min-width:74px;font-weight:650;font-size:10.5px;letter-spacing:.03em}
+  .segrow .v.ok{color:#3d7a4a} .segrow .v.split{color:#a33b3b} .segrow .v.miss{color:#9a6b12}
+  .segrow .pc{display:inline-block;background:#F2F1EC;border-radius:4px;padding:0 4px;margin:2px 3px 0 0}
+  .segrow .lbl{color:#8b9099;display:inline-block;min-width:74px}
   .slotrow{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px;cursor:pointer;
     border:1px solid transparent}
   .slotrow:hover{background:#F6F5F1}
@@ -565,6 +573,23 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
 <div id="labdr">
   <div class="dh"><b>Tooltip composer</b><span class="sp"></span>
     <button class="lb sm" id="labclose">Close</button></div>
+
+  <div class="card">
+    <h3>Sentence ends · gate test</h3>
+    <p>One sentence per line, written as <b>expected count | text</b>. Run shows, for
+      each line, where this browser's own splitter cuts it, and where it cuts once
+      our rules have joined the false ends. A wrong split is the bad one: it would
+      block a good selection.</p>
+    <textarea id="segin" spellcheck="false"></textarea>
+    <div class="r"><label class="inl">The gate</label>
+      <button class="lb sm" id="gatetoggle"></button>
+      <span style="font-size:11.5px;color:#6B7178">no Add, no Profile past a sentence end</span></div>
+    <div class="r" style="margin-top:6px"><button class="lb sm" id="segrun">Run</button>
+      <button class="lb sm" id="segcopy">Copy result</button>
+      <button class="lb sm warn" id="segreset">Back to Socrates' 23</button></div>
+    <div id="segsum"></div>
+    <div id="segout"></div>
+  </div>
 
   <div class="card">
     <h3>Focus classes</h3>
@@ -871,7 +896,7 @@ function classify(raw, before, after){
         (L.test(t.charAt(t.length-1)) && L.test(after||""))) return "subword";
   }
   var words = t.match(/[A-Za-z0-9\u00C0-\u024F'\u2019-]+/g) || [];
-  if ((t.match(/[.!?]\s+[A-Z\u00C0-\u00DE]/g) || []).length >= 1) return "beyond";
+  if (crossesSentenceEnd(t)) return "beyond";   // the gate, item-resolution-brief.md §2
   if (/[.!?]["'\u201D]?$/.test(t) || words.length > 8) return "sentence";
   if (words.length > 1) return "phrase";
   return "word";
@@ -1467,6 +1492,48 @@ function sentenceBounds(b, start, end){
   s = s < 0 ? 0 : s + 1;
   var m = b.slice(end).search(/[.!?\n]/);
   return {start:s, end: m < 0 ? b.length : end + m + 1};
+}
+
+/* ── sentence ends (Contractor 13) ─────────────────────────────────────
+   Intl.Segmenter first, then our rules join the cuts it gets wrong in German.
+   Only ever JOINS: when unsure, it is one sentence, so a selection is let
+   through (item-resolution-brief.md §2). Nothing uses this yet but the test
+   card; the gate will. */
+var SEG_NEVER_END = ("dr prof nr s str bzw ca vgl st hr fr frl abs art bd jh geb gest evtl ggf "
+  + "inkl zzgl max min mio mrd sog tel kap anm dipl ing mag hrsg bspw bzgl allg eigtl gegr "
+  + "ff hl mind lt ld fa abb aufl bes insb ehem rd tsd od zzt gem "
+  + "jan feb febr apr jun jul aug sep sept okt nov dez").split(" ");
+function segCutIsFalse(before, after){
+  var b = before.replace(/\s+$/, ""), a = after.replace(/^\s+/, "");
+  if (!/\.$/.test(b)) return false;                   // only a dot can be a false end
+  if (/(^|[\s(„"])\d+\.$/.test(b)) return "number";    // 15. Mai, 2. Platz, 3. Oktober
+  if (/(^|[\s(„"])\p{L}\.$/u.test(b)) return "letter";  // z. B., J. S., d. h., u. a.
+  var w = (b.match(/(\p{L}+)\.$/u) || [])[1] || "";
+  if (w && (SEG_NEVER_END.indexOf(w.toLowerCase()) >= 0 || /str$/i.test(w))) return "abbreviation";
+  if (/^\p{Ll}/u.test(a)) return "next starts small";  // a sentence rarely starts so
+  return false;
+}
+function segRaw(text, lang){
+  var sg = new Intl.Segmenter(lang || "de", {granularity:"sentence"});
+  return Array.from(sg.segment(text), function(x){ return {start:x.index, end:x.index + x.segment.length}; });
+}
+/* Does this selection run past the end of a sentence? German dots inside dates
+   and abbreviations are joined back first, so „z. B. Äpfel" is one sentence and
+   is let through. When unsure it joins, i.e. it lets the selection through. */
+function crossesSentenceEnd(text){
+  var t = String(text || "").trim();
+  if (!t) return false;
+  try{ return segSentences(t).length > 1; }catch(e){ return false; }
+}
+function segSentences(text, lang){
+  var raw = segRaw(text, lang), out = [];
+  raw.forEach(function(r){
+    var last = out[out.length-1];
+    var why = last && segCutIsFalse(text.slice(last.start, last.end), text.slice(r.start, r.end));
+    if (why){ last.end = r.end; last.joins = (last.joins||[]).concat(why); }
+    else out.push({start:r.start, end:r.end});
+  });
+  return out;
 }
 
 var SCHEMA1 = (function(){
@@ -2904,10 +2971,22 @@ function labShow(rect, term, savedId, hlId){
   // Classes are offered above and nowhere else. Without this they could arrive
   // twice — once from the class list and once from the slot list — and turning
   // one off in either place left the other still putting it in the bar.
+  // The gate: past the end of a sentence there is no Add and no Profile, so a
+  // half-page selection can never become an item, and is never sent to the AI.
+  // Longer passages belong to texts and collections. (item-resolution-brief.md §2)
+  var gated = GATE_ON && extent === "beyond";
   (COMP[extent] || []).forEach(function(id){
     if (id.indexOf("__cls_") === 0) return;
+    if (gated && (id === "add" || id === "profile")) return;
     var n = slotNode(id); if (n) ttEl.appendChild(n);
   });
+  if (gated){
+    var gn = document.createElement("span");
+    gn.style.cssText = "padding:6px 9px;font-size:11px;color:#9b9e96;white-space:nowrap";
+    gn.textContent = "more than one sentence";
+    gn.title = "Saving works within a single sentence. Longer passages belong to texts, not items.";
+    ttEl.appendChild(gn);
+  }
   // The modifier as a disclosure: held, the bar grows the slot; let go and it
   // is gone. Nothing sits there permanently for a case that comes up twice a
   // chapter.
@@ -3362,6 +3441,94 @@ $("capcopy").onclick = function(){
   var b = this; setTimeout(function(){ b.textContent = "Copy"; }, 1500);
 };
 $("capclear").onclick = function(){ CAPS = []; saveL("caps", CAPS); paintAll(); };
+
+var GATE_ON = load("gateon", true) !== false;
+var SEG_DEFAULT = [
+ "1 | Am 15. Mai fahren wir nach Berlin.",
+ "1 | Sie kam am 3. Oktober 1990 zur Welt.",
+ "1 | Er belegte den 2. Platz im Rennen.",
+ "1 | Ludwig XIV. regierte sehr lange.",
+ "1 | Wir brauchen Obst, z. B. Äpfel und Birnen.",
+ "1 | Das ist schwierig, d. h. wir brauchen mehr Zeit.",
+ "1 | Dr. Müller wohnt in der Hauptstr. 12.",
+ "1 | Siehe S. 45 bzw. Nr. 3 im Anhang.",
+ "1 | Die Reise dauert ca. drei Stunden.",
+ "1 | J. S. Bach wurde in Eisenach geboren.",
+ "2 | Wir kauften Brot, Käse usw. Dann gingen wir nach Hause.",
+ "1 | Der Preis ist von 3,5 auf 4.5 Prozent gestiegen.",
+ "1 | Das Auto kostet 12.000 Euro.",
+ "1 | Der Zug fährt um 10.30 Uhr ab.",
+ "1 | \u201EKommst du mit?\u201C, fragte sie leise.",
+ "1 | \u201EIch weiß es nicht!\u201C, rief er.",
+ "1 | Sie sagte: \u201EMorgen regnet es.\u201C",
+ "1 | Er zögerte... und ging dann doch.",
+ "1 | Mehr Infos auf www.beispiel.de im Netz.",
+ "1 | Das Treffen (siehe unten.) fällt aus.",
+ "2 | Es regnet. Wir bleiben zu Hause.",
+ "2 | Kommst du? Ich warte schon.",
+ "2 | \u201EHilfe!\u201C Niemand antwortete.",
+ "2 | Ich ging nach Hause. Er blieb noch.",
+ "2 | Was machst du? Ich lese gerade.",
+ "2 | \u201EWarte!\u201C Sie drehte sich um.",
+ "2 | Es war spät. 1990 war alles anders.",
+ "2 | Wir fuhren los. Dr. Müller kam später.",
+ "2 | Der Vortrag war lang. Trotzdem hat er gefallen.",
+ "1 | Vgl. dazu Abb. 4 auf S. 12.",
+ "1 | Das Spiel endete 2:1 n. V.",
+ "1 | Er arbeitet bei der Fa. Meier in der Bahnhofstr. 8.",
+ "1 | Um 8 Uhr, also ca. 30 Min. später, ging es los."
+].join("\n");
+var SEG_LAST = "";
+function segVerdict(got, want){
+  if (!want) return {c:"", t:"\u2014"};
+  if (got === want) return {c:"ok", t:"OK"};
+  return got > want ? {c:"split", t:"WRONG SPLIT"} : {c:"miss", t:"MISSED"};
+}
+function segRun(){
+  var lines = $("segin").value.split("\n").filter(function(l){ return l.trim(); });
+  saveL("segtests", $("segin").value);
+  var html = "", rep = [], tally = {raw:{ok:0,split:0,miss:0}, ours:{ok:0,split:0,miss:0}};
+  var pcs = function(t, list){ return list.map(function(x){
+    return '<span class="pc">' + esc(t.slice(x.start, x.end).trim()) + "</span>"; }).join(""); };
+  lines.forEach(function(l, i){
+    var m = l.match(/^\s*(\d+)\s*\|\s*(.*)$/), want = m ? +m[1] : 0, t = m ? m[2] : l.trim();
+    var raw = segRaw(t), ours = segSentences(t);
+    var v1 = segVerdict(raw.length, want), v2 = segVerdict(ours.length, want);
+    if (v1.c) tally.raw[v1.c]++; if (v2.c) tally.ours[v2.c]++;
+    var why = [].concat.apply([], ours.map(function(x){ return x.joins || []; }));
+    html += '<div class="segrow"><b>' + (i+1) + ".</b> " + esc(t)
+      + '<br><span class="lbl">browser</span><span class="v ' + v1.c + '">' + v1.t + "</span>" + pcs(t, raw)
+      + '<br><span class="lbl">with rules</span><span class="v ' + v2.c + '">' + v2.t + "</span>" + pcs(t, ours)
+      + (why.length ? ' <span style="color:#8b9099">joined: ' + esc(why.join(", ")) + "</span>" : "")
+      + "</div>";
+    rep.push((i+1) + ". " + t + "\n   browser:    " + v1.t + "  " + raw.map(function(x){ return "[" + t.slice(x.start,x.end).trim() + "]"; }).join(" ")
+      + "\n   with rules: " + v2.t + "  " + ours.map(function(x){ return "[" + t.slice(x.start,x.end).trim() + "]"; }).join(" "));
+  });
+  var line = function(k){ var x = tally[k]; return x.ok + " OK, " + x.split + " wrong split, " + x.miss + " missed"; };
+  var sum = "Browser alone: " + line("raw") + "\nWith our rules: " + line("ours");
+  $("segsum").innerHTML = esc(sum).replace("\n", "<br>");
+  $("segout").innerHTML = html;
+  SEG_LAST = "Sentence-end test, " + navigator.userAgent + "\n" + sum + "\n\n" + rep.join("\n");
+  say("Sentence ends: " + sum.replace("\n", " \u00b7 "));
+}
+function paintGateBtn(){
+  var b = $("gatetoggle"); if (!b) return;
+  b.textContent = GATE_ON ? "on" : "off";
+  b.className = "lb sm" + (GATE_ON ? " on" : "");
+}
+$("gatetoggle").onclick = function(){
+  GATE_ON = !GATE_ON; saveL("gateon", GATE_ON); paintGateBtn();
+  say("The gate is " + (GATE_ON ? "on" : "off"));
+};
+paintGateBtn();
+$("segin").value = load("segtests", SEG_DEFAULT) || SEG_DEFAULT;
+$("segrun").onclick = segRun;
+$("segreset").onclick = function(){ $("segin").value = SEG_DEFAULT; segRun(); };
+$("segcopy").onclick = function(){
+  if (!SEG_LAST) segRun();
+  try{ navigator.clipboard.writeText(SEG_LAST); this.textContent = "Copied"; }catch(e){}
+  var b = this; setTimeout(function(){ b.textContent = "Copy result"; }, 1500);
+};
 
 $("notescopy").onclick = function(){
   var t = NOTES.map(function(n){ return n.label + "\t" + n.term + "\t" + n.text.replace(/\n/g," / "); }).join("\n");
