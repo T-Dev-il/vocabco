@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-17f (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-18a (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -583,7 +583,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <textarea id="segin" spellcheck="false"></textarea>
     <div class="r"><label class="inl">The gate</label>
       <button class="lb sm" id="gatetoggle"></button>
-      <span style="font-size:11.5px;color:#6B7178">no Add, no Profile past a sentence end</span></div>
+      <span style="font-size:11.5px;color:#6B7178">Add and Profile bounce past a sentence end</span></div>
+    <div class="r"><label class="inl">Last selection</label>
+      <span id="measline" style="font-size:11.5px;color:#1B1E21">nothing selected yet</span></div>
     <div class="r" style="margin-top:6px"><button class="lb sm" id="segrun">Run</button>
       <button class="lb sm" id="segcopy">Copy result</button>
       <button class="lb sm warn" id="segreset">Back to Socrates' 23</button></div>
@@ -1513,6 +1515,52 @@ function segCutIsFalse(before, after){
   if (/^\p{Ll}/u.test(a)) return "next starts small";  // a sentence rarely starts so
   return false;
 }
+/* The four measures, all plain code, all known before anything is sent
+   (selection-routing-brief.md §2). W words, E sentence ends the selection
+   continues past, P a paragraph break inside it, S how many separate spots. */
+function measure(text, spots){
+  var t = String(text || "").trim();
+  return {
+    W: (t.match(/[\p{L}\p{N}'\u2019-]+/gu) || []).length,
+    E: t ? Math.max(0, segSentences(t).length - 1) : 0,
+    P: /\n\s*\n/.test(String(text || "")),
+    S: Math.max(1, spots || 1)
+  };
+}
+function measureOf(){
+  var t = (typeof heldTerm === "function") ? heldTerm() : "";
+  var sp = (typeof parts !== "undefined" && parts.length) ? parts.length : 1;
+  var m = measure(t, sp);
+  // Several spots: E and P come from the stretch of page they sit in, not from
+  // the spots glued together, so two spots either side of a full stop count as
+  // crossing it. (selection-routing-brief.md §4, separate spots)
+  if (sp > 1){
+    try{
+      var rs = heldRanges(), b = bodyText();
+      var span = b.slice(rs[0].start, rs[rs.length-1].end);
+      var sm = measure(span, sp);
+      m.E = sm.E; m.P = sm.P;
+    }catch(e){}
+  }
+  m.item = (m.E === 0);            // the one hard line: §3
+  return m;
+}
+function measureLine(m){
+  return "W " + m.W + " \u00b7 E " + m.E + " \u00b7 P " + (m.P ? "yes" : "no") + " \u00b7 S " + m.S
+    + " \u2014 " + (m.item ? "item route" : "not an item");
+}
+/* The bounce without a call: plain code already knows, so nothing is sent.
+   The tooltip does not change; the message says what is true. (§5) */
+function bounceNotItem(m, anchor){
+  var why = m.S > 1 ? "These spots run across the end of a sentence."
+                    : "This runs past the end of a sentence.";
+  showAI("Not a lexical item",
+    esc(why) + " A lexical item never spans two sentences, so this cannot be saved as one."
+    + '<br><br><span style="color:#8b9099">Keeping it as a snippet is coming; the gesture for it is still being designed.</span>'
+    + '<br><br><span style="color:#8b9099">' + esc(measureLine(m)) + "</span>",
+    false, anchor || null);
+  say("Bounced, no call sent \u2014 " + measureLine(m));
+}
 function segRaw(text, lang){
   var sg = new Intl.Segmenter(lang || "de", {granularity:"sentence"});
   return Array.from(sg.segment(text), function(x){ return {start:x.index, end:x.index + x.segment.length}; });
@@ -2079,6 +2127,8 @@ function findPieces(a, pieces){
 function startProfile(label){
   var b = bodyText(), rs = heldRanges();
   if (!rs.length){ say("Profile: nothing selected"); return; }
+  var meas = measureOf();
+  if (GATE_ON && !meas.item){ bounceNotItem(meas, ttEl ? ttEl.getBoundingClientRect() : null); return; }
   var s0 = rs[0].start, e0 = rs[rs.length-1].end;
   var bounds = sentenceBounds(b, s0, e0);
   var a = { term: heldTerm(), textId: ui.readerTextId,
@@ -2763,6 +2813,8 @@ function slotNode(id, ghost){
     b2.title = LAST.savedId ? "Saved \u2014 click to undo" : "Save this item";
     b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
     b2.onclick = async function(){
+      var m = measureOf();
+      if (GATE_ON && !m.item && !LAST.savedId){ bounceNotItem(m, ttEl ? ttEl.getBoundingClientRect() : null); return; }
       b2.disabled = true;
       if (parts.length){ await applyToParts("add"); return; }
       if (LAST.savedId){ await unsaveReaderTerm(LAST.savedId); say("Unsaved"); labReopen(null, LAST.hlId); }
@@ -2971,22 +3023,13 @@ function labShow(rect, term, savedId, hlId){
   // Classes are offered above and nowhere else. Without this they could arrive
   // twice — once from the class list and once from the slot list — and turning
   // one off in either place left the other still putting it in the bar.
-  // The gate: past the end of a sentence there is no Add and no Profile, so a
-  // half-page selection can never become an item, and is never sent to the AI.
-  // Longer passages belong to texts and collections. (item-resolution-brief.md §2)
-  var gated = GATE_ON && extent === "beyond";
+  // The tooltip is the same whatever the selection: Add and Profile are always
+  // there, and a selection that cannot be an item bounces when pressed.
+  // (selection-routing-brief.md §5, which replaces item-resolution-brief.md §2)
   (COMP[extent] || []).forEach(function(id){
     if (id.indexOf("__cls_") === 0) return;
-    if (gated && (id === "add" || id === "profile")) return;
     var n = slotNode(id); if (n) ttEl.appendChild(n);
   });
-  if (gated){
-    var gn = document.createElement("span");
-    gn.style.cssText = "padding:6px 9px;font-size:11px;color:#9b9e96;white-space:nowrap";
-    gn.textContent = "more than one sentence";
-    gn.title = "Saving works within a single sentence. Longer passages belong to texts, not items.";
-    ttEl.appendChild(gn);
-  }
   // The modifier as a disclosure: held, the bar grows the slot; let go and it
   // is gone. Nothing sits there permanently for a case that comes up twice a
   // chapter.
@@ -3019,6 +3062,10 @@ function labShow(rect, term, savedId, hlId){
     e.textContent = "no slots for this";
     ttEl.appendChild(e);
   }
+  MEAS = measureOf();
+  say("Selection: " + measureLine(MEAS));
+  paintMeas();
+
   ttEl.style.left = Math.max(8, Math.min(rect.left, window.innerWidth-280)) + "px";
   ttEl.style.top  = Math.max(8, rect.top - 46) + "px";
   ttEl.addEventListener("mousedown", function(e){ e.stopPropagation(); });
@@ -3443,6 +3490,11 @@ $("capcopy").onclick = function(){
 $("capclear").onclick = function(){ CAPS = []; saveL("caps", CAPS); paintAll(); };
 
 var GATE_ON = load("gateon", true) !== false;
+var MEAS = null;
+function paintMeas(){
+  var n = $("measline"); if (!n) return;
+  n.textContent = MEAS ? measureLine(MEAS) : "nothing selected yet";
+}
 var SEG_DEFAULT = [
  "1 | Am 15. Mai fahren wir nach Berlin.",
  "1 | Sie kam am 3. Oktober 1990 zur Welt.",
@@ -3521,6 +3573,7 @@ $("gatetoggle").onclick = function(){
   say("The gate is " + (GATE_ON ? "on" : "off"));
 };
 paintGateBtn();
+paintMeas();
 $("segin").value = load("segtests", SEG_DEFAULT) || SEG_DEFAULT;
 $("segrun").onclick = segRun;
 $("segreset").onclick = function(){ $("segin").value = SEG_DEFAULT; segRun(); };
