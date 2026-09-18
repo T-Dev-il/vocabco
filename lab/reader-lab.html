@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-18b (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-18c (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -269,6 +269,24 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     border-radius:6px;padding:5px 8px;font:12px inherit;font-family:inherit;background:#fff;
     color:#1B1E21;max-width:100%}
   #labdr label.inl{font-size:11.5px;color:#6B7178;min-width:62px}
+  .sel-tt.keep-row{position:fixed;z-index:95}
+  #binpanel{position:fixed;right:16px;top:70px;width:262px;z-index:88;background:#fff;
+    border:1px solid #D9DBD5;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.10);
+    font:12px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#1B1E21;overflow:hidden}
+  #binpanel .hd{display:flex;align-items:center;gap:6px;padding:7px 9px;cursor:move;
+    background:#F7F6F2;border-bottom:1px solid #ECEDE9;font-size:11px;letter-spacing:.04em;
+    text-transform:uppercase;color:#8b9099}
+  #binpanel .hd b{color:#1B1E21;font-size:11px}
+  #binpanel .bd{max-height:46vh;overflow:auto;padding:4px 0}
+  #binpanel.min .bd{display:none}
+  #binpanel .bin{padding:5px 9px;font-size:11px;color:#6B7178;display:flex;align-items:center;gap:6px}
+  #binpanel .kept{padding:5px 9px 6px 14px;border-top:1px solid #F1F2EE;cursor:pointer}
+  #binpanel .kept:hover{background:#F7F6F2}
+  #binpanel .kept .t{color:#1B1E21}
+  #binpanel .kept .s{color:#8b9099;font-size:10.5px;margin-top:2px}
+  #binpanel .kept .x{float:right;color:#b08;opacity:.55}
+  #binpanel .em{padding:9px;color:#8b9099}
+  .lab-kept{border-bottom:2px dotted #6cc0ff}
   #segin{width:100%;min-height:150px;border:1px solid #D9DBD5;border-radius:6px;padding:6px 8px;
     font:11.5px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#1B1E21;resize:vertical;box-sizing:border-box}
   #segsum{font-size:12px;color:#1B1E21;margin-top:8px}
@@ -598,6 +616,18 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   </div>
 
   <div class="card">
+    <h3>Collections</h3>
+    <p>A collection holds things taken out of the flow: a word, a sentence, a passage.
+      It reaches across texts. <b>On</b> puts it straight in the tooltip; <b>open</b>
+      shows it in the panel on the reader, where it can be dragged and folded.
+      Everything here lives in this browser only.</p>
+    <div class="r"><input id="binname" placeholder="name of a new collection" style="flex:1">
+      <select id="bincol"><option value="blue">blue</option><option value="yellow">yellow</option><option value="pink">pink</option></select>
+      <button class="lb sm" id="binadd">Add</button></div>
+    <div id="binlist"></div>
+  </div>
+
+  <div class="card">
     <h3>Focus classes</h3>
     <p>A standing thing to look for, above any one text. Turn one on and the
       tooltip grows a slot for it. Marking highlights the span and collects it
@@ -799,12 +829,13 @@ function defaults(){ return {
   register:  {label:"How formal", icon:"edit", showLabel:false, kind:"none"},
   relatives: {label:"Relatives here", icon:"link", showLabel:false, kind:"none"},
   note:      {label:"Note", icon:"note", showLabel:false, kind:"none"},
-  collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"}
+  collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"},
+  keep:      {label:"Keep", icon:"listPlus", showLabel:true, kind:"keep", wired:true}
 };}
 function defaultComp(){ return {
-  subword:["add","translate","highlight","profile","examples"], word:["add","translate","highlight","profile","examples"],
-  phrase:["add","translate","highlight","profile","examples"], sentence:["add","translate","highlight"],
-  beyond:["add","translate","highlight"], multi:["add","translate","highlight","profile","examples"]
+  subword:["add","translate","highlight","profile","examples","keep"], word:["add","translate","highlight","profile","examples","keep"],
+  phrase:["add","translate","highlight","profile","examples","keep"], sentence:["add","translate","highlight","keep"],
+  beyond:["add","translate","highlight","keep"], multi:["add","translate","highlight","profile","examples","keep"]
 };}
 
 /* The two that were confusable, named for what they are. "More than one
@@ -868,6 +899,41 @@ var COMP  = load("comp", null) || defaultComp();
 })();
 var CLASSES = load("classes", []) || [];
 var CAPS = load("caps", []) || [];
+
+/* ── Bins: things taken out of the flow and kept (selection-routing-brief.md
+   §1 and §7). A bin reaches across texts. A bin that is switched ON sits in
+   the tooltip, the way a focus class does; a bin that is OPEN shows its
+   members in the reader panel. Same machinery either way, only the size of
+   what goes in differs. Lives in this browser, not the database. */
+var BINS = load("bins", []) || [];
+var KEPT = load("kept", []) || [];
+function binById(id){ return BINS.filter(function(b){ return b.id === id; })[0] || null; }
+function saveBins(){ saveL("bins", BINS); }
+function saveKept(){ saveL("kept", KEPT); }
+/* What a kept thing is, by its size (§7). Tunable; nothing breaks if wrong. */
+function keptSize(m){
+  if (m.P || m.E > 4) return "text";
+  if (m.E === 0 && m.W <= 8) return "snippet";
+  return m.E <= 2 ? "sentence" : "text";
+}
+function keepInto(bin){
+  var b = bodyText(), rs = heldRanges();
+  if (!rs.length){ say("Nothing to keep \u2014 the reader could not place that selection"); return; }
+  var s0 = rs[0].start, e0 = rs[rs.length-1].end, hit = heldTerm(), m = measureOf();
+  KEPT.unshift({ id:"k"+Date.now().toString(36), bin:bin.id, binName:bin.name, colour:bin.colour,
+    text:hit, size:keptSize(m), W:m.W, E:m.E, S:m.S,
+    ranges: rs.map(function(r){ return {start:r.start, end:r.end}; }),
+    sentence: sentenceAround(b, s0, e0),
+    textId: ui.readerTextId, textName: (S.texts[ui.readerTextId] || {}).name || "",
+    start:s0, end:e0, when: Date.now() });
+  saveKept();
+  say("Kept in " + bin.name + " (" + keptSize(m) + "): " + hit);
+  parts = []; labHide(); keepRowHide(); labPaint(); paintBins(); paintBinPanel();
+}
+function newBin(name, colour){
+  var bin = {id:"b"+Date.now().toString(36), name:name || "Bin", colour:colour || "blue", on:false, open:true};
+  BINS.push(bin); saveBins(); paintBins(); paintBinPanel(); return bin;
+}
 /* Saved AI answers. Browser-only, like CAPS: nothing here reaches the database
    until the shape settles and gets its own table (START-HERE.md §6). */
 var NOTES = load("notes", []) || [];
@@ -998,6 +1064,12 @@ function labPaint(){
     paintRange(root2, +a[0], +a[1], "lab-note", "");
     root.querySelectorAll('.lab-note:not([data-notes])').forEach(function(sp){
       sp.setAttribute("data-notes", byRange[k].join(",")); });
+  });
+  KEPT.forEach(function(k){
+    if (k.textId !== tid) return;
+    var bin = binById(k.bin); if (!bin || !bin.open) return;
+    (k.ranges || [{start:k.start, end:k.end}]).forEach(function(r){
+      paintRange(root, r.start, r.end, "lab-kept", "kept in " + k.binName); });
   });
   if (!SHOWMARKS) return;
   CAPS.forEach(function(c){
@@ -1560,7 +1632,7 @@ function bounceNotItem(m, anchor){
                     : "This runs past the end of a sentence.";
   showAI("Not a lexical item",
     esc(why) + " A lexical item never spans two sentences, so this cannot be saved as one."
-    + '<br><br><span style="color:#8b9099">Keeping it as a snippet is coming; the gesture for it is still being designed.</span>'
+    + '<br><br><span style="color:#8b9099">To keep it anyway, press Keep in the tooltip and choose a collection.</span>'
     + '<br><br><span style="color:#8b9099">' + esc(measureLine(m)) + "</span>",
     false, anchor || null);
   say("Bounced, no call sent \u2014 " + measureLine(m));
@@ -1936,7 +2008,7 @@ function bounceTooMany(P){
   PF = null; labPaint();
   showAI("Too many parts",
     "This selection holds " + n + " separate lexical items, so it cannot be saved as one."
-    + '<br><br><span style="color:#8b9099">Select the one you want.</span>',
+    + '<br><br><span style="color:#8b9099">Select the one you want \u2014 or press Keep to put the whole thing in a collection.</span>',
     false, anchor);
   say("Bounced after the call \u2014 " + n + " items: " + names.join(", "));
   routeSeen({W:(P.about.term.match(/[\p{L}\p{N}'\u2019-]+/gu)||[]).length, items:n, term:P.about.term, bounced:true});
@@ -2906,6 +2978,12 @@ function slotNode(id, ghost){
     return b2;
   }
 
+  if (s.kind === "keep"){
+    b2.className = pre + "tt-x"; b2.title = "Keep this in a collection";
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.onclick = function(e){ e.stopPropagation(); keepRowShow(b2.getBoundingClientRect()); };
+    return b2;
+  }
   if (s.kind === "profile"){
     b2.className = pre + "tt-ai";
     b2.title = "The whole German profile of this item";
@@ -3049,6 +3127,112 @@ async function capture(cls){
   parts = []; labHide(); labPaint(); paintCaps(); paintClasses();
 }
 
+/* The second row. It opens beside the tooltip, the way holding Ctrl opens the
+   way to another part: the keep route is a second option and must not crowd
+   the item path (selection-routing-brief.md §6). Which gesture finally opens
+   it is still for the design chat; this is the plain version. */
+var keepRowEl = null;
+function keepRowHide(){ if (keepRowEl){ keepRowEl.remove(); keepRowEl = null; } }
+function keepRowShow(rect){
+  keepRowHide();
+  var row = document.createElement("div");
+  row.className = "sel-tt keep-row";
+  BINS.forEach(function(bin){
+    var b = document.createElement("button");
+    b.className = "tt-x";
+    b.innerHTML = '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+      + (COLS[bin.colour] || "#6cc0ff") + '"></span> ' + esc(bin.name);
+    b.onclick = function(e){ e.stopPropagation(); keepInto(bin); };
+    row.appendChild(b);
+  });
+  var nb = document.createElement("button");
+  nb.className = "tt-x"; nb.textContent = BINS.length ? "New collection\u2026" : "Make the first collection\u2026";
+  nb.onclick = function(e){
+    e.stopPropagation();
+    var n = prompt("Name for the collection:", "Kept");
+    if (n === null) return;
+    keepInto(newBin(n.trim() || "Kept", "blue"));
+  };
+  row.appendChild(nb);
+  document.body.appendChild(row);
+  keepRowEl = row;
+  var r = row.getBoundingClientRect();
+  row.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - r.width - 12)) + "px";
+  row.style.top  = Math.min(window.innerHeight - r.height - 8, rect.bottom + 6) + "px";
+}
+
+/* The reader panel. A bin that is open shows its members here, whichever text
+   they came from, so what was taken out of the flow is visible while reading.
+   Rough on purpose: it can be dragged and folded away, and where it finally
+   belongs is a design question. */
+function binPanelEl(){
+  var el = document.getElementById("binpanel");
+  if (el) return el;
+  el = document.createElement("div"); el.id = "binpanel";
+  el.innerHTML = '<div class="hd"><b>Collections</b><span style="flex:1"></span>'
+    + '<button class="lb sm" id="binfold">fold</button></div><div class="bd"></div>';
+  document.body.appendChild(el);
+  var hd = el.querySelector(".hd"), drag = null;
+  hd.addEventListener("mousedown", function(e){
+    if (e.target.id === "binfold") return;
+    var r = el.getBoundingClientRect();
+    drag = {x:e.clientX - r.left, y:e.clientY - r.top};
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", function(e){
+    if (!drag) return;
+    el.style.left = Math.max(4, Math.min(window.innerWidth - 80, e.clientX - drag.x)) + "px";
+    el.style.top  = Math.max(4, Math.min(window.innerHeight - 40, e.clientY - drag.y)) + "px";
+    el.style.right = "auto";
+  });
+  document.addEventListener("mouseup", function(){ drag = null; });
+  el.querySelector("#binfold").onclick = function(){
+    el.classList.toggle("min");
+    this.textContent = el.classList.contains("min") ? "open" : "fold";
+  };
+  el.querySelector(".bd").addEventListener("click", function(e){
+    var row = e.target.closest(".kept"); if (!row) return;
+    var k = KEPT.filter(function(x){ return x.id === row.dataset.id; })[0]; if (!k) return;
+    if (e.target.classList.contains("x")){
+      KEPT = KEPT.filter(function(x){ return x.id !== k.id; });
+      saveKept(); paintBinPanel(); labPaint(); say("Removed from " + k.binName); return;
+    }
+    jumpToKept(k);
+  });
+  return el;
+}
+function jumpToKept(k){
+  if (k.textId !== ui.readerTextId){ say("That one is in \u201C" + (k.textName || "another text") + "\u201D \u2014 open it there"); return; }
+  labPaint();
+  var root = document.getElementById("r-render");
+  var sp = root ? root.querySelector(".lab-kept") : null;
+  paintRange(root, k.start, k.end, "lab-held", "kept in " + k.binName);
+  var held = root ? root.querySelector(".lab-held") : null;
+  if (held) held.scrollIntoView({behavior:"smooth", block:"center"});
+  say("Jumped to: " + k.text);
+}
+function paintBinPanel(){
+  var open = BINS.filter(function(b){ return b.open; });
+  var el = binPanelEl();
+  el.style.display = open.length ? "" : "none";
+  if (!open.length) return;
+  var bd = el.querySelector(".bd"), html = "";
+  open.forEach(function(bin){
+    var mine = KEPT.filter(function(k){ return k.bin === bin.id; });
+    html += '<div class="bin"><span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+      + (COLS[bin.colour] || "#6cc0ff") + '"></span>' + esc(bin.name)
+      + '<span style="flex:1"></span>' + mine.length + "</div>";
+    if (!mine.length) html += '<div class="em">Nothing kept here yet.</div>';
+    mine.slice(0, 40).forEach(function(k){
+      html += '<div class="kept" data-id="' + k.id + '"><span class="x" title="Remove">\u00d7</span>'
+        + '<div class="t">' + esc(k.text.length > 90 ? k.text.slice(0, 90) + "\u2026" : k.text) + "</div>"
+        + '<div class="s">' + esc(k.size) + " \u00b7 " + esc(k.textName || "this text")
+        + (k.textId === ui.readerTextId ? "" : " \u00b7 elsewhere") + "</div></div>";
+    });
+  });
+  bd.innerHTML = html;
+}
+
 function labShow(rect, term, savedId, hlId){
   labHide();
   if (savedId === undefined) savedId = savedTermIdForRange(ui.lastSelRange);
@@ -3069,6 +3253,17 @@ function labShow(rect, term, savedId, hlId){
 
   CLASSES.filter(function(c){ return c.on; }).forEach(function(c){
     var n = slotNode("__cls_" + c.id); if (n) ttEl.appendChild(n);
+  });
+  // A bin switched on is called into the text and filled as the learner reads
+  // (selection-routing-brief.md §1, "switched on"). The Keep button reaches
+  // every bin; this is the shortcut for the one in use.
+  BINS.filter(function(b){ return b.on; }).forEach(function(bin){
+    var bb = document.createElement("button");
+    bb.className = "tt-x"; bb.title = "Keep this in " + bin.name;
+    bb.innerHTML = '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
+      + (COLS[bin.colour] || "#6cc0ff") + '"></span> ' + esc(bin.name);
+    bb.onclick = function(e){ e.stopPropagation(); keepInto(bin); };
+    ttEl.appendChild(bb);
   });
   // Classes are offered above and nowhere else. Without this they could arrive
   // twice — once from the class list and once from the slot list — and turning
@@ -3122,7 +3317,7 @@ function labShow(rect, term, savedId, hlId){
   document.body.appendChild(ttEl);
   labPaint();
 }
-function labHide(){ if (ttEl){ ttEl.remove(); ttEl = null; } }
+function labHide(){ if (ttEl){ ttEl.remove(); ttEl = null; } keepRowHide(); }
 
 /* app-lab.js's own reopenTT reads _ttTerm, which only its own showTT sets and
    that no longer runs. This reads ours, so the tooltip still stays open after
@@ -3307,6 +3502,15 @@ function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets()
 
 /* A class appears in the slot list as a real slot, so it can be reordered and
    unticked like any other. */
+/* A layout saved before Keep existed has no Keep in it. Put it back, once. */
+function ensureKeepSlot(){
+  if (!SLOTS.keep) SLOTS.keep = {label:"Keep", icon:"listPlus", showLabel:true, kind:"keep", wired:true};
+  if (load("keepslot", false) === true) return;
+  Object.keys(COMP).forEach(function(k){
+    if ((COMP[k] || []).indexOf("keep") < 0) COMP[k] = (COMP[k] || []).concat(["keep"]);
+  });
+  saveL("keepslot", true); keep();
+}
 function syncClassSlots(){
   Object.keys(SLOTS).forEach(function(k){
     if (k.indexOf("__cls_") === 0 && !CLASSES.some(function(c){ return "__cls_"+c.id === k; }))
@@ -3560,6 +3764,18 @@ function routeText(){
       + "  W " + r.W + " E " + r.E + " S " + r.S + "  \u2192 " + r.items + " item(s)"
       + (r.bounced ? " BOUNCED" : "") + "  \u201C" + r.term + "\u201D"; }).join("\n");
 }
+function paintBins(){
+  var n = $("binlist"); if (!n) return;
+  n.innerHTML = BINS.length ? BINS.map(function(b){
+    var c = KEPT.filter(function(k){ return k.bin === b.id; }).length;
+    return '<div class="slotrow" style="cursor:default"><span style="display:inline-block;width:10px;height:10px;'
+      + 'border-radius:2px;background:' + (COLS[b.colour] || "#6cc0ff") + '"></span>'
+      + '<span style="flex:1">' + esc(b.name) + ' <span style="color:#8b9099">' + c + "</span></span>"
+      + '<button class="lb sm' + (b.on ? " on" : "") + '" data-on="' + b.id + '">on</button>'
+      + '<button class="lb sm' + (b.open ? " on" : "") + '" data-open="' + b.id + '">open</button>'
+      + '<button class="lb sm warn" data-del="' + b.id + '">\u00d7</button></div>';
+  }).join("") : '<p style="margin:6px 0 0;color:#8b9099">No collections yet. The Keep button in the tooltip can make the first one.</p>';
+}
 function paintMeas(){
   var n = $("measline"); if (!n) return;
   n.textContent = MEAS ? measureLine(MEAS) : "nothing selected yet";
@@ -3641,15 +3857,35 @@ $("gatetoggle").onclick = function(){
   GATE_ON = !GATE_ON; saveL("gateon", GATE_ON); paintGateBtn();
   say("The gate is " + (GATE_ON ? "on" : "off"));
 };
+$("binadd").onclick = function(){
+  var n = $("binname").value.trim(); if (!n){ say("Give the collection a name first"); return; }
+  newBin(n, $("bincol").value); $("binname").value = ""; say("Collection made: " + n);
+};
+$("binlist").onclick = function(e){
+  var b = e.target.closest("button"); if (!b) return;
+  var id = b.dataset.on || b.dataset.open || b.dataset.del, bin = binById(id); if (!bin) return;
+  if (b.dataset.on) bin.on = !bin.on;
+  else if (b.dataset.open) bin.open = !bin.open;
+  else if (b.dataset.del){
+    if (!confirm("Delete \u201C" + bin.name + "\u201D and everything kept in it?")) return;
+    BINS = BINS.filter(function(x){ return x.id !== id; });
+    KEPT = KEPT.filter(function(k){ return k.bin !== id; });
+    saveKept();
+  }
+  saveBins(); paintBins(); paintBinPanel(); labPaint();
+};
 $("routecopy").onclick = function(){
   var t = routeText(); if (!t){ say("The routing log is empty"); return; }
   try{ navigator.clipboard.writeText(t); this.textContent = "Copied"; }catch(e){}
   var b = this; setTimeout(function(){ b.textContent = "Copy the routing log"; }, 1500);
 };
 $("routeclear").onclick = function(){ saveL("routelog", []); paintRoute(); say("Routing log cleared"); };
+ensureKeepSlot();
 paintGateBtn();
 paintMeas();
 paintRoute();
+paintBins();
+paintBinPanel();
 $("segin").value = load("segtests", SEG_DEFAULT) || SEG_DEFAULT;
 $("segrun").onclick = segRun;
 $("segreset").onclick = function(){ $("segin").value = SEG_DEFAULT; segRun(); };
