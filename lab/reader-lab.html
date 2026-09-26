@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-18c (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-26b (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -618,8 +618,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   <div class="card">
     <h3>Collections</h3>
     <p>A collection holds things taken out of the flow: a word, a sentence, a passage.
-      It reaches across texts. <b>On</b> puts it straight in the tooltip; <b>open</b>
-      shows it in the panel on the reader, where it can be dragged and folded.
+      It reaches across texts. <b>On</b> makes it live in the text you are reading:
+      its members are marked on the page and listed in the panel, which can be dragged
+      and folded. Keep in the tooltip reaches every collection, on or not.
       Everything here lives in this browser only.</p>
     <div class="r"><input id="binname" placeholder="name of a new collection" style="flex:1">
       <select id="bincol"><option value="blue">blue</option><option value="yellow">yellow</option><option value="pink">pink</option></select>
@@ -907,6 +908,16 @@ var CAPS = load("caps", []) || [];
    what goes in differs. Lives in this browser, not the database. */
 var BINS = load("bins", []) || [];
 var KEPT = load("kept", []) || [];
+/* One switch, not two. A collection saved before this carried `on` (it sat in
+   the tooltip) and `open` (it showed in the panel); the tooltip shortcut is
+   gone, so the two fold into `on` = live in this text. */
+(function(){
+  var moved = false;
+  BINS.forEach(function(b){
+    if (b.open !== undefined){ b.on = !!(b.on || b.open); delete b.open; moved = true; }
+  });
+  if (moved) saveL("bins", BINS);
+})();
 function binById(id){ return BINS.filter(function(b){ return b.id === id; })[0] || null; }
 function saveBins(){ saveL("bins", BINS); }
 function saveKept(){ saveL("kept", KEPT); }
@@ -931,7 +942,7 @@ function keepInto(bin){
   parts = []; labHide(); keepRowHide(); labPaint(); paintBins(); paintBinPanel();
 }
 function newBin(name, colour){
-  var bin = {id:"b"+Date.now().toString(36), name:name || "Bin", colour:colour || "blue", on:false, open:true};
+  var bin = {id:"b"+Date.now().toString(36), name:name || "Bin", colour:colour || "blue", on:true};
   BINS.push(bin); saveBins(); paintBins(); paintBinPanel(); return bin;
 }
 /* Saved AI answers. Browser-only, like CAPS: nothing here reaches the database
@@ -1067,7 +1078,7 @@ function labPaint(){
   });
   KEPT.forEach(function(k){
     if (k.textId !== tid) return;
-    var bin = binById(k.bin); if (!bin || !bin.open) return;
+    var bin = binById(k.bin); if (!bin || !bin.on) return;
     (k.ranges || [{start:k.start, end:k.end}]).forEach(function(r){
       paintRange(root, r.start, r.end, "lab-kept", "kept in " + k.binName); });
   });
@@ -1632,12 +1643,20 @@ function bounceNotItem(m, anchor){
                     : "This runs past the end of a sentence.";
   showAI("Not a lexical item",
     esc(why) + " A lexical item never spans two sentences, so this cannot be saved as one."
-    + '<br><br><span style="color:#8b9099">To keep it anyway, press Keep in the tooltip and choose a collection.</span>'
+    + '<br><br><button class="lb sm" id="bkeep">Keep it in a collection</button>'
     + '<br><br><span style="color:#8b9099">' + esc(measureLine(m)) + "</span>",
     false, anchor || null);
+  bounceKeepWire();
   say("Bounced, no call sent \u2014 " + measureLine(m));
   if (typeof routeSeen === "function")
     routeSeen({W:m.W, E:m.E, S:m.S, items:0, bounced:true, term:(typeof heldTerm === "function" ? heldTerm() : "")});
+}
+/* The bounce is the moment that hands over the keep route
+   (selection-routing-brief.md §6), so it offers the same button the tooltip
+   does, opening the same row of collections. */
+function bounceKeepWire(){
+  var b = document.querySelector("#labai #bkeep"); if (!b) return;
+  b.onclick = function(e){ e.stopPropagation(); keepRowShow(b.getBoundingClientRect()); };
 }
 function segRaw(text, lang){
   var sg = new Intl.Segmenter(lang || "de", {granularity:"sentence"});
@@ -2008,8 +2027,10 @@ function bounceTooMany(P){
   PF = null; labPaint();
   showAI("Too many parts",
     "This selection holds " + n + " separate lexical items, so it cannot be saved as one."
-    + '<br><br><span style="color:#8b9099">Select the one you want \u2014 or press Keep to put the whole thing in a collection.</span>',
+    + '<br><br><span style="color:#8b9099">Select the one you want.</span>'
+    + '<br><br><button class="lb sm" id="bkeep">Keep the whole thing in a collection</button>',
     false, anchor);
+  bounceKeepWire();
   say("Bounced after the call \u2014 " + n + " items: " + names.join(", "));
   routeSeen({W:(P.about.term.match(/[\p{L}\p{N}'\u2019-]+/gu)||[]).length, items:n, term:P.about.term, bounced:true});
 }
@@ -3154,6 +3175,10 @@ function keepRowShow(rect){
     keepInto(newBin(n.trim() || "Kept", "blue"));
   };
   row.appendChild(nb);
+  // The row is not inside the tooltip, so it has to stop a press itself:
+  // anything that reaches the document hides the tooltip, and hiding the
+  // tooltip removed this row before its own click could land.
+  row.addEventListener("mousedown", function(e){ e.stopPropagation(); });
   document.body.appendChild(row);
   keepRowEl = row;
   var r = row.getBoundingClientRect();
@@ -3212,7 +3237,7 @@ function jumpToKept(k){
   say("Jumped to: " + k.text);
 }
 function paintBinPanel(){
-  var open = BINS.filter(function(b){ return b.open; });
+  var open = BINS.filter(function(b){ return b.on; });
   var el = binPanelEl();
   el.style.display = open.length ? "" : "none";
   if (!open.length) return;
@@ -3253,17 +3278,6 @@ function labShow(rect, term, savedId, hlId){
 
   CLASSES.filter(function(c){ return c.on; }).forEach(function(c){
     var n = slotNode("__cls_" + c.id); if (n) ttEl.appendChild(n);
-  });
-  // A bin switched on is called into the text and filled as the learner reads
-  // (selection-routing-brief.md §1, "switched on"). The Keep button reaches
-  // every bin; this is the shortcut for the one in use.
-  BINS.filter(function(b){ return b.on; }).forEach(function(bin){
-    var bb = document.createElement("button");
-    bb.className = "tt-x"; bb.title = "Keep this in " + bin.name;
-    bb.innerHTML = '<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:'
-      + (COLS[bin.colour] || "#6cc0ff") + '"></span> ' + esc(bin.name);
-    bb.onclick = function(e){ e.stopPropagation(); keepInto(bin); };
-    ttEl.appendChild(bb);
   });
   // Classes are offered above and nowhere else. Without this they could arrive
   // twice — once from the class list and once from the slot list — and turning
@@ -3318,6 +3332,10 @@ function labShow(rect, term, savedId, hlId){
   labPaint();
 }
 function labHide(){ if (ttEl){ ttEl.remove(); ttEl = null; } keepRowHide(); }
+/* Esc closes the keep row and leaves everything else alone. */
+document.addEventListener("keydown", function(e){
+  if (e.key === "Escape" && keepRowEl){ keepRowHide(); say("Keep: nothing chosen"); }
+});
 
 /* app-lab.js's own reopenTT reads _ttTerm, which only its own showTT sets and
    that no longer runs. This reads ours, so the tooltip still stays open after
@@ -3383,6 +3401,8 @@ window.addEventListener("blur", function(){ revealed = false; });
 
 document.addEventListener("mousedown", function(e){
   if (ttEl && ttEl.contains(e.target)) return;
+  if (keepRowEl && keepRowEl.contains(e.target)) return;
+  if (e.target.closest && e.target.closest("#labai")) return;   // a bounce's own buttons
   if ($("labdr").contains(e.target) || e.target.id === "labbtn") return;
   // A press anywhere else gives up on a part-built item — unless the modifier
   // is down, which is how the next piece gets selected.
@@ -3772,7 +3792,6 @@ function paintBins(){
       + 'border-radius:2px;background:' + (COLS[b.colour] || "#6cc0ff") + '"></span>'
       + '<span style="flex:1">' + esc(b.name) + ' <span style="color:#8b9099">' + c + "</span></span>"
       + '<button class="lb sm' + (b.on ? " on" : "") + '" data-on="' + b.id + '">on</button>'
-      + '<button class="lb sm' + (b.open ? " on" : "") + '" data-open="' + b.id + '">open</button>'
       + '<button class="lb sm warn" data-del="' + b.id + '">\u00d7</button></div>';
   }).join("") : '<p style="margin:6px 0 0;color:#8b9099">No collections yet. The Keep button in the tooltip can make the first one.</p>';
 }
@@ -3863,9 +3882,8 @@ $("binadd").onclick = function(){
 };
 $("binlist").onclick = function(e){
   var b = e.target.closest("button"); if (!b) return;
-  var id = b.dataset.on || b.dataset.open || b.dataset.del, bin = binById(id); if (!bin) return;
+  var id = b.dataset.on || b.dataset.del, bin = binById(id); if (!bin) return;
   if (b.dataset.on) bin.on = !bin.on;
-  else if (b.dataset.open) bin.open = !bin.open;
   else if (b.dataset.del){
     if (!confirm("Delete \u201C" + bin.name + "\u201D and everything kept in it?")) return;
     BINS = BINS.filter(function(x){ return x.id !== id; });
