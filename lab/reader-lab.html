@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-26b (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-26c (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -3347,6 +3347,70 @@ function labReopen(termId, hlId){
   if (!r || !term){ labHide(); return; }
   labShow(r, term, termId || null, hlId === undefined ? undefined : (hlId || null));
 }
+
+/* ── when the reader shows no tooltip at all ───────────────────────────
+   The reader turns a selection into character offsets by looking for the word
+   span (.w) at each end — `charOffsetOfPoint` in app.js. The spaces between
+   words are plain text and are NOT inside a span, so a selection whose start or
+   end lands on a space maps to nothing, `selectionCharRange` returns null, and
+   no tooltip is shown. Dragging to the beginning or the end of a line is
+   exactly that: the space that wraps the line sits at the end of the drag.
+   Which is why it never happens in the middle of a line.
+
+   app-lab.js is not edited (it stays byte-identical to app.js), so the lab
+   notices the gap and opens the tooltip itself, reading the same data-c
+   offsets the reader would have used and trimming the selection in to the
+   words it actually covers. */
+function labWordRange(){
+  var root = document.getElementById("r-render"); if (!root) return null;
+  var sel; try{ sel = window.getSelection(); }catch(e){ return null; }
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  var r; try{ r = sel.getRangeAt(0); }catch(e){ return null; }
+  if (!r.toString().trim()) return null;
+  if (!root.contains(r.commonAncestorContainer)) return null;
+
+  var inW = function(node){
+    var el = (node && node.nodeType === 3) ? node.parentElement : node;
+    return (el && el.closest) ? el.closest(".w") : null;
+  };
+  var cOf = function(el){ var c = parseInt(el.dataset.c, 10); return isNaN(c) ? null : c; };
+  var inside = [];                       // every word span the selection touches
+  var ws = root.querySelectorAll(".w");
+  for (var i = 0; i < ws.length; i++){
+    var w = ws[i], pos;
+    try{ pos = r.comparePoint(w, 0); }catch(e){ pos = r.intersectsNode(w) ? 0 : 1; }
+    if (pos === 0 && cOf(w) !== null) inside.push(w);
+  }
+
+  var sw = inW(r.startContainer), ew = inW(r.endContainer), start = null, end = null;
+  if (sw && cOf(sw) !== null && r.startContainer.nodeType === 3) start = cOf(sw) + r.startOffset;
+  else if (inside.length) start = cOf(inside[0]);
+  if (ew && cOf(ew) !== null && r.endContainer.nodeType === 3) end = cOf(ew) + r.endOffset;
+  else if (inside.length){ var L = inside[inside.length-1]; end = cOf(L) + L.textContent.length; }
+  if (start === null || end === null || end <= start) return null;
+
+  var rect; try{ rect = r.getBoundingClientRect(); }catch(e){ rect = null; }
+  if (!rect || !rect.width) return null;
+  return {start:start, end:end, rect:rect};
+}
+function labRescue(){
+  var got = labWordRange(); if (!got) return;
+  // The reader's own state, set the way the reader would have set it, so
+  // everything downstream (saved ids, highlights, Add, Keep) reads one range.
+  ui.lastSelRange = {start:got.start, end:got.end};
+  if (ttEl) return;                                   // the reader managed it
+  var term = bodyText().slice(got.start, got.end).replace(/\s+/g, " ").trim();
+  if (!term) return;
+  labShow(got.rect, term, undefined, undefined);
+  say("The reader could not place that selection (it ended outside a word) — the lab placed it: "
+      + got.start + "–" + got.end);
+}
+document.addEventListener("mouseup", function(e){
+  if (ttEl && ttEl.contains(e.target)) return;
+  if (keepRowEl && keepRowEl.contains(e.target)) return;
+  if ($("labai").contains(e.target) || $("labdr").contains(e.target)) return;
+  setTimeout(labRescue, 20);
+});
 
 window.showTT   = labShow;
 window.hideTT   = labHide;
