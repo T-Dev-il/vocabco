@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-27d (Contractor 14).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-27e (Contractor 14).  SCAFFOLDING (route.md §4).
+  27e: "Explain in" is a real dropdown, with Other… for any language.
   27d: learner language picked in the Language card; the say-it script keeps the form on the page.
   27c: English as a second target language (english-profile-brief.md rev 2).
   27b and before: Contractor 13 and earlier.
@@ -648,11 +649,9 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <button class="lb sm tlb" data-l="en">English</button>
       <span class="langguess" id="langguess"></span></div>
     <div class="r"><label class="inl">Explain in</label>
-      <input type="text" id="learnlang" list="learnlanglist" style="flex:1" placeholder="pick or type a language">
-      <datalist id="learnlanglist"><option value="German"><option value="English"><option value="French">
-        <option value="Spanish"><option value="Italian"><option value="Portuguese"><option value="Dutch">
-        <option value="Polish"><option value="Turkish"><option value="Ukrainian"><option value="Russian">
-        <option value="Arabic"><option value="Chinese"><option value="Japanese"></datalist></div>
+      <select id="learnlangsel" style="flex:1"></select></div>
+    <div class="r" id="learnlangother" style="display:none"><label class="inl"></label>
+      <input type="text" id="learnlang" style="flex:1" placeholder="type the language, then Enter"></div>
     <p style="margin-top:4px" id="learnlanghint"></p>
     <div class="r"><label class="inl">English</label>
       <button class="lb sm varb" data-v="US">American</button>
@@ -4547,23 +4546,36 @@ function paintLang(){
   var vn = $("voicename");
   if (vn){ var tag = voiceTag(lang), v = pickVoice(tag);
     vn.textContent = tag + ": " + (v ? v.name : voicesNow().length ? "no matching voice, the browser's default" : "voices not loaded yet"); }
-  var ll = $("learnlang");
-  if (ll && document.activeElement !== ll) ll.value = learnLang(lang);
+  var ll = $("learnlang"), sel = $("learnlangsel"), cur = learnLang(lang);
+  if (sel){
+    var known = EXPLAIN_LANGS.indexOf(cur) >= 0;
+    sel.innerHTML = EXPLAIN_LANGS.map(function(n){ return '<option value="' + esc(n) + '"' + (n === cur ? " selected" : "") + ">" + esc(n) + "</option>"; }).join("")
+      + '<option value="__other"' + (known ? "" : " selected") + '>' + (known ? "Other\u2026" : "Other: " + esc(cur)) + "</option>";
+    if (document.activeElement !== ll){ ll.value = known ? "" : cur; $("learnlangother").style.display = known ? "none" : ""; }
+  }
   var h = $("learnlanghint");
   if (h) h.textContent = "Meanings, notes and translations are written in this language, for "
     + (LANG_NAMES[lang] || lang) + " texts. Kept separately for each language you read. "
     + "An open profile keeps the language it was made in; the next one uses this.";
 }
-$("learnlang").oninput = function(){
-  // picking from the list fires input, not change, in some browsers
-  var v = this.value;
-  if (Array.from($("learnlanglist").options).some(function(o){ return o.value === v; })) this.onchange();
-};
-$("learnlang").onchange = function(){
+/* A plain dropdown of the commonest languages, and "Other…" for anything else,
+   typed by hand. The name is passed to the AI as written, so any language the
+   model knows works. */
+var EXPLAIN_LANGS = ["German","English","French","Spanish","Italian","Portuguese","Dutch","Polish","Czech",
+  "Swedish","Danish","Norwegian","Finnish","Greek","Turkish","Ukrainian","Russian","Romanian","Hungarian",
+  "Hebrew","Arabic","Persian","Hindi","Chinese","Japanese","Korean","Vietnamese","Thai","Indonesian"];
+function setLearnLang(v){
   var lang = textLang(), def = lang === "de" ? "English" : "German";
-  saveL(lang === "de" ? "learnlang" : "learnlang_" + lang, this.value.trim() || def);
-  say("Learner speaks " + learnLang(lang) + " (for " + (LANG_NAMES[lang] || lang) + " texts)");
+  saveL(lang === "de" ? "learnlang" : "learnlang_" + lang, String(v || "").trim() || def);
+  say("Explained in " + learnLang(lang) + " (for " + (LANG_NAMES[lang] || lang) + " texts)");
+  paintLang();
+}
+$("learnlangsel").onchange = function(){
+  if (this.value === "__other"){ $("learnlangother").style.display = ""; $("learnlang").focus(); return; }
+  setLearnLang(this.value);
 };
+$("learnlang").onchange = function(){ if (this.value.trim()) setLearnLang(this.value); };
+$("learnlang").onkeydown = function(e){ if (e.key === "Enter") this.blur(); };
 document.querySelectorAll(".tlb").forEach(function(b){ b.onclick = function(){
   var o = load("textlang", {}) || {}, id = ui.readerTextId;
   if (!id){ say("Open a text first"); return; }
