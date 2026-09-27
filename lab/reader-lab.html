@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-26c (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-27a (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -269,6 +269,27 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     border-radius:6px;padding:5px 8px;font:12px inherit;font-family:inherit;background:#fff;
     color:#1B1E21;max-width:100%}
   #labdr label.inl{font-size:11.5px;color:#6B7178;min-width:62px}
+  /* The stack chip (chips-and-panels-v2.html, "Stack"), on an Add++ item.
+     The reader's own saved mark is the chip; two leaves sit behind it. */
+  #r-render mark.saved.lab-pp{position:relative;isolation:isolate;border-radius:4px;
+    background:#fff;box-shadow:inset 0 0 0 .5px #CFCFCB;padding:0 .34em}
+  #r-render mark.saved.lab-pp::before,#r-render mark.saved.lab-pp::after{content:"";
+    position:absolute;inset:0;z-index:-1;border-radius:inherit;background:#fff;
+    box-shadow:inset 0 0 0 .5px #CFCFCB;transition:transform .2s cubic-bezier(.2,.75,.2,1)}
+  #r-render mark.saved.lab-pp::before{transform:translate(2px,2px)}
+  #r-render mark.saved.lab-pp::after{transform:translate(4px,4px);z-index:-2;background:#F6F6F4}
+  #r-render mark.saved.lab-pp:hover::before{transform:translate(3px,3px) rotate(1deg)}
+  #r-render mark.saved.lab-pp:hover::after{transform:translate(6px,5px) rotate(2deg)}
+  .pp-sign{position:relative;display:inline-block;margin-left:.32em;vertical-align:middle;flex:none}
+  .pp-sign-work{width:8px;height:8px;border-radius:50%;box-shadow:inset 0 0 0 1px #DCE0E7;
+    animation:pp-spin 1.6s linear infinite}
+  .pp-sign-work::after{content:"";position:absolute;top:-1px;left:50%;width:3px;height:3px;
+    margin-left:-1.5px;border-radius:50%;background:#6F7C93}
+  .pp-sign-attn{font:600 11.5px/1 Inter,system-ui,sans-serif;color:#D2801E}
+  .pp-sign-attn::after{content:"?"}
+  .pp-sign-fail{font:600 11.5px/1 Inter,system-ui,sans-serif;color:#A23E2A}
+  .pp-sign-fail::after{content:"!"}
+  @keyframes pp-spin{to{transform:rotate(360deg)}}
   .sel-tt.keep-row{position:fixed;z-index:95}
   #binpanel{position:fixed;right:16px;top:70px;width:262px;z-index:88;background:#fff;
     border:1px solid #D9DBD5;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.10);
@@ -831,12 +852,13 @@ function defaults(){ return {
   relatives: {label:"Relatives here", icon:"link", showLabel:false, kind:"none"},
   note:      {label:"Note", icon:"note", showLabel:false, kind:"none"},
   collect:   {label:"Collect", icon:"listPlus", showLabel:false, kind:"none"},
-  keep:      {label:"Keep", icon:"listPlus", showLabel:true, kind:"keep", wired:true}
+  keep:      {label:"Keep", icon:"listPlus", showLabel:true, kind:"keep", wired:true},
+  addpp:     {label:"Add++", useReaderIcon:"plus", showLabel:true, kind:"addpp", wired:true}
 };}
 function defaultComp(){ return {
-  subword:["add","translate","highlight","profile","examples","keep"], word:["add","translate","highlight","profile","examples","keep"],
-  phrase:["add","translate","highlight","profile","examples","keep"], sentence:["add","translate","highlight","keep"],
-  beyond:["add","translate","highlight","keep"], multi:["add","translate","highlight","profile","examples","keep"]
+  subword:["add","addpp","translate","highlight","profile","examples","keep"], word:["add","addpp","translate","highlight","profile","examples","keep"],
+  phrase:["add","addpp","translate","highlight","profile","examples","keep"], sentence:["add","addpp","translate","highlight","keep"],
+  beyond:["add","addpp","translate","highlight","keep"], multi:["add","addpp","translate","highlight","profile","examples","keep"]
 };}
 
 /* The two that were confusable, named for what they are. "More than one
@@ -1076,6 +1098,7 @@ function labPaint(){
     root.querySelectorAll('.lab-note:not([data-notes])').forEach(function(sp){
       sp.setAttribute("data-notes", byRange[k].join(",")); });
   });
+  ppPaint();
   KEPT.forEach(function(k){
     if (k.textId !== tid) return;
     var bin = binById(k.bin); if (!bin || !bin.on) return;
@@ -1338,6 +1361,7 @@ function autoSave(P){
   var settled = P.s1.state === "done" && P.s2a.state !== "waiting" && P.s2b.state !== "waiting"
     && (!P.s3 || P.s3.state !== "waiting");
   if (!settled || P.removed) return;
+  ppSet(P, (P.alts && P.alts.length) ? "attn" : "plain");
   var snap = profileSnapshot(P);
   var ranges = P.ranges.map(function(r){ return {start:r.start, end:r.end}; });
   var n = P.noteId && NOTES.filter(function(x){ return x.id === P.noteId; })[0];
@@ -1950,6 +1974,7 @@ var CALL_APPLY = {
     P.labels = (j.items || []).filter(function(x){ return x && (x.words || []).length; });
     P.itemCount = P.labels.length;
     locate(P);
+    if (P.ppId) ppRepoint(P.ppId, P.ranges);
     routeNote(P);
     return P.item.item + " (" + P.item.pos + ")"
       + (P.itemCount ? ", " + P.itemCount + " item" + (P.itemCount > 1 ? "s" : "") + " in the selection" : "")
@@ -2013,7 +2038,7 @@ async function runStage1(P){
   P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); paintProfile();
   var ok = await runCall(P, identifyId());
   if (P !== PF) return;
-  if (!ok){ P.s2a = P.s2b = P.s3 = slotF("waits on finding the item"); paintProfile(); return; }
+  if (!ok){ P.s2a = P.s2b = P.s3 = slotF("waits on finding the item"); ppSet(P, "fail"); paintProfile(); return; }
   if (P.itemCount > 2){ bounceTooMany(P); return; }
   runStage2(P);
 }
@@ -2024,6 +2049,8 @@ async function runStage1(P){
 function bounceTooMany(P){
   var anchor = P.anchor || null, n = P.itemCount;
   var names = P.labels.map(function(x){ return x.item; }).filter(Boolean);
+  // A bounced selection is not a chip state: the chip goes back off the page.
+  if (P.ppId){ var gone = P.ppId; delete PP[gone]; unsaveReaderTerm(gone); say("  the chip was taken back off"); }
   PF = null; labPaint();
   showAI("Too many parts",
     "This selection holds " + n + " separate lexical items, so it cannot be saved as one."
@@ -2267,6 +2294,94 @@ function findPieces(a, pieces){
   return {ranges:out, missing:missing};
 }
 
+/* ── Add++ : save and profile as one act ──────────────────────────────
+   item-resolution-brief.md §5 and Contractor 12's §6.3. Add stays exactly as it
+   was; this is the merged act beside it, so the two can be compared.
+
+   One press: the chip goes on the page at once, the profile runs behind it, and
+   the chip re-covers the cleaned-up words when the call says what they are.
+
+   Four states, from chips-and-panels-v2.html (the stack chip):
+     plain   nothing pending
+     work    an orbit, while the calls are out
+     attn    an orange ? — there is a quiet keep-or-change here
+     fail    a red ! — the run failed
+   Settled is plain again. Colour and the rest of the look are a UI question and
+   are deliberately not decided here. */
+var PP = {};                      // termId -> "work" | "attn" | "fail" | "plain"
+function ppLabel(st){
+  return st === "work" ? "working" : st === "attn" ? "needs a look"
+       : st === "fail" ? "failed" : "settled";
+}
+function ppPaint(){
+  var root = document.getElementById("r-render"); if (!root) return;
+  Object.keys(PP).forEach(function(id){
+    var st = PP[id] || "plain";
+    var all = root.querySelectorAll('mark.saved[data-rterm="' + id + '"]');
+    all.forEach(function(mk, i){
+      mk.classList.add("lab-pp");
+      mk.classList.remove("pp-work", "pp-attn", "pp-fail");
+      if (st !== "plain") mk.classList.add("pp-" + st);
+      var old = mk.querySelector(".pp-sign"); if (old) old.remove();
+      if (i === all.length - 1 && st !== "plain"){
+        var sign = document.createElement("i");
+        sign.className = "pp-sign pp-sign-" + st;
+        sign.title = st === "work" ? "Working on the profile"
+                   : st === "attn" ? "There is a keep-or-change in this one"
+                   : "The profile failed";
+        mk.appendChild(sign);
+      }
+    });
+  });
+}
+function ppSet(P, st){
+  if (!P || !P.ppId || PP[P.ppId] === st) return;
+  PP[P.ppId] = st; ppPaint();
+  say("  chip: " + ppLabel(st));
+}
+/* The chip covers the cleaned-up pieces once the call has said what they are
+   (item-resolution-brief.md §1: the messy original selection is not kept). */
+async function ppRepoint(id, ranges){
+  var tid = ui.readerTextId, t = S.texts[tid];
+  if (!t || !id || !ranges || !ranges.length) return;
+  var cur = (t.marks || []).filter(function(m){ return m.type === "saved" && m.termId === id; })
+                           .sort(function(a, b){ return a.start - b.start; });
+  var want = ranges.slice().sort(function(a, b){ return a.start - b.start; });
+  var same = cur.length === want.length && cur.every(function(m, i){
+    return m.start === want[i].start && m.end === want[i].end; });
+  if (same) return;
+  t.marks = (t.marks || []).filter(function(m){ return !(m.type === "saved" && m.termId === id); });
+  want.forEach(function(r){ t.marks.push({type:"saved", start:r.start, end:r.end, termId:id}); });
+  t.updatedAt = Date.now(); t.lastActiveAt = Date.now();
+  render();
+  try{ await VocabStore.set({texts: S.texts}); }
+  catch(e){ say("  could not move the chip onto the cleaned-up words"); }
+  await settle(); ppPaint();
+  say("  chip now covers: " + want.map(function(r){ return bodyText().slice(r.start, r.end); }).join(" … "));
+}
+async function addPlusPlus(){
+  var m = measureOf();
+  if (GATE_ON && !m.item){ bounceNotItem(m, ttEl ? ttEl.getBoundingClientRect() : null); return; }
+  var rs = heldRanges();
+  if (!rs.length){ say("Add++: the reader could not place that selection"); return; }
+  var b = bodyText(), s0 = rs[0].start, e0 = rs[rs.length-1].end;
+  var bounds = sentenceBounds(b, s0, e0);
+  var about = { term: heldTerm(), textId: ui.readerTextId, meas: m,
+    ranges: rs.map(function(x){ return {start:x.start, end:x.end}; }), bounds: bounds,
+    sentence: b.slice(bounds.start, bounds.end).replace(/\s+/g, " ").trim(),
+    context: (typeof makeContext === "function") ? makeContext(b, s0, e0 - s0, 200)
+             : b.slice(Math.max(0, s0-200), Math.min(b.length, e0+200)) };
+  var anchor = ttEl ? ttEl.getBoundingClientRect() : null;
+  // The chip first, by the create-first order of FIX-013, so it is on the page
+  // before anything is asked.
+  if (!parts.length && LAST && LAST.range) parts = [makePart(LAST.range, LAST.term)];
+  var id = await applyToParts("add");
+  if (!id){ say("Add++: nothing was saved, so no profile was started"); return; }
+  PP[id] = "work"; ppPaint();
+  say("Add++: chip on the page, profile starting — " + about.term);
+  startProfileOn(about, anchor, id);
+}
+
 function startProfile(label){
   var b = bodyText(), rs = heldRanges();
   if (!rs.length){ say("Profile: nothing selected"); return; }
@@ -2280,7 +2395,13 @@ function startProfile(label){
     sentence: b.slice(bounds.start, bounds.end).replace(/\s+/g, " ").trim(),
     context: (typeof makeContext === "function") ? makeContext(b, s0, e0 - s0, 200)
              : b.slice(Math.max(0, s0-200), Math.min(b.length, e0+200)) };
-  PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: ttEl ? ttEl.getBoundingClientRect() : null,
+  startProfileOn(a, ttEl ? ttEl.getBoundingClientRect() : null, null);
+}
+
+/* The profile, on a selection already worked out. Add++ uses this with the id of
+   the chip it has just put on the page, so the chip can follow the run. */
+function startProfileOn(a, anchor, ppId){
+  PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: anchor, ppId: ppId || null,
     item: {item:a.term, on_page:[a.term], added:[], companions:[], pos:"", meaning:""},
     s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), alts: [], altsOpen: false,
     ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: callModel(callDef(identifyId())) };
@@ -2999,6 +3120,13 @@ function slotNode(id, ghost){
     return b2;
   }
 
+  if (s.kind === "addpp"){
+    b2.className = pre + "tt-add";
+    b2.title = "Save and profile in one act \u2014 the chip appears at once";
+    b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
+    b2.onclick = function(e){ e.stopPropagation(); b2.disabled = true; addPlusPlus(); };
+    return b2;
+  }
   if (s.kind === "keep"){
     b2.className = pre + "tt-x"; b2.title = "Keep this in a collection";
     b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
@@ -3123,6 +3251,7 @@ async function applyToParts(what, colour){
   say((n === rs.length ? "  OK: " : "  PROBLEM: ") + n + " of " + rs.length
       + " pieces carry the id after saving " + ms());
   labPaint();
+  return id;                      // Add++ needs it to follow its own chip
 }
 
 async function capture(cls){
@@ -3589,11 +3718,25 @@ function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets()
 /* A layout saved before Keep existed has no Keep in it. Put it back, once. */
 function ensureKeepSlot(){
   if (!SLOTS.keep) SLOTS.keep = {label:"Keep", icon:"listPlus", showLabel:true, kind:"keep", wired:true};
-  if (load("keepslot", false) === true) return;
-  Object.keys(COMP).forEach(function(k){
-    if ((COMP[k] || []).indexOf("keep") < 0) COMP[k] = (COMP[k] || []).concat(["keep"]);
-  });
-  saveL("keepslot", true); keep();
+  if (load("keepslot", false) !== true){
+    Object.keys(COMP).forEach(function(k){
+      if ((COMP[k] || []).indexOf("keep") < 0) COMP[k] = (COMP[k] || []).concat(["keep"]);
+    });
+    saveL("keepslot", true); keep();
+  }
+  // Add++ (the merged act) reaches layouts saved before it existed, next to Add.
+  if (!SLOTS.addpp) SLOTS.addpp = {label:"Add++", useReaderIcon:"plus", showLabel:true, kind:"addpp", wired:true};
+  if (load("ppslot", false) !== true){
+    Object.keys(COMP).forEach(function(k){
+      var l = (COMP[k] || []).slice();
+      if (l.indexOf("addpp") < 0){
+        var at = l.indexOf("add");
+        if (at < 0) l.push("addpp"); else l.splice(at + 1, 0, "addpp");
+        COMP[k] = l;
+      }
+    });
+    saveL("ppslot", true); keep();
+  }
 }
 function syncClassSlots(){
   Object.keys(SLOTS).forEach(function(k){
