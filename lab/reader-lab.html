@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-27b (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-27c (Contractor 14).  SCAFFOLDING (route.md §4).
+  27c: English as a second target language (english-profile-brief.md rev 2).
+  27b and before: Contractor 13 and earlier.
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -606,6 +608,18 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   .lab-note{text-decoration:underline dotted #7a8f5c;text-underline-offset:4px;text-decoration-thickness:1.5px;cursor:help}
   .lab-note:hover{background:rgba(122,143,92,.14);border-radius:2px}
 
+  /* English: one spelling, several sounds (english-profile-brief.md §5). */
+  #labai .pf-trk{margin-top:8px;font:12.5px/1.45 var(--pfui)}
+  #labai .pf-trk-note{opacity:.85}
+  #labai .pf-script{margin:6px 0 0;padding-left:18px;font:13.5px/1.45 var(--pfs)}
+  #labai .pf-script li{padding:2px 0}
+  #labai .pf-lq .pf-trk{color:var(--acc)}
+  #labai .pf-lq .pf-script{color:var(--ink-l);font-family:var(--pfg);font-size:16px}
+  #labai .pf-hc .pf-trk-note{font:400 15px/1.35 var(--pfh)}
+  #labai .pf-play.pf-playing{box-shadow:inset 0 0 0 1.5px currentColor}
+  #labai .pf-watch::before{content:"watch out \00b7  ";opacity:.6;font-style:normal;font-size:11px}
+  .langguess{font-size:11px;color:#8b9099}
+
   /* A span held while a several-part item is being built. */
   .lab-held{outline:1.5px dashed #4a6f9e;outline-offset:2px;border-radius:3px;
     background:rgba(74,111,158,.10)}
@@ -621,6 +635,28 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
 <div id="labdr">
   <div class="dh"><b>Tooltip composer</b><span class="sp"></span>
     <button class="lb sm" id="labclose">Close</button></div>
+
+  <div class="card">
+    <h3>Language</h3>
+    <p>The language of the text that is open. The lab guesses it from the text;
+      a switch here overrides the guess for this text only. The profile, its
+      presets, its links and its voice all follow it.</p>
+    <div class="r"><label class="inl">This text</label>
+      <button class="lb sm tlb" data-l="auto">guess</button>
+      <button class="lb sm tlb" data-l="de">German</button>
+      <button class="lb sm tlb" data-l="en">English</button>
+      <span class="langguess" id="langguess"></span></div>
+    <div class="r"><label class="inl">English</label>
+      <button class="lb sm varb" data-v="US">American</button>
+      <button class="lb sm varb" data-v="UK">British</button>
+      <span class="langguess">spelling, words and voice</span></div>
+    <div class="r"><label class="inl">Voice</label>
+      <span id="voicename" style="flex:1;font-size:11.5px;color:#6B7178"></span>
+      <button class="lb sm" id="voicetest">Try it</button></div>
+    <p style="margin-top:6px">The voice is this browser's own. The one picked is the
+      best-sounding match for the language and variety that this device offers, so it
+      differs between your computer and your phone.</p>
+  </div>
 
   <div class="card">
     <h3>Sentence ends · gate test</h3>
@@ -693,7 +729,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       the repository, not in the database. Anyone who opens this page on your
       machine can use it, and nobody else can.</p>
     <div class="r"><label class="inl">Key</label>
-      <input type="password" id="aikey" placeholder="AIza\u2026 or AQ.\u2026" style="flex:1"></div>
+      <input type="password" id="aikey" placeholder="AIza… or AQ.…" style="flex:1"></div>
     <div class="r"><label class="inl">Model</label>
       <select id="aimodelpick" style="flex:1"></select></div>
     <div class="r" id="aimodelother" style="display:none"><label class="inl"></label>
@@ -709,6 +745,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div id="aistatus" style="font-size:11.5px;color:#6B7178;margin-top:7px"></div>
     <div class="r" style="margin-top:9px"><label class="inl">Learner speaks</label>
       <input type="text" id="learnlang" style="flex:1"></div>
+    <p style="margin-top:4px" id="learnlanghint"></p>
     <div class="r"><label class="inl">Level</label>
       <button class="lb sm lvlb" data-lvl="A1">A1</button><button class="lb sm lvlb" data-lvl="A2">A2</button>
       <button class="lb sm lvlb" data-lvl="B1">B1</button><button class="lb sm lvlb" data-lvl="B2">B2</button>
@@ -743,7 +780,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div id="presetcmp" style="overflow-x:auto"></div>
     <details id="presetedit" class="bc"><summary>Edit this preset</summary><div id="presetbody"></div></details>
     <div id="benchcalls"></div>
-    <details class="bc"><summary><b>Links</b> \u00b7 services a link slot can open</summary>
+    <details class="bc"><summary><b>Links</b> · services a link slot can open</summary>
       <div id="linkedit"></div></details>
     <p style="margin-top:8px"><b>Slots:</b> <span id="benchslots"></span></p>
     <h3 style="margin-top:14px">Mistake log</h3>
@@ -769,8 +806,8 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <h3>Slots in the bar</h3>
     <div id="slotlist"></div>
     <div class="r" style="margin-top:9px">
-      <button class="lb sm" id="moveL">\u2190 earlier</button>
-      <button class="lb sm" id="moveR">later \u2192</button></div>
+      <button class="lb sm" id="moveL">← earlier</button>
+      <button class="lb sm" id="moveR">later →</button></div>
     <div class="r"><input type="text" id="newslot" placeholder="New slot" style="flex:1">
       <button class="lb sm" id="addslot">Add</button></div>
   </div>
@@ -875,14 +912,14 @@ function defaultComp(){ return {
    is one item whose pieces are not next to each other. */
 var EXTENTS = [
   {id:"subword", name:"Part of a word",
-   note:"The selection lies strictly inside one word \u2014 a prefix, a stem, an ending. Spaces either side of what you dragged never change the answer."},
+   note:"The selection lies strictly inside one word — a prefix, a stem, an ending. Spaces either side of what you dragged never change the answer."},
   {id:"word", name:"One word", note:"One word, on its own."},
   {id:"phrase", name:"A few words", note:"More than one word, inside a single sentence."},
   {id:"sentence", name:"One sentence", note:"A whole sentence, or something long enough to be treated as one."},
   {id:"beyond", name:"More than one sentence",
-   note:"One continuous run of text that crosses a full stop \u2014 a passage. Still a single drag."},
+   note:"One continuous run of text that crosses a full stop — a passage. Still a single drag."},
   {id:"multi", name:"Several parts of one thing",
-   note:"One item whose pieces are NOT next to each other \u2014 steht \u2026 auf, ne \u2026 pas. Hold Ctrl or Cmd and select the second piece. The only kind you cannot arrive at by dragging."}
+   note:"One item whose pieces are NOT next to each other — steht … auf, ne … pas. Hold Ctrl or Cmd and select the second piece. The only kind you cannot arrive at by dragging."}
 ];
 
 var SLOTS = mergeSlots(load("slots", null));
@@ -960,7 +997,7 @@ function keptSize(m){
 }
 function keepInto(bin){
   var b = bodyText(), rs = heldRanges();
-  if (!rs.length){ say("Nothing to keep \u2014 the reader could not place that selection"); return; }
+  if (!rs.length){ say("Nothing to keep — the reader could not place that selection"); return; }
   var s0 = rs[0].start, e0 = rs[rs.length-1].end, hit = heldTerm(), m = measureOf();
   KEPT.unshift({ id:"k"+Date.now().toString(36), bin:bin.id, binName:bin.name, colour:bin.colour,
     text:hit, size:keptSize(m), W:m.W, E:m.E, S:m.S,
@@ -1004,20 +1041,51 @@ function selNeighbours(){
 }
 function classify(raw, before, after){
   var t = String(raw||"").trim(); if (!t) return null;
-  var L = /[A-Za-z0-9\u00C0-\u024F]/;
+  var L = /[A-Za-z0-9À-ɏ]/;
   if (!/\s/.test(t)){
     if ((L.test(t.charAt(0)) && L.test(before||"")) ||
         (L.test(t.charAt(t.length-1)) && L.test(after||""))) return "subword";
   }
-  var words = t.match(/[A-Za-z0-9\u00C0-\u024F'\u2019-]+/g) || [];
+  var words = t.match(/[A-Za-z0-9À-ɏ'’-]+/g) || [];
   if (crossesSentenceEnd(t)) return "beyond";   // the gate, item-resolution-brief.md §2
-  if (/[.!?]["'\u201D]?$/.test(t) || words.length > 8) return "sentence";
+  if (/[.!?]["'”]?$/.test(t) || words.length > 8) return "sentence";
   if (words.length > 1) return "phrase";
   return "word";
 }
 
 /* ── context for a capture ────────────────────────────────────────────── */
 function bodyText(){ try{ return (S.texts[ui.readerTextId] || {}).body || ""; }catch(e){ return ""; } }
+
+/* ── which language the open text is in (Contractor 14) ────────────────
+   German was the only target language, so nothing asked. Now each text has
+   one: guessed from its commonest short words, and overridable per text in the
+   composer. The override lives in this browser only, keyed by text id. The
+   profile, its presets, its links, the sentence rules and the voice all follow
+   it. A saved profile carries the language it was made in. */
+var LANG_NAMES = {de:"German", en:"English"};
+var LANG_WORDS = {
+  de:"der die das und ist nicht ich sie es ein eine zu mit auf für den dem sich auch wir ihr aber wie noch nach bei aus war hat sind".split(" "),
+  en:"the and is of to in that it you was for on are with as this be have not they at but his her from we by had what were there".split(" ")
+};
+function guessLang(body){
+  var w = String(body || "").slice(0, 4000).toLowerCase().match(/[a-zäöüß]+/g) || [];
+  var n = {de:0, en:0};
+  w.forEach(function(x){ Object.keys(n).forEach(function(l){ if (LANG_WORDS[l].indexOf(x) >= 0) n[l]++; }); });
+  return n.en > n.de ? "en" : "de";          // German stays the default when unsure
+}
+function textLangSet(){ return (load("textlang", {}) || {})[ui.readerTextId] || ""; }
+function textLang(){ try{ return textLangSet() || guessLang(bodyText()); }catch(e){ return "de"; } }
+/* The open text's language. Anything about a profile already running reads
+   that profile's own P.lang instead, so switching texts never re-labels it. */
+function curLang(){ return textLang(); }
+function variety(){ return load("variety", "US") === "UK" ? "UK" : "US"; }
+function varietyName(){ return variety() === "UK" ? "British English" : "American English"; }
+/* The learner's own language, kept per target language: someone reading English
+   is most likely a German speaker, someone reading German an English one. */
+function learnLang(lang){
+  lang = lang || curLang();
+  return lang === "de" ? load("learnlang", "English") : load("learnlang_" + lang, "German");
+}
 function sentenceAround(b, start, end){
   var s = Math.max(b.lastIndexOf(".", start-1), b.lastIndexOf("!", start-1), b.lastIndexOf("?", start-1));
   s = s < 0 ? 0 : s + 1;
@@ -1176,7 +1244,7 @@ document.addEventListener("click", function(e){
 var AI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /* Google is retiring the old AIza "traffic keys" in favour of AQ "authentication
-   keys", and AI Studio now issues only the AQ kind \u2014 but the Generative
+   keys", and AI Studio now issues only the AQ kind — but the Generative
    Language REST endpoint has not caught up and refuses them, whichever way they
    are sent. The key is real; the endpoint will not take it. So how it is sent is
    a setting rather than an assumption, and the test says which half failed:
@@ -1225,7 +1293,7 @@ async function askAI(promptText, opts){
     if (!r.err){ if (modes[i].mode !== start) saveL("aischemaMode", modes[i].mode); return r; }
     last = r;
     if (r.status !== 400) return r;      // only a refused request is worth retrying in a simpler form
-    say("  schema mode '" + modes[i].mode + "' refused \u2014 trying the next");
+    say("  schema mode '" + modes[i].mode + "' refused — trying the next");
   }
   return last;
 }
@@ -1242,7 +1310,7 @@ async function askAIOnce(promptText, gc, modelOverride){
                               : {contents:[{parts:[{text:promptText}]}]})
     });
     var ms = Date.now() - t0;
-    if (res.status === 429){ AISTATS.limited++; say("  RATE LIMITED (429) after " + ms + "ms \u2014 " + AISTATS.limited + " so far"); }
+    if (res.status === 429){ AISTATS.limited++; say("  RATE LIMITED (429) after " + ms + "ms — " + AISTATS.limited + " so far"); }
     var j = null;
     try{ j = await res.json(); }catch(e){}
     if (!res.ok){
@@ -1253,8 +1321,8 @@ async function askAIOnce(promptText, gc, modelOverride){
           && key.indexOf("AQ.") === 0)
         msg += "\n\nThe key itself is fine. AI Studio now issues only AQ keys, and this "
              + "REST endpoint still refuses them however they are sent. Two ways round it: "
-             + "make an AIza key in the Google Cloud console instead (APIs & Services \u2192 "
-             + "Credentials \u2192 Create credentials \u2192 API key, on a project with the "
+             + "make an AIza key in the Google Cloud console instead (APIs & Services → "
+             + "Credentials → Create credentials → API key, on a project with the "
              + "Generative Language API switched on), or try the other two settings under "
              + "How it is sent.";
       if (/not found|is not supported/i.test(msg))
@@ -1333,7 +1401,7 @@ document.addEventListener("mouseover", function(e){
   var n = ns[0];
   if (n.profile){ showProfile(n.profile, el.getBoundingClientRect(), n); return; }
   var more = ns.length > 1 ? "\n\n(+" + (ns.length-1) + " more saved for this)" : "";
-  showAI(n.label + " \u00b7 " + n.term, esc(n.text + more), false, el.getBoundingClientRect(), null, n);
+  showAI(n.label + " · " + n.term, esc(n.text + more), false, el.getBoundingClientRect(), null, n);
 }, true);
 document.addEventListener("mouseout", function(e){
   var from = e.target.closest && (e.target.closest(".lab-note") || e.target.closest("#labai"));
@@ -1359,7 +1427,7 @@ function reportMark(n){
     : n.textId !== ui.readerTextId ? "saved for text " + n.textId + " but text " + ui.readerTextId + " is open"
     : !(n.ranges || []).length ? "no positions were stored"
     : !root.querySelector(".w[data-c]") ? "the reader's word spans carry no positions"
-    : drawn ? "" : "positions " + n.ranges.map(function(r){ return r.start + "\u2013" + r.end; }).join(", ") + " matched no words";
+    : drawn ? "" : "positions " + n.ranges.map(function(r){ return r.start + "–" + r.end; }).join(", ") + " matched no words";
   say(drawn ? "  marked in the text (" + drawn + " piece" + (drawn > 1 ? "s" : "") + ")" : "  NOT MARKED: " + why);
 }
 /* ── auto-save ──────────────────────────────────────────────────────────
@@ -1368,7 +1436,7 @@ function reportMark(n){
    "Remove" takes it away and keeps it away for this panel. */
 function autoSave(P){
   var settled = P.s1.state === "done" && P.s2a.state !== "waiting" && P.s2b.state !== "waiting"
-    && (!P.s3 || P.s3.state !== "waiting");
+    && (!P.s3 || P.s3.state !== "waiting") && (!P.s4 || P.s4.state !== "waiting");
   if (!settled || P.removed) return;
   ppSet(P, (P.alts && P.alts.length) ? "attn" : "plain");
   var snap = profileSnapshot(P);
@@ -1377,12 +1445,12 @@ function autoSave(P){
   var n = P.noteId && NOTES.filter(function(x){ return x.id === P.noteId; })[0];
   if (n){
     if (JSON.stringify(n.profile) === JSON.stringify(snap) && JSON.stringify(n.ranges) === JSON.stringify(ranges)) return;
-    n.profile = snap; n.ranges = ranges; n.term = snap.item; n.text = snap.item + " \u2014 " + snap.meaning;
+    n.profile = snap; n.ranges = ranges; n.term = snap.item; n.text = snap.item + " — " + snap.meaning;
     n.updated = Date.now(); saveL("notes", NOTES);
     say("  saved profile updated: " + snap.item); labPaint(); return;
   }
   n = { id:"n" + Date.now().toString(36), slot:"profile", label:"Profile",
-    term:snap.item, textId:P.textId, ranges:ranges, text: snap.item + " \u2014 " + snap.meaning,
+    term:snap.item, textId:P.textId, ranges:ranges, text: snap.item + " — " + snap.meaning,
     profile:snap, marked:!P.markOff, model:P.model, when:Date.now(),
     about:{term:P.about.term, sentence:P.about.sentence} };
   NOTES.unshift(n); saveL("notes", NOTES);
@@ -1416,17 +1484,20 @@ function logFromProfile(v, about, meta, slot, extra){
     selection: about ? about.term : (v.selection || ""),
     item: v.item || "", slot: slot, call: m.call || call,
     provider: m.provider || "", model: m.model || "", prompt_version: m.prompt_version || "",
-    preset: m.preset || activePreset().id
+    preset: m.preset || activePreset(v.lang).id
   }, extra || {});
 }
 /* What a slot said, as plain text, for the log. */
 function slotSaid(v, slot, i){
   if (slot === "examples"){ var e = (v.examples || [])[i]; return e ? e.text.replace(/\*\*/g, "") + " | " + e.tr : ""; }
-  if (slot === "pieces") return (v.pieces || []).join(" \u2026 ");
+  if (slot === "pieces") return (v.pieces || []).join(" … ");
   if (slot === "alternatives") return (v.alternatives || []).map(function(a){ return a.item; }).join(", ");
   if (slot === "companions") return (v.companions || []).join(", ");
   if (slot === "synonyms") return (v.synonyms || []).map(function(x){ return x.word + " (" + x.difference + ")"; }).join("; ");
   if (slot === "collocations") return (v.collocations || []).join("; ");
+  if (slot === "forms") return (v.forms || []).map(function(f){ return f.label + ": " + f.form; }).join("; ");
+  if (slot === "script") return (v.script || []).join(" / ");
+  if (slot === "audio") return (LASTVOICE ? "voice " + LASTVOICE + " | " : "not played yet | ") + audioLines(v).join(" / ");
   var x = v[slot === "item" ? "item" : slot];
   return x == null ? "" : String(x);
 }
@@ -1440,7 +1511,7 @@ function pfFlagWire(card, v, live, note){
   var fl = card.querySelector(".pf-flag");
   if (!fl){ fl = document.createElement("button"); fl.className = "pf-flag"; fl.type = "button";
     fl.title = "Flag this as wrong"; fl.setAttribute("aria-label", "Flag this as wrong");
-    fl.innerHTML = "<span>\u2691</span>"; card.appendChild(fl); }
+    fl.innerHTML = "<span>⚑</span>"; card.appendChild(fl); }
   var target = null, pending = null;
   function place(el){
     if (target && target !== el) target.classList.remove("pf-flagon");
@@ -1469,7 +1540,7 @@ function pfFlagWire(card, v, live, note){
     if (!target) return;
     var slot = target.dataset.slot, i = +(target.dataset.i || 0);
     var said = slotSaid(v, slot, i);
-    var should = prompt("Flagging \u201c" + (said || slot) + "\u201d (" + slot + ").\nWhat should it have said? (optional)", "");
+    var should = prompt("Flagging “" + (said || slot) + "” (" + slot + ").\nWhat should it have said? (optional)", "");
     if (should === null) return;                          // cancelled: nothing logged
     var about = live ? live.about : (note && note.about) || null;
     var meta = live ? live.meta : v.meta;
@@ -1487,20 +1558,20 @@ function paintMistakes(){
   $("mlogcount").textContent = MISTAKES.length ? flags + " flagged, " + (MISTAKES.length - flags) + " failed or rate-limited" : "Empty.";
   var groups = {};
   MISTAKES.forEach(function(m){
-    var k = by === "call" ? (m.call || "?") + (m.kind === "flag" ? "" : " \u00b7 " + m.kind)
+    var k = by === "call" ? (m.call || "?") + (m.kind === "flag" ? "" : " · " + m.kind)
                           : (m.kind === "flag" ? (m.slot || "?") : m.kind + " (" + (m.call || "?") + ")");
     (groups[k] = groups[k] || []).push(m);
   });
   host.innerHTML = Object.keys(groups).sort(function(a, b){ return groups[b].length - groups[a].length; }).map(function(k){
-    return '<details class="mg"><summary><b>' + esc(k) + "</b> \u00b7 " + groups[k].length + "</summary>"
+    return '<details class="mg"><summary><b>' + esc(k) + "</b> · " + groups[k].length + "</summary>"
       + groups[k].slice(0, 60).map(function(m){
         return '<div class="me">' + (m.kind === "flag"
           ? "<b>" + esc(m.item) + "</b> " + esc(by === "call" ? m.slot + ": " : "") + esc(m.said || "")
-            + (m.should_be ? " \u2192 <i>" + esc(m.should_be) + "</i>" : "")
-          : esc(m.item || m.selection || "") + " \u2014 " + esc(String(m.error || "").slice(0, 90)))
-          + '<small>' + esc(m.model || "") + (m.prompt_version ? " v" + m.prompt_version : "") + " \u00b7 "
-          + esc(m.preset || "") + " \u00b7 " + esc((m.at || "").slice(0, 16).replace("T", " ")) + "</small></div>";
-      }).join("") + (groups[k].length > 60 ? '<div class="me"><small>\u2026 and ' + (groups[k].length - 60) + " more in the export</small></div>" : "")
+            + (m.should_be ? " → <i>" + esc(m.should_be) + "</i>" : "")
+          : esc(m.item || m.selection || "") + " — " + esc(String(m.error || "").slice(0, 90)))
+          + '<small>' + esc(m.model || "") + (m.prompt_version ? " v" + m.prompt_version : "") + " · "
+          + esc(m.preset || "") + " · " + esc((m.at || "").slice(0, 16).replace("T", " ")) + "</small></div>";
+      }).join("") + (groups[k].length > 60 ? '<div class="me"><small>… and ' + (groups[k].length - 60) + " more in the export</small></div>" : "")
       + "</details>";
   }).join("");
 }
@@ -1516,7 +1587,7 @@ function exportMistakes(kind){
   if (kind === "json") return downloadFile("mistake-log-" + stamp + ".json", JSON.stringify(MISTAKES, null, 2), "application/json");
   var q = function(x){ x = x == null ? "" : String(x); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
   var csv = MLOG_COLS.join(",") + "\n" + MISTAKES.map(function(m){ return MLOG_COLS.map(function(c){ return q(m[c]); }).join(","); }).join("\n");
-  downloadFile("mistake-log-" + stamp + ".csv", "\ufeff" + csv, "text/csv");
+  downloadFile("mistake-log-" + stamp + ".csv", "﻿" + csv, "text/csv");
 }
 
 /* ── the blank-page bug: record it when it happens ──────────────────────
@@ -1530,7 +1601,7 @@ function describe(el){
   if (!el || !el.tagName) return "?";
   var s = el.tagName.toLowerCase() + (el.id ? "#" + el.id : "")
     + (el.className && typeof el.className === "string" ? "." + el.className.trim().split(/\s+/).slice(0, 3).join(".") : "");
-  var w = el.closest && el.closest(".w"); if (w) s += " in word \u201c" + w.textContent.slice(0, 20) + "\u201d";
+  var w = el.closest && el.closest(".w"); if (w) s += " in word “" + w.textContent.slice(0, 20) + "”";
   return s;
 }
 ["click","dblclick","mousedown"].forEach(function(t){
@@ -1572,7 +1643,7 @@ document.addEventListener("click", function(e){
   if (!n) return;
   clearTimeout(noteTimer);
   if (n.profile) showProfile(n.profile, el.getBoundingClientRect(), n);
-  else showAI(n.label + " \u00b7 " + n.term, esc(n.text), false, el.getBoundingClientRect(), null, n);
+  else showAI(n.label + " · " + n.term, esc(n.text), false, el.getBoundingClientRect(), null, n);
   $("labai").dataset.pinned = "1";          // opened by a click: stays until closed
 }, true);
 
@@ -1627,13 +1698,22 @@ var SEG_NEVER_END = ("dr prof nr s str bzw ca vgl st hr fr frl abs art bd jh geb
   + "inkl zzgl max min mio mrd sog tel kap anm dipl ing mag hrsg bspw bzgl allg eigtl gegr "
   + "ff hl mind lt ld fa abb aufl bes insb ehem rd tsd od zzt gem "
   + "jan feb febr apr jun jul aug sep sept okt nov dez").split(" ");
-function segCutIsFalse(before, after){
+/* English: a number then a dot IS a sentence end (in 1990. Then…), so that rule
+   is German only. The letter rule (e.g., J. S. Bach) and the small-letter rule
+   hold for both. "etc." is left out on purpose: it ends sentences as often as
+   not, and the small-letter rule already catches it mid-sentence. */
+var SEG_NEVER_END_EN = ("mr mrs ms dr prof st jr sr vs no nos fig figs vol vols approx dept est "
+  + "inc ltd co corp mt ft cf al ed eds gen gov lt col sgt rev univ "
+  + "jan feb mar apr jun jul aug sep sept oct nov dec").split(" ");
+function segCutIsFalse(before, after, lang){
+  var en = lang === "en";
   var b = before.replace(/\s+$/, ""), a = after.replace(/^\s+/, "");
   if (!/\.$/.test(b)) return false;                   // only a dot can be a false end
-  if (/(^|[\s(„"])\d+\.$/.test(b)) return "number";    // 15. Mai, 2. Platz, 3. Oktober
-  if (/(^|[\s(„"])\p{L}\.$/u.test(b)) return "letter";  // z. B., J. S., d. h., u. a.
+  if (!en && /(^|[\s(„"])\d+\.$/.test(b)) return "number";    // 15. Mai, 2. Platz, 3. Oktober
+  if (/(^|[\s(„"“])\p{L}\.$/u.test(b)) return "letter";  // z. B., J. S., d. h., u. a., e.g.
   var w = (b.match(/(\p{L}+)\.$/u) || [])[1] || "";
-  if (w && (SEG_NEVER_END.indexOf(w.toLowerCase()) >= 0 || /str$/i.test(w))) return "abbreviation";
+  if (w && (en ? SEG_NEVER_END_EN.indexOf(w.toLowerCase()) >= 0
+               : (SEG_NEVER_END.indexOf(w.toLowerCase()) >= 0 || /str$/i.test(w)))) return "abbreviation";
   if (/^\p{Ll}/u.test(a)) return "next starts small";  // a sentence rarely starts so
   return false;
 }
@@ -1643,7 +1723,7 @@ function segCutIsFalse(before, after){
 function measure(text, spots){
   var t = String(text || "").trim();
   return {
-    W: (t.match(/[\p{L}\p{N}'\u2019-]+/gu) || []).length,
+    W: (t.match(/[\p{L}\p{N}'’-]+/gu) || []).length,
     E: t ? Math.max(0, segSentences(t).length - 1) : 0,
     P: /\n\s*\n/.test(String(text || "")),
     S: Math.max(1, spots || 1)
@@ -1668,8 +1748,8 @@ function measureOf(){
   return m;
 }
 function measureLine(m){
-  return "W " + m.W + " \u00b7 E " + m.E + " \u00b7 P " + (m.P ? "yes" : "no") + " \u00b7 S " + m.S
-    + " \u2014 " + (m.item ? "item route" : "not an item");
+  return "W " + m.W + " · E " + m.E + " · P " + (m.P ? "yes" : "no") + " · S " + m.S
+    + " — " + (m.item ? "item route" : "not an item");
 }
 /* The bounce without a call: plain code already knows, so nothing is sent.
    The tooltip does not change; the message says what is true. (§5) */
@@ -1682,7 +1762,7 @@ function bounceNotItem(m, anchor){
     + '<br><br><span style="color:#8b9099">' + esc(measureLine(m)) + "</span>",
     false, anchor || null);
   bounceKeepWire();
-  say("Bounced, no call sent \u2014 " + measureLine(m));
+  say("Bounced, no call sent — " + measureLine(m));
   if (typeof routeSeen === "function")
     routeSeen({W:m.W, E:m.E, S:m.S, items:0, bounced:true, term:(typeof heldTerm === "function" ? heldTerm() : "")});
 }
@@ -1706,10 +1786,11 @@ function crossesSentenceEnd(text){
   try{ return segSentences(t).length > 1; }catch(e){ return false; }
 }
 function segSentences(text, lang){
+  lang = lang || curLang();
   var raw = segRaw(text, lang), out = [];
   raw.forEach(function(r){
     var last = out[out.length-1];
-    var why = last && segCutIsFalse(text.slice(last.start, last.end), text.slice(r.start, r.end));
+    var why = last && segCutIsFalse(text.slice(last.start, last.end), text.slice(r.start, r.end), lang);
     if (why){ last.end = r.end; last.joins = (last.joins||[]).concat(why); }
     else out.push({start:r.start, end:r.end});
   });
@@ -1745,6 +1826,22 @@ var SCHEMA_NU = {type:"OBJECT", properties:{
 var SCHEMA2B = {type:"OBJECT", properties:{examples:{type:"ARRAY", items:{type:"OBJECT",
   properties:{text:{type:"STRING"}, tr:{type:"STRING"}, pieces:{type:"ARRAY", items:{type:"STRING"}}}, required:["text","tr"]}}},
   required:["examples"]};
+/* English (english-profile-brief.md §4). Stage 1 is German's plus one field,
+   tricky_sound, on the best reading and on every alternative. */
+var SCHEMA1_EN = (function(){
+  var s = JSON.parse(JSON.stringify(SCHEMA1));
+  s.properties.best.properties.tricky_sound = {type:"BOOLEAN"};
+  s.properties.best.required = s.properties.best.required.concat(["tricky_sound"]);
+  s.properties.alternatives.items = s.properties.best;
+  return s;
+})();
+var SCHEMA2A_EN = {type:"OBJECT", properties:{
+  forms:{type:"ARRAY", items:{type:"OBJECT", properties:{label:{type:"STRING"}, form:{type:"STRING"}}, required:["label","form"]}},
+  countable:{type:"STRING"}, where_used:{type:"STRING"},
+  register:{type:"STRING", enum:["informal","neutral","formal"]},
+  watch_out:{type:"STRING"}, note:{type:"STRING"}, meaning:{type:"STRING"}},
+  required:["forms","countable","where_used","register","watch_out","note"]};
+var SCHEMA_SAY = {type:"OBJECT", properties:{script:{type:"ARRAY", items:{type:"STRING"}}}, required:["script"]};
 
 /* ── the profile bench (profile-bench-brief.md) ─────────────────────────
    Three plain lists decide everything a profile does:
@@ -1784,6 +1881,12 @@ var SLOT_DEFS = [
   {id:"collocations", label:"Goes with",        kind:"ai"},
   {id:"connotation",  label:"Feel",             kind:"ai"},
   {id:"region",       label:"Where",            kind:"ai"},
+  {id:"forms",        label:"Forms",            kind:"ai"},
+  {id:"countable",    label:"Countable",        kind:"ai", applies_to:["noun"]},
+  {id:"where_used",   label:"US or UK",         kind:"ai"},
+  {id:"watch_out",    label:"Watch out",        kind:"ai"},
+  {id:"tricky_sound", label:"Tricky sound",     kind:"ai"},
+  {id:"script",       label:"Say-it script",    kind:"ai"},
   {id:"links",        label:"Links",            kind:"link"},
   {id:"audio",        label:"Audio",            kind:"empty"}
 ];
@@ -1797,8 +1900,16 @@ var LINK_DEFAULTS = [
   {id:"forvo",      label:"Forvo",      group:"Hear it",  url:"https://forvo.com/word/{{word}}/#de", on:true},
   {id:"dwds",       label:"DWDS",       group:"Look it up", url:"https://www.dwds.de/wb/{{word}}", on:true},
   {id:"wiktionary", label:"Wiktionary", group:"Look it up", url:"https://de.wiktionary.org/wiki/{{word}}", on:true},
-  {id:"duden",      label:"Duden",      group:"Look it up", url:"https://www.duden.de/suchen/dudenonline/{{word}}", on:false}
+  {id:"duden",      label:"Duden",      group:"Look it up", url:"https://www.duden.de/suchen/dudenonline/{{word}}", on:false},
+  // English. {{accent}} is us or uk, from the variety; {{dash}} joins a phrase
+  // with hyphens, which is how Cambridge files phrasal verbs (give-up).
+  {id:"youglish_en", lang:"en", label:"YouGlish", group:"Hear it", url:"https://youglish.com/pronounce/{{item}}/english/{{accent}}", on:true},
+  {id:"forvo_en",    lang:"en", label:"Forvo",    group:"Hear it", url:"https://forvo.com/word/{{item}}/#en", on:false},
+  {id:"cambridge",   lang:"en", label:"Cambridge", group:"Look it up", url:"https://dictionary.cambridge.org/dictionary/english/{{dash}}", on:true},
+  {id:"merriam",     lang:"en", label:"Merriam-Webster", group:"Look it up", url:"https://www.merriam-webster.com/dictionary/{{item}}", on:true},
+  {id:"wiktionary_en", lang:"en", label:"Wiktionary", group:"Look it up", url:"https://en.wiktionary.org/wiki/{{item}}", on:false}
 ];
+function linkLang(x){ return x.lang || "de"; }          // links saved before English are German ones
 function linkServices(){
   var saved = load("links", null);
   if (!saved) return LINK_DEFAULTS.map(function(x){ return Object.assign({}, x); });
@@ -1808,7 +1919,9 @@ function linkServices(){
 }
 function linkURL(svc, item){
   var it = String(item || "").trim(), w = it.replace(/^sich\s+/i, "");
-  return svc.url.replace(/\{\{item\}\}/g, encodeURIComponent(it)).replace(/\{\{word\}\}/g, encodeURIComponent(w));
+  return svc.url.replace(/\{\{item\}\}/g, encodeURIComponent(it)).replace(/\{\{word\}\}/g, encodeURIComponent(w))
+    .replace(/\{\{dash\}\}/g, encodeURIComponent(it.toLowerCase().replace(/\s+/g, "-")))
+    .replace(/\{\{accent\}\}/g, variety() === "UK" ? "uk" : "us");
 }
 var PROVIDERS = {
   gemini: {label:"Google Gemini", ask: function(prompt, gc, model){ return askAIOnce(prompt, gc, model); }}
@@ -1846,7 +1959,7 @@ var CALL_DEFAULTS = {
 + "- gender: for nouns, the article for THIS meaning (der, die or das); otherwise null.\n"
 + "- plural: for nouns, the plural with its article (die Seen), or \"no plural\"; otherwise null.\n"
 + "- participle: for verbs, the past participle with its helper verb (ist aufgestanden, hat gewartet); otherwise null.\n"
-+ "- splits: for separable verbs, how it splits in a main clause (ich stehe \u2026 auf); otherwise null.\n"
++ "- splits: for separable verbs, how it splits in a main clause (ich stehe … auf); otherwise null.\n"
 + "- register: informal, neutral or formal.\n"
 + "- ipa: the pronunciation of \"{{item}}\" in IPA, between slashes.\n"
 + "- gloss: a short plain explanation in {{learner_language}} that adds something beyond the meaning; an EMPTY STRING if it would only repeat it.\n"
@@ -1897,25 +2010,128 @@ var CALL_DEFAULTS = {
   Object.keys(CALL_DEFAULTS).forEach(function(k){ delete CALL_DEFAULTS[k]; });
   Object.assign(CALL_DEFAULTS, ordered);
 })();
+
+/* ── English (english-profile-brief.md rev 2, Contractor 14) ────────────
+   The same jobs as German, done by calls of their own, so a language is new
+   calls and presets rather than new code. Each call carries `lang`; German
+   calls carry none and count as "de". One new job, `sayit`: the spoken
+   script for a word whose spelling has more than one sound. It runs only when
+   stage 1 says tricky_sound. */
+(function(){
+  var C = CALL_DEFAULTS;
+  C.identify_en = {id:"identify_en", lang:"en", group:"identify", label:"Find the item", variant:"English", state:"s1", schema:SCHEMA1_EN,
+    fills:["item","pieces","pos","meaning","alternatives","companions","tricky_sound"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"A learner of English selected part of an English text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
++ "Selected: \"{{selection}}\"\nSentence: \"{{sentence}}\"\nWider context: \"{{context}}\"\n"
++ "Learner's language: {{learner_language}}. Level: {{level}}. The learner is learning {{variety}}.\n\n"
++ "Fill `best` with the most likely reading:\n"
++ "- item: the dictionary form. Verbs as the bare infinitive without \"to\"; a phrasal verb with its particle (give up, look up). Nouns in the singular WITHOUT an article (mouse for mice). Adjectives in the base form. Idioms in their citation form (break the ice).\n"
++ "- on_page: every piece of that item exactly as it is written in the sentence, in reading order, one word per entry.\n"
++ "- A piece the learner did NOT select belongs in on_page (and in `added`) only when the word cannot carry this meaning without it: the particle of a phrasal verb (up in \"gave up\"), a fixed part of an idiom.\n"
++ "- dropped: selected words that are not part of the item.\n"
++ "- companions: words in the sentence that usually go with the item but are not part of it, such as the preposition in \"depend on\". Exact text. Do not also put them in on_page.\n"
++ "- pos: one of noun, verb, adjective, adverb, preposition, conjunction, pronoun, article, particle, idiom, other.\n"
++ "- meaning: the meaning in this context, in {{learner_language}}, a few words.\n"
++ "- tricky_sound: true when this same spelling is pronounced differently across its meanings, parts of speech or tenses "
++ "(read, record, present, tear, wind, lead, live, close, minute, object, desert, bow, row, use, wound, content). "
++ "It is NOT about whether the word is hard to say. Most words are false.\n\n"
++ "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ, and its own tricky_sound. "
++ "{{level_rule}} Give an empty list when the reading is clear.\n"
++ "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
++ "`items`: label the SELECTION. One entry per distinct lexical item that the selected words belong to, with `words` = the selected words belonging to it, exactly as written. "
++ "Count only words the learner actually selected: not a particle you added, and not companions. "
++ "A function word that is part of an item (an article inside an idiom, the particle of a phrasal verb) belongs to that item, not to an entry of its own. "
++ "One ordinary word selected gives exactly one entry.\n\n"
++ "Answer with JSON only."};
+  C.identify_en_def = Object.assign({}, C.identify_en, {id:"identify_en_def", variant:"English, meaning as an English definition",
+    prompt: C.identify_en.prompt.replace("- meaning: the meaning in this context, in {{learner_language}}, a few words.",
+      "- meaning: a short, simple ENGLISH definition of the meaning in this context (not a translation), under 12 words.")});
+  C.grammar_en = {id:"grammar_en", lang:"en", group:"grammar", label:"Grammar", variant:"English", state:"s2a", schema:SCHEMA2A_EN,
+    fills:["forms","countable","where_used","register","watch_out","note"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"English lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
++ "As used in: \"{{sentence}}\"\n"
++ "The learner speaks {{learner_language}}, is at level {{level}}, and is learning {{variety}}.\n\n"
++ "Every field marked ONLY IF must be empty ([] or \"\") unless its condition holds. Most words leave most fields empty. Do not fill a field to be helpful.\n"
++ "- forms: ONLY IF a form cannot be guessed from the regular rules. Verbs: the irregular past and past participle, labels \"past\" and \"participle\" (go: went, gone). "
++ "Nouns: an irregular plural, label \"plural\" (mouse: mice). Adjectives: a comparison that is not the regular -er/-est or more/most, or that learners commonly get wrong, label \"comparison\" (fun: more fun; funner is informal). "
++ "An opposite whose prefix cannot be guessed, label \"opposite\" (reversible: irreversible). Otherwise an empty list.\n"
++ "- countable: ONLY for nouns: \"countable\", \"uncountable\" or \"both\". An empty string for anything else.\n"
++ "- where_used: ONLY IF the word, or this meaning, is used mainly in American or mainly in British English: say which, and the other variety's usual word if there is one. Under 12 words, in {{learner_language}}. An empty string for common words.\n"
++ "- register: informal, neutral or formal.\n"
++ "- watch_out: ONLY IF speakers of {{learner_language}} typically get this word wrong: a false friend, a typical mistake. At most 20 words, in {{learner_language}}. An empty string otherwise.\n"
++ "- note: an EMPTY STRING unless there is something genuinely worth a learner's attention that the fields above do not already say. At most 20 words, in {{learner_language}}.\n"
++ "- meaning: the meaning in this context in {{learner_language}}, a few words.\n"
++ "Never mention another pronunciation or another meaning of the same spelling.\n\n"
++ "Answer with JSON only."};
+  C.examples_en = {id:"examples_en", lang:"en", group:"examples", label:"Examples", variant:"English", state:"s2b", schema:SCHEMA2B,
+    fills:["examples"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"Write 4 English example sentences using \"{{item}}\" with exactly this meaning: \"{{meaning}}\".\n"
++ "It was met in: \"{{sentence}}\"\n"
++ "Level {{level}}. Spelling and word choice in {{variety}}. Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
++ "The sentences may be read aloud. If this spelling can also be pronounced another way, every sentence must make the pronunciation for THIS meaning unmistakable from its context, and must never use the word in another meaning.\n"
++ "For each, give `text` (English) and `tr` (translation into {{learner_language}}).\n"
++ "In `text`, wrap each word that belongs to the item in double asterisks, e.g. She **gave** it **up** last year.\n"
++ "Also give `pieces`: ONLY the words that are forms of the item itself, exactly as written in that sentence, in order (for She gave it up last year. that is [\"gave\", \"up\"]). "
++ "Never include the words the item describes, modifies or goes with: for an adjective, only the adjective; for a noun, not its article; for a verb, not its object.\n\n"
++ "Answer with JSON only."};
+  C.examples_en_rich = Object.assign({}, C.examples_en, {id:"examples_en_rich", variant:"English, rich",
+    prompt: C.examples_en.prompt.replace("Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
+      "Each 12 to 22 words, natural and clearly varied: different tenses, persons and sentence types (questions, subordinate clauses), not copies of the original sentence.")});
+  C.sayit_en = {id:"sayit_en", lang:"en", group:"sayit", label:"Say it", variant:"English", state:"s4", schema:SCHEMA_SAY,
+    fills:["script"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"English lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
++ "On the page it is written \"{{on_page}}\", in: \"{{sentence}}\"\n\n"
++ "This spelling is pronounced in more than one way in English. Write a short spoken script, in simple {{variety}} for a learner at level {{level}}, that lets the learner HEAR how it is said in THIS meaning.\n"
++ "Rules:\n"
++ "- The word never appears on its own. Every line is a full sentence whose context forces the pronunciation for this meaning.\n"
++ "- Only this meaning. Never mention, hint at or contrast another meaning or another pronunciation, and never use the word in another meaning.\n"
++ "- If the word on the page is a form that sounds different from its other forms (read in the past tense), use that same form in every line.\n"
++ "- The first line explains the meaning in plain English, the way a person would say it aloud (\"When someone cries, a tear rolls down their cheek.\"). Then 2 or 3 natural example sentences.\n"
++ "- About 10 to 15 seconds spoken in total. Spelling and word choice in {{variety}}.\n"
++ "- The script is in English.\n\n"
++ "Return `script`: the lines in order.\n\n"
++ "Answer with JSON only."};
+  C.nuance_en = Object.assign({}, C.nuance, {id:"nuance_en", lang:"en", variant:"English", prompt_version:1,
+    prompt: C.nuance.prompt.replace("German lexical item", "English lexical item")
+      .replace("short German phrases (eine Entscheidung treffen)", "short English phrases (make a decision)")
+      .replace("regional (Austrian, Swiss, southern, northern)", "regional within {{variety}} (Scottish, Southern US, northern English)")});
+  ["identify_en_def","examples_en_rich"].forEach(function(k){
+    if (C[k].prompt === C[k.replace(/_def$|_rich$/, "")].prompt) console.warn("[lab] an English variant prompt did not change: " + k); });
+  if (C.nuance_en.prompt === C.nuance.prompt) console.warn("[lab] the English nuance prompt did not change");
+})();
 var GROUPS = [
   {id:"identify", label:"Find the item", required:true},
   {id:"grammar",  label:"Grammar"},
   {id:"examples", label:"Examples"},
-  {id:"nuance",   label:"Nuance"}
+  {id:"nuance",   label:"Nuance"},
+  {id:"sayit",    label:"Say it"}
 ];
+function callLang(id){ return (CALL_DEFAULTS[id] || {}).lang || "de"; }
 function groupOf(id){ return (CALL_DEFAULTS[id] || {}).group || id; }
-function callName(id){ var c = CALL_DEFAULTS[id]; return c ? c.label + (c.variant ? " \u00b7 " + c.variant : "") : id; }
-function variantsOf(g){ return Object.keys(CALL_DEFAULTS).filter(function(id){ return groupOf(id) === g; }); }
+function callName(id){ var c = CALL_DEFAULTS[id]; return c ? c.label + (c.variant ? " · " + c.variant : "") : id; }
+function variantsOf(g, lang){ return Object.keys(CALL_DEFAULTS).filter(function(id){
+  return groupOf(id) === g && (!lang || callLang(id) === lang); }); }
 function presetCall(pr, g){ return (pr.calls || []).filter(function(id){ return groupOf(id) === g && CALL_DEFAULTS[id]; })[0] || null; }
-function identifyId(){ return presetCall(activePreset(), "identify") || "identify"; }
+function identifyId(lang){ lang = lang || curLang(); return presetCall(activePreset(lang), "identify") || variantsOf("identify", lang)[0] || "identify"; }
 
 /* show: full | collapsed | hidden for any slot id (missing means full).
    Collapsed slots are still fetched and stored: practice needs them. */
 var PRESET_DEFAULTS = {
   beginner: {id:"beginner", label:"Beginner", calls:["identify","grammar","examples"], show:{}},
   advanced: {id:"advanced", label:"Advanced", calls:["identify_de","grammar","examples_rich","nuance"],
-    show:{gender:"collapsed", plural:"collapsed", participle:"collapsed", splits:"collapsed"}}
+    show:{gender:"collapsed", plural:"collapsed", participle:"collapsed", splits:"collapsed"}},
+  en_beginner: {id:"en_beginner", lang:"en", label:"Beginner", calls:["identify_en","grammar_en","examples_en","sayit_en"], show:{}},
+  en_advanced: {id:"en_advanced", lang:"en", label:"Advanced", calls:["identify_en_def","grammar_en","examples_en_rich","nuance_en","sayit_en"],
+    show:{forms:"collapsed", countable:"collapsed"}}
 };
+/* A preset belongs to one language; ones saved before English are German. */
+function presetLang(p){ return (p && p.lang) || "de"; }
+function presetKey(lang){ return lang === "de" ? "pfpreset" : "pfpreset_" + lang; }
+function presetDefault(lang){ return lang === "de" ? "beginner" : lang + "_beginner"; }
 var SHOW_MODES = ["full","collapsed","hidden"];
 /* Presets saved by the previous build carried hidden options; turn them into
    the variant they meant. */
@@ -1925,8 +2141,8 @@ function normalisePreset(p){
   if (o.meaning_in === "target_language") p.calls = p.calls.map(function(c){ return c === "identify" ? "identify_de" : c; });
   if (o.example_length === "long") p.calls = p.calls.map(function(c){ return c === "examples" ? "examples_rich" : c; });
   delete p.options;
-  p.calls = (p.calls || []).filter(function(c){ return CALL_DEFAULTS[c]; });
-  if (!presetCall(p, "identify")) p.calls.unshift("identify");
+  p.calls = (p.calls || []).filter(function(c){ return CALL_DEFAULTS[c] && callLang(c) === presetLang(p); });
+  if (!presetCall(p, "identify")) p.calls.unshift(variantsOf("identify", presetLang(p))[0]);
   var seen = {};
   p.calls = p.calls.filter(function(c){ var g = groupOf(c); if (seen[g]) return false; seen[g] = 1; return true; });
   return p;
@@ -1955,13 +2171,23 @@ function presets(){
   Object.keys(all).forEach(function(k){ all[k] = normalisePreset(all[k]); });
   return all;
 }
-function activePreset(){ var p = presets(); return p[load("pfpreset", "beginner")] || p.beginner; }
+function presetsFor(lang){
+  var all = presets(), out = {};
+  Object.keys(all).forEach(function(k){ if (presetLang(all[k]) === lang) out[k] = all[k]; });
+  return out;
+}
+function activePreset(lang){
+  lang = lang || curLang();
+  var p = presetsFor(lang), d = presetDefault(lang);
+  return p[load(presetKey(lang), d)] || p[d] || presets().beginner;
+}
 
 function fillVars(tpl, v){ return tpl.replace(/\{\{(\w+)\}\}/g, function(m, k){ return k in v ? v[k] : m; }); }
 function callVars(P){
-  var L = load("learnlang", "English"), lvl = load("level", "B1"), it = P.item || {};
+  var L = learnLang(P.lang), lvl = load("level", "B1"), it = P.item || {};
   return { selection:P.about.term, sentence:P.about.sentence, context:P.about.context,
     learner_language:L, level:lvl, level_rule:levelRule(lvl),
+    variety:varietyName(), on_page:(it.on_page || []).join(" … "),
     // kept so prompts edited in the previous build still fill in
     meaning_language:L, explain_language:L,
     example_rule:"Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
@@ -1974,7 +2200,7 @@ var CALL_APPLY = {
     var best = j.best || {};
     P.item = { item: best.item || P.about.term, on_page: best.on_page || [P.about.term],
       added: best.added || [], dropped: best.dropped || [], companions: best.companions || [],
-      pos: best.pos || "", meaning: best.meaning || "" };
+      pos: best.pos || "", meaning: best.meaning || "", tricky: !!best.tricky_sound };
     P.alts = (j.alternatives || []).slice();
     // the learner's own selection is always one of the options
     if (!j.selection_ok && P.item.item.toLowerCase() !== P.about.term.toLowerCase())
@@ -1987,7 +2213,7 @@ var CALL_APPLY = {
     locate(P);
     if (P.ppId) ppRepoint(P.ppId, P.ranges);
     routeNote(P);
-    return P.item.item + " (" + P.item.pos + ")"
+    return P.item.item + " (" + P.item.pos + ")" + (P.item.tricky ? ", TRICKY SOUND" : "")
       + (P.itemCount ? ", " + P.itemCount + " item" + (P.itemCount > 1 ? "s" : "") + " in the selection" : "")
       + (P.alts.length ? ", " + P.alts.length + " other option(s)" : "");
   },
@@ -1999,13 +2225,15 @@ var CALL_APPLY = {
   nuance: function(P, j){
     var n = (j.synonyms || []).length, c = (j.collocations || []).length;
     return n + " near words, " + c + " partners" + (j.connotation ? ", a feel" : "") + (j.region ? ", a region" : "");
-  }
+  },
+  sayit: function(P, j){ return (j.script || []).length + " lines"; }
 };
 var CALL_VALUE = {
   identify: function(j){ return j; },
   grammar:  function(j){ return j; },
   examples: function(j){ return (j.examples || []).slice(0, 4); },
-  nuance:   function(j){ return j; }
+  nuance:   function(j){ return j; },
+  sayit:    function(j){ return {script:(j.script || []).map(String).filter(function(x){ return x.trim(); })}; }
 };
 
 /* Run one call on the live profile. Other calls are untouched. */
@@ -2017,7 +2245,7 @@ async function runCall(P, id){
   var model = callModel(c);
   P.meta = P.meta || {};
   var g = groupOf(id);
-  P.meta[g] = {call:id, provider:c.provider, model:model, prompt_version:c.prompt_version, preset:activePreset().id};
+  P.meta[g] = {call:id, provider:c.provider, model:model, prompt_version:c.prompt_version, preset:activePreset(P.lang).id};
   var sent = fillVars(c.prompt, callVars(P));
   P.sent = P.sent || {}; P.sent[g] = sent;
   if (g === "examples") P._exMiss = {};
@@ -2046,10 +2274,10 @@ async function runCall(P, id){
 }
 
 async function runStage1(P){
-  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); paintProfile();
-  var ok = await runCall(P, identifyId());
+  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); P.s4 = slotW(); paintProfile();
+  var ok = await runCall(P, identifyId(P.lang));
   if (P !== PF) return;
-  if (!ok){ P.s2a = P.s2b = P.s3 = slotF("waits on finding the item"); ppSet(P, "fail"); paintProfile(); return; }
+  if (!ok){ P.s2a = P.s2b = P.s3 = P.s4 = slotF("waits on finding the item"); ppSet(P, "fail"); paintProfile(); return; }
   if (P.itemCount > 2){ bounceTooMany(P); return; }
   runStage2(P);
 }
@@ -2069,8 +2297,8 @@ function bounceTooMany(P){
     + '<br><br><button class="lb sm" id="bkeep">Keep the whole thing in a collection</button>',
     false, anchor);
   bounceKeepWire();
-  say("Bounced after the call \u2014 " + n + " items: " + names.join(", "));
-  routeSeen({W:(P.about.term.match(/[\p{L}\p{N}'\u2019-]+/gu)||[]).length, items:n, term:P.about.term, bounced:true});
+  say("Bounced after the call — " + n + " items: " + names.join(", "));
+  routeSeen({W:(P.about.term.match(/[\p{L}\p{N}'’-]+/gu)||[]).length, items:n, term:P.about.term, bounced:true});
 }
 /* What the routing decided, against what the call decided. Kept so the
    developer's questions in selection-routing-brief.md §9 can be answered from
@@ -2097,12 +2325,20 @@ function locate(P){
 /* Everything after identify, side by side, as the preset says. */
 function runStage2(P){
   var t0 = Date.now();
-  var pr = activePreset();
+  var pr = activePreset(P.lang);
   var calls = pr.calls.filter(function(id){ return groupOf(id) !== "identify" && CALL_DEFAULTS[id]; });
   GROUPS.forEach(function(G){
     if (G.id === "identify" || presetCall(pr, G.id)) return;
     var k = CALL_DEFAULTS[variantsOf(G.id)[0]].state;
     if (!P[k] || P[k].state !== "done") P[k] = slotV(G.id === "examples" ? [] : {});   // not asked for: keep what is there
+  });
+  // The say-it script is only for a spelling with more than one sound, and a
+  // different reading can change that, so it is decided here on every run.
+  calls = calls.filter(function(id){
+    if (groupOf(id) !== "sayit") return true;
+    if (P.item && P.item.tricky) return true;
+    P[CALL_DEFAULTS[id].state] = slotV({script:[]});
+    return false;
   });
   Promise.all(calls.map(function(id){ return runCall(P, id); })).then(function(){
     if (P === PF) say("  all calls back " + (Date.now() - P.t0) + "ms after the click");
@@ -2114,11 +2350,11 @@ function runStage2(P){
    examples). Everything else stays; the panel re-lays out by the new show. */
 async function applyPresetToOpen(){
   var P = PF; if (!P || P.s1.state !== "done") { if (P) paintProfile(); return; }
-  var pr = activePreset();
+  var pr = activePreset(P.lang);
   // a job is re-run when the preset now asks for it differently: another variant, or none yet
   var differs = function(id){ return !P.sent || P.sent[groupOf(id)] !== fillVars(callDef(id).prompt, callVars(P)); };
   P.gen++;
-  var idc = identifyId();
+  var idc = identifyId(P.lang);
   if (differs(idc)){
     say("  preset: " + callName(idc));
     await runCall(P, idc);
@@ -2126,6 +2362,7 @@ async function applyPresetToOpen(){
   }
   var todo = pr.calls.filter(function(id){
     var g = groupOf(id); if (g === "identify") return false;
+    if (g === "sayit" && !(P.item && P.item.tricky)) return false;
     var st = P[CALL_DEFAULTS[id].state];
     return !st || st.state !== "done" || differs(id);
   });
@@ -2151,11 +2388,13 @@ function savePreset(pr){
 function paintPresetEditor(){
   var host = $("presetbody"); if (!host) return;
   var pr = JSON.parse(JSON.stringify(activePreset()));
+  var lang = presetLang(pr);
   var custom = !!((load("presetsPF", {}) || {})[pr.id]);
-  var h = '<p style="margin:6px 0 3px"><b>Which call does each job</b></p>' + GROUPS.map(function(G){
+  var h = '<p style="margin:6px 0 3px"><b>Which call does each job</b> · ' + esc(LANG_NAMES[lang] || lang) + '</p>'
+    + GROUPS.filter(function(G){ return variantsOf(G.id, lang).length; }).map(function(G){
     var cur = presetCall(pr, G.id);
     return '<div class="r"><label class="inl" style="min-width:100px">' + esc(G.label) + "</label>"
-      + variantsOf(G.id).map(function(id){
+      + variantsOf(G.id, lang).map(function(id){
         var c = CALL_DEFAULTS[id];
         return '<button class="lb sm' + (cur === id ? " on" : "") + '" data-pv="' + id + '" data-g="' + G.id + '">' + esc(c.variant || "on") + "</button>"; }).join("")
       + (G.required ? "" : '<button class="lb sm' + (cur ? "" : " on") + '" data-pv="" data-g="' + G.id + '">off</button>')
@@ -2165,7 +2404,7 @@ function paintPresetEditor(){
     return '<div class="r"><label class="inl" style="min-width:100px">' + esc(d.label) + '</label>'
       + SHOW_MODES.map(function(x){ return '<button class="lb sm' + (x === m ? " on" : "") + '" data-ps="' + d.id + '" data-m="' + x + '">' + x + "</button>"; }).join("")
       + "</div>"; }).join("") + "</div>";
-  h += '<div class="r" style="margin-top:6px"><button class="lb sm" id="pnew">Save as a new preset\u2026</button>'
+  h += '<div class="r" style="margin-top:6px"><button class="lb sm" id="pnew">Save as a new preset…</button>'
     + (custom ? '<button class="lb sm warn" id="preset0">' + (PRESET_DEFAULTS[pr.id] ? "Back to the original" : "Delete this preset") + "</button>" : "") + "</div>";
   host.innerHTML = h;
   function commit(msg){ savePreset(pr); say(msg); var open = $("presetedit").open; paintBench(); $("presetedit").open = open; applyPresetToOpen(); }
@@ -2174,20 +2413,20 @@ function paintPresetEditor(){
     pr.calls = pr.calls.filter(function(x){ return groupOf(x) !== g; });
     if (id) pr.calls.push(id);
     pr.calls = Object.keys(CALL_DEFAULTS).filter(function(x){ return pr.calls.indexOf(x) >= 0; });
-    commit("Preset " + pr.label + ": " + g + " \u2192 " + (id ? callName(id) : "off")); }; });
+    commit("Preset " + pr.label + ": " + g + " → " + (id ? callName(id) : "off")); }; });
   host.querySelectorAll("[data-ps]").forEach(function(b){ b.onclick = function(){
     pr.show = pr.show || {}; pr.show[b.dataset.ps] = b.dataset.m; commit("Preset " + pr.id + ": " + b.dataset.ps + " " + b.dataset.m); }; });
   $("pnew").onclick = function(){
     var name = prompt("Name for the new preset:", pr.label + " copy"); if (!name) return;
     var id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || ("p" + Date.now());
     if (presets()[id]) id += "-" + Date.now().toString(36).slice(-3);
-    var np = JSON.parse(JSON.stringify(pr)); np.id = id; np.label = name;
-    savePreset(np); saveL("pfpreset", id); paintBench(); say("New preset: " + name);
+    var np = JSON.parse(JSON.stringify(pr)); np.id = id; np.label = name; np.lang = lang;
+    savePreset(np); saveL(presetKey(lang), id); paintBench(); say("New preset: " + name);
   };
   var p0 = $("preset0");
   if (p0) p0.onclick = function(){
     var all = load("presetsPF", {}) || {}; delete all[pr.id]; saveL("presetsPF", all);
-    if (!PRESET_DEFAULTS[pr.id]) saveL("pfpreset", "beginner");
+    if (!PRESET_DEFAULTS[pr.id]) saveL(presetKey(lang), presetDefault(lang));
     paintBench(); say("Preset " + pr.id + (PRESET_DEFAULTS[pr.id] ? " back to the original" : " deleted")); applyPresetToOpen();
   };
 }
@@ -2195,9 +2434,9 @@ function paintPresetEditor(){
    and which parts it folds or hides. Nothing about a preset is anywhere else. */
 function paintPresetTable(){
   var host = $("presetcmp"); if (!host) return;
-  var ps = presets(), keys = Object.keys(ps), cur = activePreset().id;
+  var lang = curLang(), ps = presetsFor(lang), keys = Object.keys(ps), cur = activePreset().id;
   var cell = function(t, dim){ return "<td" + (dim ? ' class="dim"' : "") + ">" + t + "</td>"; };
-  var rows = GROUPS.map(function(G){
+  var rows = GROUPS.filter(function(G){ return variantsOf(G.id, lang).length; }).map(function(G){
     var vals = keys.map(function(k){ var id = presetCall(ps[k], G.id); return id ? (CALL_DEFAULTS[id].variant || "on") + ' <small>v' + callDef(id).prompt_version + "</small>" : "off"; });
     var same = vals.every(function(x){ return x === vals[0]; });
     return "<tr" + (same ? "" : ' class="diff"') + "><th>" + esc(G.label) + "</th>" + vals.map(function(x){ return cell(x, x === "off"); }).join("") + "</tr>";
@@ -2205,9 +2444,9 @@ function paintPresetTable(){
   ["collapsed","hidden"].forEach(function(m){
     var vals = keys.map(function(k){ var sh = ps[k].show || {};
       var l = SLOT_DEFS.filter(function(d){ return sh[d.id] === m; }).map(function(d){ return d.label; });
-      return l.length ? esc(l.join(", ")) : "\u2014"; });
+      return l.length ? esc(l.join(", ")) : "—"; });
     var same = vals.every(function(x){ return x === vals[0]; });
-    rows.push("<tr" + (same ? "" : ' class="diff"') + "><th>" + (m === "collapsed" ? "Folded" : "Hidden") + "</th>" + vals.map(function(x){ return cell(x, x === "\u2014"); }).join("") + "</tr>");
+    rows.push("<tr" + (same ? "" : ' class="diff"') + "><th>" + (m === "collapsed" ? "Folded" : "Hidden") + "</th>" + vals.map(function(x){ return cell(x, x === "—"); }).join("") + "</tr>");
   });
   host.innerHTML = '<table class="pcmp"><tr><th></th>' + keys.map(function(k){
     return "<th" + (k === cur ? ' class="cur"' : "") + ">" + esc(ps[k].label) + "</th>"; }).join("") + "</tr>" + rows.join("") + "</table>"
@@ -2218,13 +2457,13 @@ function paintLinkEditor(){
   var list = linkServices();
   host.innerHTML = list.map(function(x, i){
     return '<div class="r"><label style="font-size:12px;min-width:120px"><input type="checkbox" data-lk="' + i + '"' + (x.on ? " checked" : "") + "> "
-      + esc(x.label) + '</label><small style="flex:1;color:#9b9e96;overflow-wrap:anywhere">' + esc(x.group || "") + " \u00b7 " + esc(x.url) + "</small>"
+      + esc(x.label) + '</label><small style="flex:1;color:#9b9e96;overflow-wrap:anywhere">' + esc(LANG_NAMES[linkLang(x)] || linkLang(x)) + " · " + esc(x.group || "") + " · " + esc(x.url) + "</small>"
       + (LINK_DEFAULTS.some(function(d){ return d.id === x.id; }) ? "" : '<button class="lb sm warn" data-lkdel="' + i + '">remove</button>') + "</div>";
   }).join("")
   + '<div class="r" style="margin-top:6px"><input type="text" id="lkname" placeholder="name" style="width:90px">'
   + '<input type="text" id="lkgroup" placeholder="heading" style="width:90px">'
-  + '<input type="text" id="lkurl" placeholder="https://\u2026{{word}}\u2026" style="flex:1"><button class="lb sm" id="lkadd">Add</button></div>'
-  + '<p style="margin:3px 0">{{item}} is the dictionary form; {{word}} drops a leading \u201csich\u201d.</p>';
+  + '<input type="text" id="lkurl" placeholder="https://…{{word}}…" style="flex:1"><button class="lb sm" id="lkadd">Add</button></div>'
+  + '<p style="margin:3px 0">{{item}} is the dictionary form; {{word}} drops a leading “sich”; {{dash}} joins a phrase with hyphens; {{accent}} is us or uk. A new link belongs to the language of the open text.</p>';
   function save(l){ saveL("links", l); paintLinkEditor(); var d = host.closest("details"); if (d) d.open = true;
     if (PF) { var c = $("labai").querySelector(".pf-card"); if (c) pfLinks(c, profileSnapshot(PF)); } }
   host.querySelectorAll("[data-lk]").forEach(function(c){ c.onchange = function(){
@@ -2233,9 +2472,9 @@ function paintLinkEditor(){
     var l = linkServices(); var gone = l.splice(+b.dataset.lkdel, 1)[0]; save(l); say("Link removed: " + gone.label); }; });
   $("lkadd").onclick = function(){
     var name = $("lkname").value.trim(), url = $("lkurl").value.trim();
-    if (!name || !/^https?:\/\//.test(url) || !/\{\{(item|word)\}\}/.test(url)){ say("A link needs a name and an address starting with http that contains {{item}} or {{word}}"); return; }
+    if (!name || !/^https?:\/\//.test(url) || !/\{\{(item|word|dash)\}\}/.test(url)){ say("A link needs a name and an address starting with http that contains {{item}}, {{word}} or {{dash}}"); return; }
     var l = linkServices();
-    l.push({id:"c" + Date.now().toString(36), label:name, group:$("lkgroup").value.trim() || "Links", url:url, on:true});
+    l.push({id:"c" + Date.now().toString(36), lang:curLang(), label:name, group:$("lkgroup").value.trim() || "Links", url:url, on:true});
     save(l); say("Link added: " + name);
   };
 }
@@ -2246,8 +2485,8 @@ function paintBench(){
   host.innerHTML = Object.keys(CALL_DEFAULTS).map(function(id){
     var c = callDef(id), edited = ((load("calls", {}) || {})[id] || {}).prompt !== undefined;
     var users = Object.keys(ps).filter(function(k){ return ps[k].calls.indexOf(id) >= 0; }).map(function(k){ return ps[k].label; });
-    return '<details class="bc" data-call="' + id + '"><summary><b>' + esc(c.label) + "</b>" + (c.variant ? " \u00b7 " + esc(c.variant) : "")
-      + " \u00b7 v" + c.prompt_version + (edited ? " (edited)" : "") + " \u00b7 " + esc(callModel(c)) + (c.model ? "" : " (default)")
+    return '<details class="bc" data-call="' + id + '"><summary><b>' + esc(c.label) + "</b>" + (c.variant ? " · " + esc(c.variant) : "")
+      + " · v" + c.prompt_version + (edited ? " (edited)" : "") + " · " + esc(callModel(c)) + (c.model ? "" : " (default)")
       + '<span class="bcu">' + (users.length ? "used by " + esc(users.join(", ")) : "not used by any preset") + "</span></summary>"
       + '<div class="r"><label class="inl">Model</label><select class="bcm" style="flex:1">'
       + '<option value="">the default model above</option>'
@@ -2256,7 +2495,7 @@ function paintBench(){
       + "</select></div>"
       + '<p style="margin:4px 0">Fills: ' + esc(c.fills.join(", ")) + "</p>"
       + '<textarea class="bcp" spellcheck="false">' + esc(c.prompt) + "</textarea>"
-      + '<p style="margin:3px 0">{{selection}} {{sentence}} {{context}} {{learner_language}} {{level}} {{level_rule}} {{item}} {{pos}} {{meaning}}</p>'
+      + '<p style="margin:3px 0">{{selection}} {{sentence}} {{context}} {{learner_language}} {{level}} {{level_rule}} {{item}} {{pos}} {{meaning}} {{variety}} {{on_page}}</p>'
       + '<div class="r"><button class="lb sm bcs">Save prompt</button>'
       + '<button class="lb sm warn bcr">Back to the original</button>'
       + '<button class="lb sm bcx">Re-run on the open item</button></div></details>';
@@ -2269,16 +2508,17 @@ function paintBench(){
     d.querySelector(".bcx").onclick = function(){ rerunCall(id); };
     function reopen(){ paintBench(); var n = host.querySelector('[data-call="' + id + '"]'); if (n) n.open = true; }
   });
-  var ps = presets(), cur = activePreset().id;
-  $("benchpreset").innerHTML = Object.keys(ps).map(function(k){
+  var blang = curLang(), ps = presetsFor(blang), cur = activePreset().id;
+  $("benchpreset").innerHTML = '<span class="langguess">' + esc(LANG_NAMES[blang] || blang) + ' texts:</span> '
+    + Object.keys(ps).map(function(k){
     return '<button class="lb sm' + (k === cur ? " on" : "") + '" data-p="' + esc(k) + '">' + esc(ps[k].label) + "</button>"; }).join("");
   $("benchpreset").querySelectorAll("[data-p]").forEach(function(b){
-    b.onclick = function(){ saveL("pfpreset", b.dataset.p); paintBench(); say("Preset: " + b.dataset.p); applyPresetToOpen(); }; });
+    b.onclick = function(){ saveL(presetKey(blang), b.dataset.p); paintBench(); say("Preset: " + b.dataset.p); applyPresetToOpen(); }; });
   paintPresetEditor();
   paintPresetTable();
   paintLinkEditor();
   $("benchslots").textContent = SLOT_DEFS.map(function(s){
-    return s.label + (s.kind !== "ai" ? " (" + s.kind + ")" : "") + (s.applies_to ? " [" + s.applies_to.join("/") + "]" : ""); }).join(" \u00b7 ");
+    return s.label + (s.kind !== "ai" ? " (" + s.kind + ")" : "") + (s.applies_to ? " [" + s.applies_to.join("/") + "]" : ""); }).join(" · ");
 }
 
 /* Pieces as text → ranges on the page. Searches only the sentence around the
@@ -2416,20 +2656,23 @@ function startProfile(label){
 /* The profile, on a selection already worked out. Add++ uses this with the id of
    the chip it has just put on the page, so the chip can follow the run. */
 function startProfileOn(a, anchor, ppId){
-  PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: anchor, ppId: ppId || null,
+  var lang = textLang();
+  PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: anchor, ppId: ppId || null, lang: lang,
     item: {item:a.term, on_page:[a.term], added:[], companions:[], pos:"", meaning:""},
-    s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), alts: [], altsOpen: false,
-    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: callModel(callDef(identifyId())) };
+    s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), s4: slotW(), alts: [], altsOpen: false,
+    ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: "" };
+  PF.model = callModel(callDef(identifyId(lang)));
   labHide();
   paintProfile();
-  say("Profile: " + a.term + " \u2014 stage 1");
+  say("Profile (" + (LANG_NAMES[lang] || lang) + ", preset " + activePreset(lang).label + "): " + a.term + " — stage 1");
   runStage1(PF);
 }
 
 function pickAlt(i){
   var P = PF, alt = P.alts[i]; if (!alt) return;
   var prev = {item:P.item.item, on_page:P.item.on_page, kind:"same_meaning", pos:P.item.pos,
-              meaning:P.item.meaning, added:P.item.added, companions:P.item.companions};
+              meaning:P.item.meaning, added:P.item.added, companions:P.item.companions,
+              tricky_sound:!!P.item.tricky};
   P.alts.splice(i, 1);
   if (alt.kind === "same_meaning"){
     P.item.item = alt.item;                 // only the label changes; nothing reruns
@@ -2440,10 +2683,11 @@ function pickAlt(i){
   }
   prev.kind = "different_meaning"; P.alts.unshift(prev);
   P.item = { item: alt.item, on_page: alt.on_page || [alt.item], added: alt.added || [],
-    dropped: alt.dropped || [], companions: alt.companions || [], pos: alt.pos || "", meaning: alt.meaning || "" };
+    dropped: alt.dropped || [], companions: alt.companions || [], pos: alt.pos || "", meaning: alt.meaning || "",
+    tricky: !!alt.tricky_sound };
   P.altsOpen = false;
   locate(P);
-  say("  switched to " + alt.item + " \u2014 rerunning grammar and examples");
+  say("  switched to " + alt.item + (P.item.tricky ? " (tricky sound)" : "") + " — rerunning grammar and examples");
   runStage2(P);
 }
 
@@ -2461,10 +2705,67 @@ function speakDE(t){
     speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){ say("No browser voice here"); }
 }
 
+/* ── English audio (english-profile-brief.md §5) ────────────────────────
+   The browser's own voice, a US or UK one to match the variety, one sentence
+   per utterance so each line keeps its whole context.
+     ordinary word  the word, then the examples
+     tricky word    the say-it script only, never the word on its own
+   The voice actually used is written to the log, because the brief's audio
+   test is "which words did which voice get wrong, on which device". */
+var LASTVOICE = "";
+function voicesNow(){ try{ return speechSynthesis.getVoices() || []; }catch(e){ return []; } }
+try{ speechSynthesis.onvoiceschanged = function(){ try{ paintLang(); }catch(e){} }; }catch(e){}
+function pickVoice(tag){
+  var want = tag.toLowerCase(), base = want.split("-")[0];
+  var vs = voicesNow().filter(function(v){ return String(v.lang || "").replace("_", "-").toLowerCase() === want; });
+  if (!vs.length) vs = voicesNow().filter(function(v){ return String(v.lang || "").toLowerCase().indexOf(base) === 0; });
+  var score = function(v){ var n = v.name || "";
+    return (/natural|neural|online/i.test(n) ? 4 : 0) + (/google/i.test(n) ? 2 : 0) + (v.localService ? 0 : 1) - (/compact|novelty/i.test(n) ? 5 : 0); };
+  vs.sort(function(a, b){ return score(b) - score(a); });
+  return vs[0] || null;
+}
+function voiceTag(lang){ return lang === "en" ? (variety() === "UK" ? "en-GB" : "en-US") : "de-DE"; }
+function speakLines(lines, lang, btn){
+  lines = (lines || []).map(function(x){ return String(x || "").replace(/\*\*/g, "").trim(); }).filter(Boolean);
+  if (!lines.length){ say("Nothing to play yet"); return; }
+  try{
+    if (speechSynthesis.speaking){ speechSynthesis.cancel(); if (btn) btn.classList.remove("pf-playing"); return; }  // a second press stops it
+    var tag = voiceTag(lang), v = pickVoice(tag);
+    LASTVOICE = v ? v.name + " (" + v.lang + ")" : "browser default for " + tag;
+    say("  voice: " + LASTVOICE);
+    lines.forEach(function(t, i){
+      var u = new SpeechSynthesisUtterance(t);
+      u.lang = tag; u.rate = 0.95; if (v) u.voice = v;
+      if (btn && i === lines.length - 1) u.onend = u.onerror = function(){ btn.classList.remove("pf-playing"); };
+      speechSynthesis.speak(u);
+    });
+    if (btn) btn.classList.add("pf-playing");
+  }catch(e){ say("No browser voice here"); }
+}
+/* What the play button says for a profile. */
+function audioLines(v){
+  if ((v.lang || "de") !== "en") return [v.item];
+  if (v.tricky) return (v.script && v.script.length) ? v.script
+    : (v.examples || []).map(function(e){ return e.text; });      // the script failed: the examples, still never the bare word
+  return [v.item].concat((v.examples || []).slice(0, 3).map(function(e){ return e.text; }));
+}
+/* The fixed note beside a tricky word (§5). No call: one sentence per learner
+   language, translated once. Anything not listed gets the English one. */
+var TRICKY_NOTE = {
+  german:  "Diese Schreibweise hat mehrere Aussprachen. In dieser Bedeutung klingt das Wort so, wie du es in diesen Sätzen hörst.",
+  deutsch: "Diese Schreibweise hat mehrere Aussprachen. In dieser Bedeutung klingt das Wort so, wie du es in diesen Sätzen hörst.",
+  english: "This spelling has more than one pronunciation. In this meaning, it sounds the way you hear it in these sentences."
+};
+function trickyNote(L){ return TRICKY_NOTE[String(L || "").trim().toLowerCase()] || TRICKY_NOTE.english; }
+
 function nu(P){ return P.s3 && P.s3.state === "done" && P.s3.value ? P.s3.value : {}; }
 function profileSnapshot(P){
   var g = P.s2a.state === "done" ? P.s2a.value : {};
-  return { item:P.item.item, pos:P.item.pos, meaning:P.item.meaning,
+  var sy = P.s4 && P.s4.state === "done" && P.s4.value ? P.s4.value : {};
+  return { lang:P.lang || "de", variety: P.lang === "en" ? variety() : "",
+    tricky: !!P.item.tricky, script: sy.script || [],
+    forms: g.forms || [], countable: g.countable || "", where_used: g.where_used || "", watch_out: g.watch_out || "",
+    item:P.item.item, pos:P.item.pos, meaning:P.item.meaning,
     pieces:P.item.on_page, added:P.item.added || [], companions:P.item.companions || [],
     gender:g.gender || null, plural:g.plural || null, participle:g.participle || null,
     splits:g.splits || null, ipa:g.ipa || "", gloss:g.gloss || "",
@@ -2472,10 +2773,10 @@ function profileSnapshot(P){
     examples: P.s2b.state === "done" ? P.s2b.value : [],
     synonyms: nu(P).synonyms || [], collocations: nu(P).collocations || [],
     connotation: nu(P).connotation || "", region: nu(P).region || "",
-    preset: activePreset().id,
+    preset: activePreset(P.lang).id,
     alternatives: P.alts.filter(function(x){ return !x.mine; })
       .map(function(x){ return {item:x.item, kind:x.kind, meaning:x.meaning}; }),
-    by:"ai", model:P.model, meta:P.meta || {}, learnerLang:load("learnlang","English"), level:load("level","B1") };
+    by:"ai", model:P.model, meta:P.meta || {}, learnerLang:learnLang(P.lang), level:load("level","B1") };
 }
 
 /* ── the panel's look (panel-design-picks.md, panel-picks.html) ──────────
@@ -2537,11 +2838,17 @@ function pfSkeleton(look){
   var hand = look.style === "hand";
   var onp  = '<div class="pf-onp" data-slot="pieces">' + pfPiece("item","onp","5em") + "</div>";
   var hw   = '<div class="pf-hw" data-slot="item">' + pfPiece("item","hw","4.2em", hand ? "div" : "span") + "</div>";
-  var row  = '<div class="pf-row"><button class="pf-play ld" data-pf="say" aria-label="Play pronunciation">' + PF_PLAY + "</button>"
+  var row  = '<div class="pf-row"><button class="pf-play ld" data-pf="say" data-slot="audio" aria-label="Play pronunciation">' + PF_PLAY + "</button>"
            + '<span data-slot="ipa">' + pfPiece("grammar","ipa","4em") + "</span>"
            + '<span class="pf-dim" data-slot="pos">' + pfPiece("item","pos","3em") + "</span>"
            + '<span class="pf-dim" data-slot="register">' + pfPiece("grammar","register","3.6em") + "</span></div>";
   var fail1 = '<div class="pf-fail" data-fail="item" hidden></div>';
+  // English only: one spelling, several sounds. The note is fixed text; the
+  // script is what the play button reads, shown on request so it can be checked.
+  var trk  = '<div class="pf-trk" data-slot="script" hidden><div class="pf-trk-note"></div>'
+           + '<button class="pf-link" data-pf="script">what it says</button><ol class="pf-script" hidden></ol></div>'
+           + '<div class="pf-fail" data-fail="say" hidden></div>';
+  row += trk;
   var extra = '<div class="pf-extra"></div>';
   var mean = '<div class="pf-mean" data-slot="meaning">' + pfPiece("item","mean","7em") + "</div>"
            + '<div class="pf-gl" data-slot="gloss" hidden>' + pfPiece("grammar","gl","9em") + "</div>";
@@ -2549,6 +2856,7 @@ function pfSkeleton(look){
       return '<li data-pf="ex" data-slot="examples" data-i="' + i + '" tabindex="0">' + pfPiece("ex","ex" + i, (15 - i*2) + "em") + '<span class="pf-tr"></span></li>'; }).join("")
            + '</ul><div class="pf-fail" data-fail="ex" hidden></div>';
   var facts = '<div class="pf-facts">' + pfPiece("grammar","facts","10em") + "</div>"
+            + '<div class="pf-note pf-watch" data-slot="watch_out" hidden>' + pfPiece("grammar","watch","12em") + "</div>"
             + '<div class="pf-note" data-slot="note" hidden>' + pfPiece("grammar","note","12em") + "</div>"
             + '<div class="pf-fail" data-fail="grammar" hidden></div>';
   var nuance = '<div class="pf-nu">'
@@ -2560,7 +2868,7 @@ function pfSkeleton(look){
   var links = '<div class="pf-links" data-slot="links" hidden></div>';
   var sig  = "";
   var tools = '<div class="pf-tools"></div><div class="pf-fade"></div>';
-  var top  = '<button class="pf-x" data-pf="close" aria-label="Close">\u00d7</button>';
+  var top  = '<button class="pf-x" data-pf="close" aria-label="Close">×</button>';
   if (!hand)
     return '<div class="pf-card pf-lq pf-' + look.style + " pf-f-" + look.frame + (look.align === "center" ? " pf-center" : "")
       + '" data-fam="lacq"><div class="pf-frame"></div>' + top
@@ -2613,7 +2921,7 @@ function pfOnPage(v, live){
     if (miss.indexOf(pc) >= 0) return '<s title="not found in this sentence">' + h + "</s>";
     if ((v.added || []).indexOf(pc) >= 0) return '<span class="pf-added" title="added: the item needs it">' + h + "</span>";
     return h;
-  }).join(" \u2026 ");
+  }).join(" … ");
 }
 /* "neutral" next to a German noun reads like neuter (das). Say it in words
    that cannot be mistaken for a gender. */
@@ -2645,9 +2953,11 @@ function sharesRun(a, b, n){
   for (var i = 0; i + n <= a.length; i++) if (b.indexOf(a.substr(i, n)) >= 0) return true;
   return false;
 }
-function trimPieces(pcs, item, pos){
+/* English goes through the same check. foldDE only lowercases English words,
+   and the reflexive rule is German's alone, so it is switched off for English. */
+function trimPieces(pcs, item, pos, lang){
   var words = String(item || "").split(/\s+/).filter(Boolean);
-  var refl = words[0] && foldDE(words[0]) === "sich";
+  var refl = (lang || "de") === "de" && words[0] && foldDE(words[0]) === "sich";
   var core = refl ? words.slice(1) : words;
   var room = core.length + (/^\s*verb\s*$/i.test(pos || "") ? 1 : 0) + (refl ? 1 : 0);
   if (pcs.length <= room) return {keep:pcs, drop:[]};
@@ -2665,7 +2975,7 @@ function pfExampleHTML(e, live, i, v){
   var pcs = (e.pieces && e.pieces.length) ? e.pieces
           : (String(e.text || "").match(/\*\*(.+?)\*\*/g) || []).map(function(x){ return x.slice(2, -2); });
   var src = v || (live && live.item) || {};
-  var tr = trimPieces(pcs, src.item, src.pos);
+  var tr = trimPieces(pcs, src.item, src.pos, (v && v.lang) || (live && live.lang) || "de");
   if (tr.drop.length && live){
     live._exTrim = live._exTrim || {};
     if (!live._exTrim[i]){
@@ -2709,7 +3019,25 @@ function pfFacts(v){
   if (v.plural) f.push(["Plural", v.plural, "plural"]);
   if (v.participle) f.push(["Perfect", v.participle, "participle"]);
   if (v.splits) f.push(["Splits", v.splits, "splits"]);
+  // English (english-profile-brief.md §2): every one of these is empty unless it matters
+  (v.forms || []).forEach(function(x){ if (x && x.form) f.push([x.label || "form", x.form, "forms"]); });
+  if (v.countable) f.push(["Countable", v.countable, "countable"]);
+  if (v.where_used) f.push(["US or UK", v.where_used, "where_used"]);
   return f;
+}
+/* The tricky-sound block: shown for an English word whose spelling has more
+   than one sound, with the fixed note in the learner's language. */
+function pfTricky(card, v){
+  var el = card.querySelector(".pf-trk"); if (!el) return;
+  var on = (v.lang === "en") && !!v.tricky;
+  el.hidden = !on;
+  if (!on) return;
+  el.querySelector(".pf-trk-note").textContent = trickyNote(v.learnerLang);
+  var ol = el.querySelector(".pf-script"), sc = v.script || [];
+  ol.innerHTML = sc.map(function(x){ return "<li>" + esc(x) + "</li>"; }).join("");
+  el.querySelector('[data-pf="script"]').hidden = !sc.length;
+  var pl = card.querySelector(".pf-play");
+  if (pl) pl.title = sc.length ? "Play the sentences" : "Waiting for the sentences";
 }
 
 /* Fill every piece of one slot. */
@@ -2727,6 +3055,7 @@ function pfFillSlot(card, slot, v, anim, live){
     put("mean", esc(v.meaning || ""));
     card.querySelector(".pf-play").classList.remove("ld");
     pfLinks(card, v);
+    pfTricky(card, v);
     var ld = card.querySelector(".pf-loader"); if (ld) ld.classList.add("corner");
   }
   if (slot === "grammar"){
@@ -2739,9 +3068,12 @@ function pfFillSlot(card, slot, v, anim, live){
     card.querySelector(".pf-facts").hidden = !f.length;
     if (f.length) put("facts", f.map(function(p){
       return '<span data-slot="' + p[2] + '"><small>' + esc(p[0]) + "</small><em>" + esc(p[1]) + "</em></span>"; }).join(""));
-    var nt = card.querySelector(".pf-note");
+    var wo = card.querySelector(".pf-watch");
+    if (v.watch_out){ wo.hidden = false; put("watch", esc(v.watch_out)); } else wo.hidden = true;
+    var nt = card.querySelector('.pf-note[data-slot="note"]');
     if (v.note){ nt.hidden = false; put("note", esc(v.note)); } else nt.hidden = true;
   }
+  if (slot === "say") pfTricky(card, v);
   if (slot === "ex"){
     sec("ex");
     var es = v.examples || [];
@@ -2767,7 +3099,7 @@ function pfFillSlot(card, slot, v, anim, live){
     if (syn.length) put("syn", "<small>near words</small>" + syn.map(function(x){
       return '<div class="pf-sw"><b>' + esc(x.word) + "</b> " + esc(x.difference || "") + "</div>"; }).join(""));
     card.querySelector(".pf-col").hidden = !col.length;
-    if (col.length) put("col", "<small>goes with</small>" + col.map(esc).join(" \u00b7 "));
+    if (col.length) put("col", "<small>goes with</small>" + col.map(esc).join(" · "));
     card.querySelector(".pf-con").hidden = !v.connotation;
     if (v.connotation) put("con", "<small>feel</small>" + esc(v.connotation));
     card.querySelector(".pf-rgn").hidden = !v.region;
@@ -2783,8 +3115,8 @@ function pfFillSlot(card, slot, v, anim, live){
 function pfFail(card, slot, err, show){
   var el = card.querySelector('[data-fail="' + slot + '"]'); if (!el) return;
   el.hidden = !show;
-  var names = {item:"The item", grammar:"Grammar", ex:"Examples", nuance:"Nuance"};
-  if (show) el.innerHTML = esc(names[slot]) + " didn\u2019t load. <button data-retry=\"" + slot + "\">Try again</button>"
+  var names = {item:"The item", grammar:"Grammar", ex:"Examples", nuance:"Nuance", say:"The spoken sentences"};
+  if (show) el.innerHTML = esc(names[slot]) + " didn’t load. <button data-retry=\"" + slot + "\">Try again</button>"
     + '<span class="pf-why">' + esc(String(err || "").split("\n")[0].slice(0, 120)) + "</span>";
   card.querySelectorAll('[data-sec="' + slot + '"]').forEach(function(s){ s.classList.remove("pending"); });
   if (slot === "ex" && show) card.querySelector(".pf-ex").hidden = true;
@@ -2814,7 +3146,7 @@ function pfControls(card, v, live, note){
     h += '<button class="pf-link" data-pf="alts" data-slot="alternatives">other options (' + live.alts.length + ")</button>";
     if (live.altsOpen) h += '<div class="pf-alts">' + live.alts.map(function(x, i){
       return '<button data-alt="' + i + '"><b>' + esc(x.item) + "</b>"
-        + (x.meaning ? " \u2014 " + esc(x.meaning) : "")
+        + (x.meaning ? " — " + esc(x.meaning) : "")
         + " <small>" + (x.mine ? "as you selected it" : x.kind === "same_meaning" ? "same meaning, other form" : "different meaning") + "</small></button>";
     }).join("") + "</div>";
   }
@@ -2833,10 +3165,10 @@ function pfControls(card, v, live, note){
       + '<label><input type="checkbox" id="aimark"' + (marked ? " checked" : "") + (live && live.removed ? " disabled" : "") + "> mark it in the text</label>"
       + ((v.examples || []).length ? '<button class="pf-link" id="pfblank">' + (pfBlanking() ? "show the item" : "blank the item") + "</button>" : "")
       + '<span class="pf-time">' + (live
-          ? esc(live.model) + (live.mode ? " \u00b7 " + esc(live.mode) : "")
-            + (live.times.s1 ? " \u00b7 " + live.times.s1 : "") + (live.times.s2a ? " / " + live.times.s2a : "")
+          ? esc(live.model) + (live.mode ? " · " + esc(live.mode) : "")
+            + (live.times.s1 ? " · " + live.times.s1 : "") + (live.times.s2a ? " / " + live.times.s2a : "")
             + (live.times.s2b ? " / " + live.times.s2b : "") + (live.times.s1 ? " ms" : "")
-          : esc(new Date(note.when).toLocaleDateString()) + " \u00b7 " + esc(v.level || "") + " \u00b7 " + esc(v.model || ""))
+          : esc(new Date(note.when).toLocaleDateString()) + " · " + esc(v.level || "") + " · " + esc(v.model || ""))
       + "</span>";
   }
 }
@@ -2877,7 +3209,7 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
     else { var l = box.querySelector(".pf-loader"); if (l) l.classList.add("off"); }
   }
   var card = box.querySelector(".pf-card"), shown = box._shown;
-  ["item","grammar","ex","nuance"].forEach(function(sl){
+  ["item","grammar","ex","nuance","say"].forEach(function(sl){
     var st = states[sl], was = shown[sl];
     if (st === was) return;
     if (st === "done"){ pfFail(card, sl, "", false); pfFillSlot(card, sl, v, !instant, live); }
@@ -2891,7 +3223,7 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
     if (op && !op.querySelector(".pf-ch")) op.innerHTML = pfOnPage(v, live);
   }
   pfApplyShow(card, v);
-  var settled = ["item","grammar","ex","nuance"].every(function(sl){ return states[sl] !== "waiting"; });
+  var settled = ["item","grammar","ex","nuance","say"].every(function(sl){ return states[sl] !== "waiting"; });
   if (settled && !shown.sig){
     shown.sig = true;
     var ldr = card.querySelector(".pf-loader");
@@ -2906,7 +3238,7 @@ function pfRender(box, key, v, states, live, note, anchor, instant){
    slot shows only its label; pressing the label opens it. A slot whose call
    is not in the preset is hidden, whatever it holds. */
 function pfApplyShow(card, v){
-  var pr = activePreset(), show = pr.show || {};
+  var pr = activePreset(v.lang || "de"), show = pr.show || {};
   var byCall = {};
   Object.keys(CALL_DEFAULTS).forEach(function(id){ CALL_DEFAULTS[id].fills.forEach(function(f){ byCall[f] = groupOf(id); }); });
   card.querySelectorAll("[data-slot]").forEach(function(el){
@@ -2917,7 +3249,7 @@ function pfApplyShow(card, v){
     var cz = mode === "collapsed";
     if (cz && !el.classList.contains("pf-cz")){
       var def = SLOT_DEFS.filter(function(d){ return d.id === slot; })[0];
-      el.setAttribute("data-label", (def ? def.label : slot) + " \u25b8");
+      el.setAttribute("data-label", (def ? def.label : slot) + " ▸");
       el.classList.add("pf-cz"); el.classList.remove("pf-open");
       el.onclick = function(e){ if (!el.classList.contains("pf-cz")) return;
         e.stopPropagation(); el.classList.toggle("pf-open"); pfMore(card); };
@@ -2929,7 +3261,8 @@ function pfApplyShow(card, v){
 }
 function pfLinks(card, v){
   var el = card.querySelector(".pf-links"); if (!el) return;
-  var on = linkServices().filter(function(x){ return x.on; });
+  var lang = v.lang || "de";
+  var on = linkServices().filter(function(x){ return x.on && linkLang(x) === lang; });
   if (!v.item || !on.length){ el.hidden = true; el.innerHTML = ""; return; }
   var groups = {};
   on.forEach(function(x){ (groups[x.group || "Links"] = groups[x.group || "Links"] || []).push(x); });
@@ -2947,7 +3280,16 @@ function pfWire(box, v, live, note){
   var card = box.querySelector(".pf-card");
   card.querySelector('[data-pf="close"]').onclick = function(){
     box.className = ""; box.dataset.pfkey = ""; if (live && PF === live) PF = null; labPaint(); };
-  card.querySelector('[data-pf="say"]').onclick = function(){ if (v.item) speakDE(v.item); };
+  card.querySelector('[data-pf="say"]').onclick = function(){
+    if (!v.item) return;
+    if ((v.lang || "de") !== "en"){ speakDE(v.item); return; }
+    if (v.tricky && !(v.script || []).length && live && live.s4 && live.s4.state === "waiting"){
+      say("The spoken sentences are still coming — a tricky word is never played on its own"); return; }
+    speakLines(audioLines(v), "en", this);
+  };
+  var sc = card.querySelector('[data-pf="script"]');
+  if (sc) sc.onclick = function(){ var ol = card.querySelector(".pf-script"); ol.hidden = !ol.hidden;
+    sc.textContent = ol.hidden ? "what it says" : "hide it"; pfMore(card); };
   card.querySelectorAll('[data-pf="ex"]').forEach(function(li){
     li.onclick = function(){ if (!li.querySelector(".ld")) li.classList.toggle("show"); };
     li.onkeydown = function(e){ if (e.key === "Enter" || e.key === " "){ e.preventDefault(); li.onclick(); } };
@@ -2959,7 +3301,8 @@ function pfWire(box, v, live, note){
     card.querySelectorAll("[data-comp]").forEach(function(b){ b.onclick = function(){ addCompanion(b.dataset.comp); }; });
     card.querySelectorAll("[data-retry]").forEach(function(b){
       b.onclick = function(){ if (b.dataset.retry === "item") runStage1(live);
-        else if (b.dataset.retry === "nuance") runCall(live, "nuance");
+        else if (b.dataset.retry === "nuance") runCall(live, presetCall(activePreset(live.lang), "nuance") || "nuance");
+        else if (b.dataset.retry === "say") runCall(live, presetCall(activePreset(live.lang), "sayit") || "sayit_en");
         else runStage2(live); }; });
   }
   var n = live ? (live.noteId && noteById(live.noteId)) : note;
@@ -2984,8 +3327,8 @@ function pfWire(box, v, live, note){
   };
   var cp = $("aicopy");
   if (cp) cp.onclick = function(){
-    var t = v.item + " \u2014 " + v.meaning + "\n" + (v.examples || []).map(function(e){
-      return e.text.replace(/\*\*/g, "") + " \u2014 " + e.tr; }).join("\n");
+    var t = v.item + " — " + v.meaning + "\n" + (v.examples || []).map(function(e){
+      return e.text.replace(/\*\*/g, "") + " — " + e.tr; }).join("\n");
     try{ navigator.clipboard.writeText(t); this.textContent = "copied"; }catch(e){} };
   pfFlagWire(card, v, live, note);
 }
@@ -2997,7 +3340,8 @@ function paintProfile(){
   var states = { item: st(P.s1), grammar: P.s1.state === "failed" ? "waiting" : st(P.s2a),
     ex: P.s1.state === "failed" ? "waiting" : st(P.s2b),
     nuance: P.s1.state === "failed" ? "waiting" : st(P.s3 || slotV({})),
-    itemErr: P.s1.err, grammarErr: P.s2a.err, exErr: P.s2b.err, nuanceErr: (P.s3 || {}).err };
+    say: P.s1.state === "failed" ? "waiting" : st(P.s4 || slotV({})),
+    itemErr: P.s1.err, grammarErr: P.s2a.err, exErr: P.s2b.err, nuanceErr: (P.s3 || {}).err, sayErr: (P.s4 || {}).err };
   autoSave(P);
   pfRender($("labai"), "live|" + P.run + "|" + P.gen, v, states, P, null, P.anchor, false);
   try{ paintLevel(); }catch(e){}
@@ -3006,7 +3350,7 @@ function paintProfile(){
 /* A saved profile, on hover: the same panel, filled at once. */
 function showProfile(snap, anchor, note){
   PF = null;
-  pfRender($("labai"), "saved|" + note.id, snap, {item:"done", grammar:"done", ex:"done", nuance:"done"},
+  pfRender($("labai"), "saved|" + note.id, snap, {item:"done", grammar:"done", ex:"done", nuance:"done", say:"done"},
            null, note, anchor, true);
 }
 
@@ -3014,7 +3358,7 @@ function paintLevel(){ var l = load("level", "B1");
   document.querySelectorAll(".lvlb").forEach(function(b){ b.classList.toggle("on", b.dataset.lvl === l); });
   var el = $("schemamode"); if (!el) return;
   el.textContent = "answers come back as: " + load("aischemaMode", "schema")
-    + " \u00b7 " + AISTATS.calls + " calls, " + AISTATS.limited + " rate-limited this visit"; }
+    + " · " + AISTATS.calls + " calls, " + AISTATS.limited + " rate-limited this visit"; }
 
 /* ── the bar ──────────────────────────────────────────────────────────── */
 function say(m){ LOG.unshift(m); if (LOG.length>40) LOG.pop();
@@ -3036,7 +3380,7 @@ function makePart(r, text){
 }
 function heldTerm(){
   if (!parts.length) return LAST ? LAST.term : "";
-  return parts.map(function(p){ return p.text; }).filter(Boolean).join(" \u2026 ");
+  return parts.map(function(p){ return p.text; }).filter(Boolean).join(" … ");
 }
 
 function slotNode(id, ghost){
@@ -3046,7 +3390,7 @@ function slotNode(id, ghost){
     var cur = (S.settings.reader && S.settings.reader.lastColor) || "yellow";
     var wrap = document.createElement("div");
     wrap.className = "tt-hl-wrap";
-    wrap.title = "Highlight \u2014 scroll to change color";
+    wrap.title = "Highlight — scroll to change color";
     wrap.innerHTML =
         '<button class="tt-hl ' + (LAST.hlId ? "on" : "") + '" id="tt-hl">'
       + '<span class="hl-pen">' + iconOf(s) + "</span>"
@@ -3069,7 +3413,7 @@ function slotNode(id, ghost){
         VocabStore.set({settings:S.settings});
         if (parts.length){ await applyToParts("hl", b.dataset.color); return; }
         var hid = await addReaderHighlight(LAST.term, b.dataset.color);
-        say(s.label + " \u2014 " + b.dataset.color); labReopen(LAST.savedId, hid);
+        say(s.label + " — " + b.dataset.color); labReopen(LAST.savedId, hid);
       };
     });
     wrap.addEventListener("wheel", function(e){
@@ -3089,7 +3433,7 @@ function slotNode(id, ghost){
 
   if (s.kind === "add"){
     b2.className = pre + "tt-add " + (LAST.savedId && !parts.length ? "on" : "");
-    b2.title = LAST.savedId ? "Saved \u2014 click to undo" : "Save this item";
+    b2.title = LAST.savedId ? "Saved — click to undo" : "Save this item";
     b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
     b2.onclick = async function(){
       var m = measureOf();
@@ -3120,7 +3464,7 @@ function slotNode(id, ghost){
       try{ window.getSelection().removeAllRanges(); }catch(err){}
       HOLDING = true;                        // the next selection joins, no Ctrl needed
       labHide(); labPaint();
-      say(parts.length + " part" + (parts.length > 1 ? "s" : "") + " held \u2014 select the next piece (Esc or a plain click lets go)");
+      say(parts.length + " part" + (parts.length > 1 ? "s" : "") + " held — select the next piece (Esc or a plain click lets go)");
     };
     return b2;
   }
@@ -3137,7 +3481,7 @@ function slotNode(id, ghost){
 
   if (s.kind === "addpp"){
     b2.className = pre + "tt-add";
-    b2.title = "Save and profile in one act \u2014 the chip appears at once";
+    b2.title = "Save and profile in one act — the chip appears at once";
     b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
     b2.onclick = function(e){ e.stopPropagation(); b2.disabled = true; addPlusPlus(); };
     return b2;
@@ -3150,7 +3494,7 @@ function slotNode(id, ghost){
   }
   if (s.kind === "profile"){
     b2.className = pre + "tt-ai";
-    b2.title = "The whole German profile of this item";
+    b2.title = "The whole profile of this item, in the language of this text";
     b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
     b2.onclick = function(){ startProfile(s.label); };
     return b2;
@@ -3165,11 +3509,11 @@ function slotNode(id, ghost){
       var about = { term: heldTerm(), textId: ui.readerTextId,
         ranges: heldRanges().map(function(x){ return {start:x.start, end:x.end}; }) };
       var anchor = ttEl ? ttEl.getBoundingClientRect() : null;
-      showAI(s.label + " \u00b7 " + about.term, "asking\u2026", false, anchor);
-      say(s.label + " \u2014 asked (" + load("aimodel","gemini-flash-latest") + ")");
+      showAI(s.label + " · " + about.term, "asking…", false, anchor);
+      say(s.label + " — asked (" + load("aimodel","gemini-flash-latest") + ")");
       var r = await askAI(q);
-      if (r.err){ showAI(s.label, esc(r.err), true, anchor); say(s.label + " \u2014 " + r.err); }
-      else { showAI(s.label + " \u00b7 " + about.term, esc(r.text.trim()), false, anchor,
+      if (r.err){ showAI(s.label, esc(r.err), true, anchor); say(s.label + " — " + r.err); }
+      else { showAI(s.label + " · " + about.term, esc(r.text.trim()), false, anchor,
                     {label:s.label, slot:id, text:r.text.trim(), about:about}); }
     };
     return b2;
@@ -3177,7 +3521,7 @@ function slotNode(id, ghost){
 
   b2.className = pre + "tt-x"; b2.title = s.label;
   b2.innerHTML = iconOf(s) + (s.showLabel ? " " + esc(s.label) : "");
-  b2.onclick = function(e){ e.stopPropagation(); say(s.label + " \u2014 nothing behind it yet"); };
+  b2.onclick = function(e){ e.stopPropagation(); say(s.label + " — nothing behind it yet"); };
   return b2;
 }
 
@@ -3229,7 +3573,7 @@ async function applyToParts(what, colour, pp){
       var rh = await VocabStore.addHighlight({ text: term, color: colour, note: "", sourceUrl: "", sourceTitle: text0.name });
       id = rh && rh.id;
     }
-  }catch(e){ say("Could not create the item \u2014 " + (e && e.message || e)); return; }
+  }catch(e){ say("Could not create the item — " + (e && e.message || e)); return; }
   say("  id " + (id || "NONE") + (fresh ? " (new)" : " (already existed)") + " " + ms());
   if (pp && id) PP[id] = "work";        // set before the first render, so no other chip is ever drawn
   if (!id){ say("No id came back, so nothing was marked"); return; }
@@ -3260,7 +3604,7 @@ async function applyToParts(what, colour, pp){
   if (pp) ppPaint();
   say("  all " + rs.length + " drawn together " + ms());
   try{ await VocabStore.set(patch); }
-  catch(e){ say("Saving the pieces failed \u2014 " + (e && e.message || e)); return; }
+  catch(e){ say("Saving the pieces failed — " + (e && e.message || e)); return; }
 
   // 4. check it stuck, after the store has had its say again
   await settle(300);
@@ -3273,7 +3617,7 @@ async function applyToParts(what, colour, pp){
 
 async function capture(cls){
   var b = bodyText(), rs = heldRanges();
-  if (!rs.length){ say("Nothing to collect \u2014 the reader could not place that selection"); return; }
+  if (!rs.length){ say("Nothing to collect — the reader could not place that selection"); return; }
   var s0 = rs[0].start, e0 = rs[rs.length-1].end;
   var hit = heldTerm();
   // No highlight. A class is not a highlight: its mark is the lab's own, it is
@@ -3313,7 +3657,7 @@ function keepRowShow(rect){
     row.appendChild(b);
   });
   var nb = document.createElement("button");
-  nb.className = "tt-x"; nb.textContent = BINS.length ? "New collection\u2026" : "Make the first collection\u2026";
+  nb.className = "tt-x"; nb.textContent = BINS.length ? "New collection…" : "Make the first collection…";
   nb.onclick = function(e){
     e.stopPropagation();
     var n = prompt("Name for the collection:", "Kept");
@@ -3373,7 +3717,7 @@ function binPanelEl(){
   return el;
 }
 function jumpToKept(k){
-  if (k.textId !== ui.readerTextId){ say("That one is in \u201C" + (k.textName || "another text") + "\u201D \u2014 open it there"); return; }
+  if (k.textId !== ui.readerTextId){ say("That one is in “" + (k.textName || "another text") + "” — open it there"); return; }
   labPaint();
   var root = document.getElementById("r-render");
   var sp = root ? root.querySelector(".lab-kept") : null;
@@ -3395,10 +3739,10 @@ function paintBinPanel(){
       + '<span style="flex:1"></span>' + mine.length + "</div>";
     if (!mine.length) html += '<div class="em">Nothing kept here yet.</div>';
     mine.slice(0, 40).forEach(function(k){
-      html += '<div class="kept" data-id="' + k.id + '"><span class="x" title="Remove">\u00d7</span>'
-        + '<div class="t">' + esc(k.text.length > 90 ? k.text.slice(0, 90) + "\u2026" : k.text) + "</div>"
-        + '<div class="s">' + esc(k.size) + " \u00b7 " + esc(k.textName || "this text")
-        + (k.textId === ui.readerTextId ? "" : " \u00b7 elsewhere") + "</div></div>";
+      html += '<div class="kept" data-id="' + k.id + '"><span class="x" title="Remove">×</span>'
+        + '<div class="t">' + esc(k.text.length > 90 ? k.text.slice(0, 90) + "…" : k.text) + "</div>"
+        + '<div class="s">' + esc(k.size) + " · " + esc(k.textName || "this text")
+        + (k.textId === ui.readerTextId ? "" : " · elsewhere") + "</div></div>";
     });
   });
   bd.innerHTML = html;
@@ -3449,7 +3793,7 @@ function labShow(rect, term, savedId, hlId){
       var chip = document.createElement("button");
       chip.className = "tt-part";
       var label = pr.text || b.slice(pr.start, pr.end).trim() || ("piece " + (i+1));
-      chip.innerHTML = '<span class="tt-pw">' + esc(label) + '</span><b>\u00d7</b>';
+      chip.innerHTML = '<span class="tt-pw">' + esc(label) + '</span><b>×</b>';
       chip.title = "Drop this piece";
       chip.onclick = function(ev){
         ev.stopPropagation();
@@ -3656,7 +4000,7 @@ function paintEditor(){
       '<div class="r"><label class="inl">Label</label>'
     + '<input type="text" id="eLabel" value="'+esc(s.label)+'" style="flex:1"></div>'
     + '<div class="r"><label class="inl">Icon</label>'
-    + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader\u2019s own</span>'
+    + (s.useReaderIcon ? '<span style="font-size:11.5px;color:#6B7178">the reader’s own</span>'
         : '<select id="eIcon">'+iconOpts+"</select>")
     + '<label style="font-size:11.5px"><input type="checkbox" id="eShow"'+(s.showLabel?" checked":"")+"> show label</label></div>"
     + (s.kind === "ai"
@@ -3671,7 +4015,7 @@ function paintEditor(){
         : s.kind === "ai" ? "Asks the AI and shows what comes back."
         : s.kind === "class"
         ? "A focus class. It highlights and collects, with the context set above."
-        : s.wired ? "Wired \u2014 it calls the reader\u2019s own function."
+        : s.wired ? "Wired — it calls the reader’s own function."
                   : "Nothing behind this yet. Pressing it writes a line in the log.")+"</p>"
     + '<div class="r" style="margin-top:9px">'
     + (s.kind === "none"
@@ -3684,7 +4028,7 @@ function paintPresets(){
   $("plist").innerHTML = ps.length ? ps.map(function(p,i){
     return '<div class="r" style="justify-content:space-between"><span>'+esc(p.name)+"</span><span>"
       + '<button class="lb sm" data-use="'+i+'">Use</button> '
-      + '<button class="lb sm warn" data-del="'+i+'">\u00d7</button></span></div>'; }).join("")
+      + '<button class="lb sm warn" data-del="'+i+'">×</button></span></div>'; }).join("")
     : '<p style="margin:0">None yet.</p>';
 }
 function paintClasses(){
@@ -3701,7 +4045,7 @@ function paintClasses(){
         + (c.on?"in the bar":"not in the bar")+"</button>"
       + '<button class="lb sm'+(c.show?" on":"")+'" data-show="'+c.id+'" title="show its marks in the text">'
         + (c.show?"shown":"hidden")+"</button>"
-      + '<button class="lb sm warn" data-cdel="'+c.id+'">\u00d7</button>'
+      + '<button class="lb sm warn" data-cdel="'+c.id+'">×</button>'
       + '<div class="r" style="width:100%"><label class="inl">Looks like</label>'
         + '<select data-ann="'+c.id+'" style="flex:1">'+annOpts+"</select></div></div>";
   }).join("") : '<p style="margin:0">None yet. A class is the thing you are hunting for this week.</p>';
@@ -3725,7 +4069,7 @@ function paintCaps(){
     return '<div class="cap" style="border-color:'+COLS[c.colour]+'">'
       + '<div class="hit">'+esc(c.hit)+"</div>"
       + '<div class="ctx">'+esc(c.sentence)+"</div>"
-      + '<div class="src">'+esc(c.clsName)+" \u00b7 "+esc(c.textName)+" \u00b7 \u00b1"+c.chars+" chars kept</div></div>";
+      + '<div class="src">'+esc(c.clsName)+" · "+esc(c.textName)+" · ±"+c.chars+" chars kept</div></div>";
   }).join("") : '<p style="margin:0">Nothing collected yet.</p>';
 }
 function paintAll(){ paintExtents(); paintSlots(); paintEditor(); paintPresets(); paintClasses(); paintCaps(); }
@@ -3790,7 +4134,7 @@ function foldCards(){
     };
   });
 }
-$("labbtn").onclick = function(){ $("labdr").classList.add("on"); foldCards(); paintAll(); };
+$("labbtn").onclick = function(){ $("labdr").classList.add("on"); foldCards(); paintAll(); paintLang(); paintBench(); };
 $("labclose").onclick = function(){ $("labdr").classList.remove("on"); };
 $("extbar").onclick = function(e){
   var b = e.target.closest("[data-x]"); if (!b) return;
@@ -3922,7 +4266,7 @@ function paintModels(list){
   var sel = $("aimodelpick");
   sel.innerHTML = names.map(function(n){
     return '<option value="'+esc(n)+'"'+(n===cur?" selected":"")+'>'+esc(n)+'</option>'; }).join("")
-    + '<option value="__other">Other\u2026</option>';
+    + '<option value="__other">Other…</option>';
   $("aimodel").value = cur;
 }
 paintModels(load("aimodels", null));
@@ -3968,20 +4312,20 @@ $("aitest").onclick = async function(){
   var st = $("aistatus");
   st.style.whiteSpace = "pre-wrap";
   st.style.color = "#6B7178";
-  st.textContent = "checking the key\u2026";
+  st.textContent = "checking the key…";
   var l = await listModels();
   if (l.err){
     st.style.color = "#8a3f3f";
-    st.textContent = "The key did not authenticate \u2014 " + l.err;
+    st.textContent = "The key did not authenticate — " + l.err;
     return;
   }
   st.textContent = "Key authenticates. " + l.names.length + " models can generate"
     + (l.names.length ? " (e.g. " + l.names.slice(0,3).join(", ") + ")" : "")
-    + ".\nNow trying " + load("aimodel","gemini-flash-latest") + "\u2026";
+    + ".\nNow trying " + load("aimodel","gemini-flash-latest") + "…";
   if (l.names.length){ saveL("aimodels", l.names); paintModels(l.names); }
   var r = await askAI("Reply with exactly: ok");
   st.style.color = r.err ? "#8a3f3f" : "#4a7a35";
-  st.textContent = (r.err ? "Key authenticates, but generating failed \u2014 " + r.err
+  st.textContent = (r.err ? "Key authenticates, but generating failed — " + r.err
                           : "Working. It answered: " + r.text.trim())
     + (l.names.length ? "\n\nModels this key can use: " + l.names.slice(0,8).join(", ") : "");
 };
@@ -4022,14 +4366,14 @@ function paintRoute(){
   var band = L.filter(function(r){ return r.W >= 4 && r.W <= 8; });
   var many = band.filter(function(r){ return r.items > 2; }).length;
   n.textContent = L.length + " selection" + (L.length > 1 ? "s" : "")
-    + " \u00b7 " + L.filter(function(r){ return r.bounced; }).length + " bounced after the call"
-    + " \u00b7 four to eight words: " + band.length + ", of those " + many + " came back as more than two items";
+    + " · " + L.filter(function(r){ return r.bounced; }).length + " bounced after the call"
+    + " · four to eight words: " + band.length + ", of those " + many + " came back as more than two items";
 }
 function routeText(){
   return routeRows().map(function(r){
     return new Date(r.when).toISOString().slice(0, 16).replace("T", " ")
-      + "  W " + r.W + " E " + r.E + " S " + r.S + "  \u2192 " + r.items + " item(s)"
-      + (r.bounced ? " BOUNCED" : "") + "  \u201C" + r.term + "\u201D"; }).join("\n");
+      + "  W " + r.W + " E " + r.E + " S " + r.S + "  → " + r.items + " item(s)"
+      + (r.bounced ? " BOUNCED" : "") + "  “" + r.term + "”"; }).join("\n");
 }
 function paintBins(){
   var n = $("binlist"); if (!n) return;
@@ -4039,7 +4383,7 @@ function paintBins(){
       + 'border-radius:2px;background:' + (COLS[b.colour] || "#6cc0ff") + '"></span>'
       + '<span style="flex:1">' + esc(b.name) + ' <span style="color:#8b9099">' + c + "</span></span>"
       + '<button class="lb sm' + (b.on ? " on" : "") + '" data-on="' + b.id + '">on</button>'
-      + '<button class="lb sm warn" data-del="' + b.id + '">\u00d7</button></div>';
+      + '<button class="lb sm warn" data-del="' + b.id + '">×</button></div>';
   }).join("") : '<p style="margin:6px 0 0;color:#8b9099">No collections yet. The Keep button in the tooltip can make the first one.</p>';
 }
 function paintMeas(){
@@ -4061,18 +4405,18 @@ var SEG_DEFAULT = [
  "1 | Der Preis ist von 3,5 auf 4.5 Prozent gestiegen.",
  "1 | Das Auto kostet 12.000 Euro.",
  "1 | Der Zug fährt um 10.30 Uhr ab.",
- "1 | \u201EKommst du mit?\u201C, fragte sie leise.",
- "1 | \u201EIch weiß es nicht!\u201C, rief er.",
- "1 | Sie sagte: \u201EMorgen regnet es.\u201C",
+ "1 | „Kommst du mit?“, fragte sie leise.",
+ "1 | „Ich weiß es nicht!“, rief er.",
+ "1 | Sie sagte: „Morgen regnet es.“",
  "1 | Er zögerte... und ging dann doch.",
  "1 | Mehr Infos auf www.beispiel.de im Netz.",
  "1 | Das Treffen (siehe unten.) fällt aus.",
  "2 | Es regnet. Wir bleiben zu Hause.",
  "2 | Kommst du? Ich warte schon.",
- "2 | \u201EHilfe!\u201C Niemand antwortete.",
+ "2 | „Hilfe!“ Niemand antwortete.",
  "2 | Ich ging nach Hause. Er blieb noch.",
  "2 | Was machst du? Ich lese gerade.",
- "2 | \u201EWarte!\u201C Sie drehte sich um.",
+ "2 | „Warte!“ Sie drehte sich um.",
  "2 | Es war spät. 1990 war alles anders.",
  "2 | Wir fuhren los. Dr. Müller kam später.",
  "2 | Der Vortrag war lang. Trotzdem hat er gefallen.",
@@ -4083,7 +4427,7 @@ var SEG_DEFAULT = [
 ].join("\n");
 var SEG_LAST = "";
 function segVerdict(got, want){
-  if (!want) return {c:"", t:"\u2014"};
+  if (!want) return {c:"", t:"—"};
   if (got === want) return {c:"ok", t:"OK"};
   return got > want ? {c:"split", t:"WRONG SPLIT"} : {c:"miss", t:"MISSED"};
 }
@@ -4095,7 +4439,7 @@ function segRun(){
     return '<span class="pc">' + esc(t.slice(x.start, x.end).trim()) + "</span>"; }).join(""); };
   lines.forEach(function(l, i){
     var m = l.match(/^\s*(\d+)\s*\|\s*(.*)$/), want = m ? +m[1] : 0, t = m ? m[2] : l.trim();
-    var raw = segRaw(t), ours = segSentences(t);
+    var raw = segRaw(t, "de"), ours = segSentences(t, "de");   // the test set is German
     var v1 = segVerdict(raw.length, want), v2 = segVerdict(ours.length, want);
     if (v1.c) tally.raw[v1.c]++; if (v2.c) tally.ours[v2.c]++;
     var why = [].concat.apply([], ours.map(function(x){ return x.joins || []; }));
@@ -4112,7 +4456,7 @@ function segRun(){
   $("segsum").innerHTML = esc(sum).replace("\n", "<br>");
   $("segout").innerHTML = html;
   SEG_LAST = "Sentence-end test, " + navigator.userAgent + "\n" + sum + "\n\n" + rep.join("\n");
-  say("Sentence ends: " + sum.replace("\n", " \u00b7 "));
+  say("Sentence ends: " + sum.replace("\n", " · "));
 }
 function paintGateBtn(){
   var b = $("gatetoggle"); if (!b) return;
@@ -4132,7 +4476,7 @@ $("binlist").onclick = function(e){
   var id = b.dataset.on || b.dataset.del, bin = binById(id); if (!bin) return;
   if (b.dataset.on) bin.on = !bin.on;
   else if (b.dataset.del){
-    if (!confirm("Delete \u201C" + bin.name + "\u201D and everything kept in it?")) return;
+    if (!confirm("Delete “" + bin.name + "” and everything kept in it?")) return;
     BINS = BINS.filter(function(x){ return x.id !== id; });
     KEPT = KEPT.filter(function(k){ return k.bin !== id; });
     saveKept();
@@ -4169,8 +4513,45 @@ $("notescopy").onclick = function(){
 $("notesclear").onclick = function(){
   if (!confirm("Remove every saved AI answer?")) return;
   NOTES = []; saveL("notes", NOTES); paintNotesCount(); labPaint(); };
-$("learnlang").value = load("learnlang", "English");
-$("learnlang").onchange = function(){ saveL("learnlang", this.value.trim() || "English"); };
+/* The Language card, and the learner's language, which is kept per target
+   language and so follows the open text. */
+function paintLang(){
+  var set = textLangSet(), g = guessLang(bodyText()), lang = textLang();
+  document.querySelectorAll(".tlb").forEach(function(b){ b.classList.toggle("on", b.dataset.l === (set || "auto")); });
+  var gl = $("langguess");
+  if (gl) gl.textContent = ui.readerTextId ? (set ? "guess would be " : "guessed: ") + (LANG_NAMES[g] || g) : "no text open";
+  document.querySelectorAll(".varb").forEach(function(b){ b.classList.toggle("on", b.dataset.v === variety()); });
+  var vn = $("voicename");
+  if (vn){ var tag = voiceTag(lang), v = pickVoice(tag);
+    vn.textContent = tag + ": " + (v ? v.name : voicesNow().length ? "no matching voice, the browser's default" : "voices not loaded yet"); }
+  var ll = $("learnlang");
+  if (ll && document.activeElement !== ll) ll.value = learnLang(lang);
+  var h = $("learnlanghint");
+  if (h) h.textContent = "For " + (LANG_NAMES[lang] || lang) + " texts. Kept separately for each language you read.";
+}
+$("learnlang").onchange = function(){
+  var lang = textLang(), def = lang === "de" ? "English" : "German";
+  saveL(lang === "de" ? "learnlang" : "learnlang_" + lang, this.value.trim() || def);
+  say("Learner speaks " + learnLang(lang) + " (for " + (LANG_NAMES[lang] || lang) + " texts)");
+};
+document.querySelectorAll(".tlb").forEach(function(b){ b.onclick = function(){
+  var o = load("textlang", {}) || {}, id = ui.readerTextId;
+  if (!id){ say("Open a text first"); return; }
+  if (b.dataset.l === "auto") delete o[id]; else o[id] = b.dataset.l;
+  saveL("textlang", o);
+  say("This text: " + (b.dataset.l === "auto" ? "guessed, " + (LANG_NAMES[textLang()] || textLang()) : LANG_NAMES[b.dataset.l]));
+  paintLang(); paintBench();
+}; });
+document.querySelectorAll(".varb").forEach(function(b){ b.onclick = function(){
+  saveL("variety", b.dataset.v); say("English: " + varietyName()); paintLang();
+}; });
+$("voicetest").onclick = function(){
+  var lang = textLang();
+  speakLines([lang === "en"
+    ? (variety() === "UK" ? "I read the colour chart yesterday, and then I had a cup of tea." : "I read the color chart yesterday, and then I grabbed a coffee.")
+    : "Ich habe gestern das Buch gelesen, und dann bin ich spazieren gegangen."], lang, null);
+};
+paintLang();
 document.querySelectorAll(".lvlb").forEach(function(b){
   b.onclick = function(){ saveL("level", b.dataset.lvl); paintLevel(); say("Level " + b.dataset.lvl); }; });
 [["pfsb","pfstyle","auto"],["pffb","pfframe","paired"],["pfab","pfalign","paired"]].forEach(function(g){
