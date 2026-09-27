@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-27a (Contractor 13).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-27b (Contractor 13).  SCAFFOLDING (route.md §4).
 
   A COPY OF THE WEBSITE, NOT A NEW ONE. index.html, app.js and app.css as they
   stood on 2026-09-14. Four changes and no more:
@@ -255,7 +255,14 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #labdr .dh b{font-size:13px} #labdr .dh .sp{flex:1}
   #labdr .card{background:#fff;border:1px solid #D9DBD5;border-radius:9px;margin:12px 12px 0;padding:12px 13px}
   #labdr h3{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#8b9099;
-    margin:0 0 9px;font-weight:650}
+    margin:0 0 9px;font-weight:650;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
+  #labdr h3:hover{color:#1B1E21}
+  #labdr h3::before{content:"";width:0;height:0;border:4px solid transparent;border-left-color:#b0b4ab;
+    margin-right:1px;transition:transform .15s ease;transform-origin:2px 4px}
+  #labdr .card.open h3::before{transform:rotate(90deg)}
+  #labdr .card:not(.open) h3{margin:0}
+  #labdr .cardbody{display:none}
+  #labdr .card.open .cardbody{display:block}
   #labdr p{margin:0 0 8px;font-size:12px;color:#6B7178}
   #labdr .r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   #labdr .r + .r{margin-top:7px}
@@ -280,6 +287,8 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
   #r-render mark.saved.lab-pp::after{transform:translate(4px,4px);z-index:-2;background:#F6F6F4}
   #r-render mark.saved.lab-pp:hover::before{transform:translate(3px,3px) rotate(1deg)}
   #r-render mark.saved.lab-pp:hover::after{transform:translate(6px,5px) rotate(2deg)}
+  #r-render mark.saved.lab-pp.lab-note{text-decoration:none}
+  #r-render mark.saved.lab-pp.lab-note:hover{background:none}
   .pp-sign{position:relative;display:inline-block;margin-left:.32em;vertical-align:middle;flex:none}
   .pp-sign-work{width:8px;height:8px;border-radius:50%;box-shadow:inset 0 0 0 1px #DCE0E7;
     animation:pp-spin 1.6s linear infinite}
@@ -1336,7 +1345,7 @@ document.addEventListener("mouseout", function(e){
     var box = $("labai");
     if (box.dataset.pinned === "1") return;
     if (box.querySelector("#aidel") || (box.dataset.pfkey || "").indexOf("saved|") === 0){ box.className = ""; box.dataset.pfkey = ""; }
-  }, 450);
+  }, 0);
 }, true);
 
 /* After a save: is the mark actually on the page, and if not, why not.
@@ -1363,6 +1372,7 @@ function autoSave(P){
   if (!settled || P.removed) return;
   ppSet(P, (P.alts && P.alts.length) ? "attn" : "plain");
   var snap = profileSnapshot(P);
+  if (P.ppId) P.markOff = true;          // the chip is the mark; no dotted line under it
   var ranges = P.ranges.map(function(r){ return {start:r.start, end:r.end}; });
   var n = P.noteId && NOTES.filter(function(x){ return x.id === P.noteId; })[0];
   if (n){
@@ -1377,6 +1387,7 @@ function autoSave(P){
     about:{term:P.about.term, sentence:P.about.sentence} };
   NOTES.unshift(n); saveL("notes", NOTES);
   P.noteId = n.id; P.saved = true;
+  if (P.ppId){ PP_NOTE[P.ppId] = n.id; ppPaint(); }
   say("Profile saved: " + snap.item);
   labPaint(); paintNotesCount(); reportMark(n);
 }
@@ -2309,6 +2320,7 @@ function findPieces(a, pieces){
    Settled is plain again. Colour and the rest of the look are a UI question and
    are deliberately not decided here. */
 var PP = {};                      // termId -> "work" | "attn" | "fail" | "plain"
+var PP_NOTE = {};                 // termId -> the saved profile's note id
 function ppLabel(st){
   return st === "work" ? "working" : st === "attn" ? "needs a look"
        : st === "fail" ? "failed" : "settled";
@@ -2320,6 +2332,9 @@ function ppPaint(){
     var all = root.querySelectorAll('mark.saved[data-rterm="' + id + '"]');
     all.forEach(function(mk, i){
       mk.classList.add("lab-pp");
+      // The chip carries the profile itself, so the dotted note mark is not
+      // painted for it: one mark on the page, not two.
+      if (PP_NOTE[id]){ mk.classList.add("lab-note"); mk.setAttribute("data-notes", PP_NOTE[id]); }
       mk.classList.remove("pp-work", "pp-attn", "pp-fail");
       if (st !== "plain") mk.classList.add("pp-" + st);
       var old = mk.querySelector(".pp-sign"); if (old) old.remove();
@@ -2375,7 +2390,7 @@ async function addPlusPlus(){
   // The chip first, by the create-first order of FIX-013, so it is on the page
   // before anything is asked.
   if (!parts.length && LAST && LAST.range) parts = [makePart(LAST.range, LAST.term)];
-  var id = await applyToParts("add");
+  var id = await applyToParts("add", null, true);
   if (!id){ say("Add++: nothing was saved, so no profile was started"); return; }
   PP[id] = "work"; ppPaint();
   say("Add++: chip on the page, profile starting — " + about.term);
@@ -3187,7 +3202,7 @@ function marksWithId(tid, kind, id){
   return (t.marks||[]).filter(function(m){
     return m.type === kind && (kind === "saved" ? m.termId : m.highlightId) === id; }).length;
 }
-async function applyToParts(what, colour){
+async function applyToParts(what, colour, pp){
   var t0 = Date.now(), ms = function(){ return "+" + (Date.now()-t0) + "ms"; };
   var rs = parts.slice().sort(function(a,b){ return a.start - b.start; });
   var term = heldTerm(), kind = (what === "add") ? "saved" : "hl";
@@ -3216,6 +3231,7 @@ async function applyToParts(what, colour){
     }
   }catch(e){ say("Could not create the item \u2014 " + (e && e.message || e)); return; }
   say("  id " + (id || "NONE") + (fresh ? " (new)" : " (already existed)") + " " + ms());
+  if (pp && id) PP[id] = "work";        // set before the first render, so no other chip is ever drawn
   if (!id){ say("No id came back, so nothing was marked"); return; }
 
   // 2. let app.js finish swapping S before touching it
@@ -3241,6 +3257,7 @@ async function applyToParts(what, colour){
   // is_disjoint already exists in the items table, for exactly this
   if (fresh && S.terms && S.terms[id]){ S.terms[id].isDisjoint = true; patch.terms = S.terms; }
   render();
+  if (pp) ppPaint();
   say("  all " + rs.length + " drawn together " + ms());
   try{ await VocabStore.set(patch); }
   catch(e){ say("Saving the pieces failed \u2014 " + (e && e.message || e)); return; }
@@ -3750,7 +3767,30 @@ function syncClassSlots(){
   keep();
 }
 
-$("labbtn").onclick = function(){ $("labdr").classList.add("on"); paintAll(); };
+/* Each section folds. The drawer is a working tool now and its cards are long,
+   so it opens as a short list of headings and you open what you need. What is
+   open is remembered in this browser. */
+function foldCards(){
+  var open = load("cardsopen", {}) || {};
+  $("labdr").querySelectorAll(".card").forEach(function(card){
+    if (card.dataset.fold) return;
+    var h = card.querySelector("h3"); if (!h) return;
+    var key = (h.textContent || "").trim().slice(0, 40);
+    card.dataset.fold = key;
+    var body = document.createElement("div");
+    body.className = "cardbody";
+    while (h.nextSibling) body.appendChild(h.nextSibling);
+    card.appendChild(body);
+    if (open[key]) card.classList.add("open");
+    h.onclick = function(){
+      card.classList.toggle("open");
+      var o = load("cardsopen", {}) || {};
+      o[key] = card.classList.contains("open");
+      saveL("cardsopen", o);
+    };
+  });
+}
+$("labbtn").onclick = function(){ $("labdr").classList.add("on"); foldCards(); paintAll(); };
 $("labclose").onclick = function(){ $("labdr").classList.remove("on"); };
 $("extbar").onclick = function(e){
   var b = e.target.closest("[data-x]"); if (!b) return;
@@ -4106,6 +4146,7 @@ $("routecopy").onclick = function(){
 };
 $("routeclear").onclick = function(){ saveL("routelog", []); paintRoute(); say("Routing log cleared"); };
 ensureKeepSlot();
+foldCards();
 paintGateBtn();
 paintMeas();
 paintRoute();
