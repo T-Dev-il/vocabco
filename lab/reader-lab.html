@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vocab Collector — lab</title>
 <!--
-  lab/reader-lab.html — build stamp: lab · 2026-09-27c (Contractor 14).  SCAFFOLDING (route.md §4).
+  lab/reader-lab.html — build stamp: lab · 2026-09-27d (Contractor 14).  SCAFFOLDING (route.md §4).
+  27d: learner language picked in the Language card; the say-it script keeps the form on the page.
   27c: English as a second target language (english-profile-brief.md rev 2).
   27b and before: Contractor 13 and earlier.
 
@@ -646,6 +647,13 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <button class="lb sm tlb" data-l="de">German</button>
       <button class="lb sm tlb" data-l="en">English</button>
       <span class="langguess" id="langguess"></span></div>
+    <div class="r"><label class="inl">Explain in</label>
+      <input type="text" id="learnlang" list="learnlanglist" style="flex:1" placeholder="pick or type a language">
+      <datalist id="learnlanglist"><option value="German"><option value="English"><option value="French">
+        <option value="Spanish"><option value="Italian"><option value="Portuguese"><option value="Dutch">
+        <option value="Polish"><option value="Turkish"><option value="Ukrainian"><option value="Russian">
+        <option value="Arabic"><option value="Chinese"><option value="Japanese"></datalist></div>
+    <p style="margin-top:4px" id="learnlanghint"></p>
     <div class="r"><label class="inl">English</label>
       <button class="lb sm varb" data-v="US">American</button>
       <button class="lb sm varb" data-v="UK">British</button>
@@ -743,9 +751,6 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <div class="r"><button class="lb sm" id="aitest">Test it</button>
       <button class="lb sm warn" id="aiforget">Forget the key</button></div>
     <div id="aistatus" style="font-size:11.5px;color:#6B7178;margin-top:7px"></div>
-    <div class="r" style="margin-top:9px"><label class="inl">Learner speaks</label>
-      <input type="text" id="learnlang" style="flex:1"></div>
-    <p style="margin-top:4px" id="learnlanghint"></p>
     <div class="r"><label class="inl">Level</label>
       <button class="lb sm lvlb" data-lvl="A1">A1</button><button class="lb sm lvlb" data-lvl="A2">A2</button>
       <button class="lb sm lvlb" data-lvl="B1">B1</button><button class="lb sm lvlb" data-lvl="B2">B2</button>
@@ -1831,6 +1836,8 @@ var SCHEMA2B = {type:"OBJECT", properties:{examples:{type:"ARRAY", items:{type:"
 var SCHEMA1_EN = (function(){
   var s = JSON.parse(JSON.stringify(SCHEMA1));
   s.properties.best.properties.tricky_sound = {type:"BOOLEAN"};
+  s.properties.best.properties.form = {type:"STRING"};
+  s.properties.best.properties.sounds_like = {type:"STRING"};
   s.properties.best.required = s.properties.best.required.concat(["tricky_sound"]);
   s.properties.alternatives.items = s.properties.best;
   return s;
@@ -2021,7 +2028,7 @@ var CALL_DEFAULTS = {
   var C = CALL_DEFAULTS;
   C.identify_en = {id:"identify_en", lang:"en", group:"identify", label:"Find the item", variant:"English", state:"s1", schema:SCHEMA1_EN,
     fills:["item","pieces","pos","meaning","alternatives","companions","tricky_sound"],
-    provider:"gemini", model:"", prompt_version:1, prompt:
+    provider:"gemini", model:"", prompt_version:2, prompt:
 "A learner of English selected part of an English text. Identify the lexical item the selection belongs to IN THIS SENTENCE.\n\n"
 + "Selected: \"{{selection}}\"\nSentence: \"{{sentence}}\"\nWider context: \"{{context}}\"\n"
 + "Learner's language: {{learner_language}}. Level: {{level}}. The learner is learning {{variety}}.\n\n"
@@ -2035,7 +2042,10 @@ var CALL_DEFAULTS = {
 + "- meaning: the meaning in this context, in {{learner_language}}, a few words.\n"
 + "- tricky_sound: true when this same spelling is pronounced differently across its meanings, parts of speech or tenses "
 + "(read, record, present, tear, wind, lead, live, close, minute, object, desert, bow, row, use, wound, content). "
-+ "It is NOT about whether the word is hard to say. Most words are false.\n\n"
++ "It is NOT about whether the word is hard to say. Most words are false.\n"
++ "- form: the grammatical form of the word AS IT IS ON THE PAGE, in a few English words (past tense, past participle, present tense, plural noun, singular noun, base form, adjective). "
++ "Spelling alone often does not show it (read can be present or past), so decide it from the sentence.\n"
++ "- sounds_like: only when tricky_sound is true, how the word sounds HERE, as a common English word it rhymes with (read in the past: \"rhymes with red\"). An empty string otherwise.\n\n"
 + "`alternatives`: other readings worth offering, each with `kind`: \"same_meaning\" when only the form differs, \"different_meaning\" when the pieces or the meaning differ, and its own tricky_sound. "
 + "{{level_rule}} Give an empty list when the reading is clear.\n"
 + "`selection_ok`: true only if the selection by itself is already exactly the item's pieces.\n\n"
@@ -2067,11 +2077,12 @@ var CALL_DEFAULTS = {
 + "Answer with JSON only."};
   C.examples_en = {id:"examples_en", lang:"en", group:"examples", label:"Examples", variant:"English", state:"s2b", schema:SCHEMA2B,
     fills:["examples"],
-    provider:"gemini", model:"", prompt_version:1, prompt:
+    provider:"gemini", model:"", prompt_version:2, prompt:
 "Write 4 English example sentences using \"{{item}}\" with exactly this meaning: \"{{meaning}}\".\n"
 + "It was met in: \"{{sentence}}\"\n"
 + "Level {{level}}. Spelling and word choice in {{variety}}. Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.\n"
 + "The sentences may be read aloud. If this spelling can also be pronounced another way, every sentence must make the pronunciation for THIS meaning unmistakable from its context, and must never use the word in another meaning.\n"
++ "{{tricky_rule}}\n"
 + "For each, give `text` (English) and `tr` (translation into {{learner_language}}).\n"
 + "In `text`, wrap each word that belongs to the item in double asterisks, e.g. She **gave** it **up** last year.\n"
 + "Also give `pieces`: ONLY the words that are forms of the item itself, exactly as written in that sentence, in order (for She gave it up last year. that is [\"gave\", \"up\"]). "
@@ -2082,17 +2093,19 @@ var CALL_DEFAULTS = {
       "Each 12 to 22 words, natural and clearly varied: different tenses, persons and sentence types (questions, subordinate clauses), not copies of the original sentence.")});
   C.sayit_en = {id:"sayit_en", lang:"en", group:"sayit", label:"Say it", variant:"English", state:"s4", schema:SCHEMA_SAY,
     fills:["script"],
-    provider:"gemini", model:"", prompt_version:1, prompt:
-"English lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
-+ "On the page it is written \"{{on_page}}\", in: \"{{sentence}}\"\n\n"
-+ "This spelling is pronounced in more than one way in English. Write a short spoken script, in simple {{variety}} for a learner at level {{level}}, that lets the learner HEAR how it is said in THIS meaning.\n"
-+ "Rules:\n"
-+ "- The word never appears on its own. Every line is a full sentence whose context forces the pronunciation for this meaning.\n"
-+ "- Only this meaning. Never mention, hint at or contrast another meaning or another pronunciation, and never use the word in another meaning.\n"
-+ "- If the word on the page is a form that sounds different from its other forms (read in the past tense), use that same form in every line.\n"
-+ "- The first line explains the meaning in plain English, the way a person would say it aloud (\"When someone cries, a tear rolls down their cheek.\"). Then 2 or 3 natural example sentences.\n"
-+ "- About 10 to 15 seconds spoken in total. Spelling and word choice in {{variety}}.\n"
-+ "- The script is in English.\n\n"
+    provider:"gemini", model:"", prompt_version:2, prompt:
+"A learner met the English word \"{{on_page}}\" in this sentence: \"{{sentence}}\"\n"
++ "Here it is the {{form}} of \"{{item}}\" ({{pos}}), meaning \"{{meaning}}\". {{sounds_like}}\n\n"
++ "This spelling is said in more than one way in English, so the learner will HEAR it rather than be told. "
++ "Write what a friendly teacher would say out loud to explain the word, in simple {{variety}}, for a learner at level {{level}}.\n\n"
++ "The one rule that matters most: every line uses the word EXACTLY as \"{{on_page}}\", as the {{form}}, with the sound it has here. "
++ "Never the dictionary form if that differs, never \"to {{item}}\", never another tense, person or ending, never another meaning. "
++ "If the word does not appear in exactly that form, the line is wrong.\n\n"
++ "- Line 1 explains, the way a person talks, and already uses the word in that form inside a sentence "
++ "(for read in the past: \"When you finished a book yesterday, you can say: I read it yesterday.\"). No definitions, no grammar words.\n"
++ "- Then 2 or 3 short, natural sentences, each with context that forces this sound (for a past tense: yesterday, last week, already, had).\n"
++ "- Never mention, hint at or contrast another pronunciation or meaning.\n"
++ "- About 10 to 15 seconds spoken in total. Spelling and word choice in {{variety}}. English only.\n\n"
 + "Return `script`: the lines in order.\n\n"
 + "Answer with JSON only."};
   C.nuance_en = Object.assign({}, C.nuance, {id:"nuance_en", lang:"en", variant:"English", prompt_version:1,
@@ -2188,6 +2201,11 @@ function callVars(P){
   return { selection:P.about.term, sentence:P.about.sentence, context:P.about.context,
     learner_language:L, level:lvl, level_rule:levelRule(lvl),
     variety:varietyName(), on_page:(it.on_page || []).join(" … "),
+    form:it.form || "the form on the page", sounds_like:it.sound ? "Here it " + it.sound.replace(/^it\s+/i, "") + "." : "",
+    tricky_rule: it.tricky ? "This word's spelling has more than one sound. Every sentence must use it in exactly the form it has on the page (\""
+      + (it.on_page || []).join(" ") + "\", " + (it.form || "the same form") + ")"
+      + (it.sound ? ", sounding the same (" + it.sound + ")" : "") + ", never another form or another meaning, "
+      + "and the context must make that sound unmistakable (for a past tense: yesterday, last week, had already)." : "",
     // kept so prompts edited in the previous build still fill in
     meaning_language:L, explain_language:L,
     example_rule:"Each under 12 words, natural, varied in form (tense, person), not copies of the original sentence.",
@@ -2200,7 +2218,8 @@ var CALL_APPLY = {
     var best = j.best || {};
     P.item = { item: best.item || P.about.term, on_page: best.on_page || [P.about.term],
       added: best.added || [], dropped: best.dropped || [], companions: best.companions || [],
-      pos: best.pos || "", meaning: best.meaning || "", tricky: !!best.tricky_sound };
+      pos: best.pos || "", meaning: best.meaning || "", tricky: !!best.tricky_sound,
+      form: best.form || "", sound: best.sounds_like || "" };
     P.alts = (j.alternatives || []).slice();
     // the learner's own selection is always one of the options
     if (!j.selection_ok && P.item.item.toLowerCase() !== P.about.term.toLowerCase())
@@ -2213,7 +2232,8 @@ var CALL_APPLY = {
     locate(P);
     if (P.ppId) ppRepoint(P.ppId, P.ranges);
     routeNote(P);
-    return P.item.item + " (" + P.item.pos + ")" + (P.item.tricky ? ", TRICKY SOUND" : "")
+    return P.item.item + " (" + P.item.pos + (P.item.form ? ", " + P.item.form : "") + ")"
+      + (P.item.tricky ? ", TRICKY SOUND" + (P.item.sound ? " \u2014 " + P.item.sound : "") : "")
       + (P.itemCount ? ", " + P.itemCount + " item" + (P.itemCount > 1 ? "s" : "") + " in the selection" : "")
       + (P.alts.length ? ", " + P.alts.length + " other option(s)" : "");
   },
@@ -2672,7 +2692,7 @@ function pickAlt(i){
   var P = PF, alt = P.alts[i]; if (!alt) return;
   var prev = {item:P.item.item, on_page:P.item.on_page, kind:"same_meaning", pos:P.item.pos,
               meaning:P.item.meaning, added:P.item.added, companions:P.item.companions,
-              tricky_sound:!!P.item.tricky};
+              tricky_sound:!!P.item.tricky, form:P.item.form || "", sounds_like:P.item.sound || ""};
   P.alts.splice(i, 1);
   if (alt.kind === "same_meaning"){
     P.item.item = alt.item;                 // only the label changes; nothing reruns
@@ -2684,7 +2704,7 @@ function pickAlt(i){
   prev.kind = "different_meaning"; P.alts.unshift(prev);
   P.item = { item: alt.item, on_page: alt.on_page || [alt.item], added: alt.added || [],
     dropped: alt.dropped || [], companions: alt.companions || [], pos: alt.pos || "", meaning: alt.meaning || "",
-    tricky: !!alt.tricky_sound };
+    tricky: !!alt.tricky_sound, form: alt.form || "", sound: alt.sounds_like || "" };
   P.altsOpen = false;
   locate(P);
   say("  switched to " + alt.item + (P.item.tricky ? " (tricky sound)" : "") + " — rerunning grammar and examples");
@@ -2754,7 +2774,10 @@ function audioLines(v){
 var TRICKY_NOTE = {
   german:  "Diese Schreibweise hat mehrere Aussprachen. In dieser Bedeutung klingt das Wort so, wie du es in diesen Sätzen hörst.",
   deutsch: "Diese Schreibweise hat mehrere Aussprachen. In dieser Bedeutung klingt das Wort so, wie du es in diesen Sätzen hörst.",
-  english: "This spelling has more than one pronunciation. In this meaning, it sounds the way you hear it in these sentences."
+  english: "This spelling has more than one pronunciation. In this meaning, it sounds the way you hear it in these sentences.",
+  french:  "Cette orthographe a plusieurs prononciations. Dans ce sens, le mot se prononce comme dans ces phrases.",
+  spanish: "Esta forma escrita tiene varias pronunciaciones. Con este significado, suena como en estas frases.",
+  italian: "Questa grafia ha più pronunce. Con questo significato, si pronuncia come in queste frasi."
 };
 function trickyNote(L){ return TRICKY_NOTE[String(L || "").trim().toLowerCase()] || TRICKY_NOTE.english; }
 
@@ -4527,8 +4550,15 @@ function paintLang(){
   var ll = $("learnlang");
   if (ll && document.activeElement !== ll) ll.value = learnLang(lang);
   var h = $("learnlanghint");
-  if (h) h.textContent = "For " + (LANG_NAMES[lang] || lang) + " texts. Kept separately for each language you read.";
+  if (h) h.textContent = "Meanings, notes and translations are written in this language, for "
+    + (LANG_NAMES[lang] || lang) + " texts. Kept separately for each language you read. "
+    + "An open profile keeps the language it was made in; the next one uses this.";
 }
+$("learnlang").oninput = function(){
+  // picking from the list fires input, not change, in some browsers
+  var v = this.value;
+  if (Array.from($("learnlanglist").options).some(function(o){ return o.value === v; })) this.onchange();
+};
 $("learnlang").onchange = function(){
   var lang = textLang(), def = lang === "de" ? "English" : "German";
   saveL(lang === "de" ? "learnlang" : "learnlang_" + lang, this.value.trim() || def);
