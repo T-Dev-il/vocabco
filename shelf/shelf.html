@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shelf</title>
+<!--
+  shelf/shelf.html — build stamp: shelf · 2026-09-27b (Contractor 14).  SCAFFOLDING.
+
+  A makeshift place to flick through everything that has been saved, kept or
+  collected, until the main site is rebuilt. It reads two stores:
+
+    the database (dev, like the lab)   saved items, highlights, texts
+    this browser (keys vc.readerlab.)  profiles, collections and what was kept
+                                       in them, focus classes and their finds
+
+  The second half lives only in this browser, on this device, which is why it is
+  not on the main site yet. Read-only: nothing here writes anything.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{--bg:#FBFAF6;--card:#fff;--ink:#1B1E21;--ink2:#585e53;--ink3:#8b9099;--line:#E6E3DA;--acc:#6f9b54;--accbg:#eef4e8}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+  #auth{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:9}
+  #auth .box{width:320px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:24px}
+  #auth h1{font-size:19px;margin:0 0 14px}
+  #auth input{width:100%;padding:9px 11px;border:1px solid #dcd7ca;border-radius:7px;font-size:14px;margin-bottom:10px}
+  #auth button{width:100%;padding:10px;border:1px solid #4f7a37;background:var(--acc);color:#fff;border-radius:7px;font-size:14px;cursor:pointer}
+  #auth .msg{font-size:12.5px;color:#a23e2a;margin-top:8px}
+  header{position:sticky;top:0;z-index:5;background:rgba(251,250,246,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--line);padding:14px 22px 0}
+  .top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .top h1{font-size:18px;margin:0;font-weight:650}
+  .top .sp{flex:1}
+  .top a{color:var(--ink2);font-size:13px}
+  #q{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font:inherit;width:220px;background:#fff}
+  #src{border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;background:#fff;max-width:220px}
+  nav{display:flex;gap:2px;margin-top:12px;overflow-x:auto}
+  nav button{border:0;background:none;padding:8px 12px 10px;font:inherit;font-size:13px;color:var(--ink3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+  nav button.on{color:var(--ink);border-bottom-color:var(--acc)}
+  nav button .n{font-size:11px;color:var(--ink3);margin-left:4px}
+  main{padding:18px 22px 60px}
+  .note{font-size:12.5px;color:var(--ink3);margin:0 0 14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;cursor:default;min-width:0}
+  .card.click{cursor:pointer}
+  .card.click:hover{border-color:#cfcbbf}
+  .card .h{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+  .card .m{color:var(--ink2);margin-top:2px}
+  .card .c{color:var(--ink2);font-size:12.5px;margin-top:6px;font-family:'Source Serif 4',Georgia,serif;overflow-wrap:anywhere}
+  .card .c b{color:var(--ink);font-weight:600}
+  .card .f{color:var(--ink3);font-size:11px;margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+  .tag{display:inline-block;background:#F2F1EC;border-radius:4px;padding:0 6px;font-size:11px;color:var(--ink2)}
+  .tag.en{background:#e8eef7} .tag.de{background:#f4ece0} .tag.trk{background:#fbe7d6}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;vertical-align:middle;margin-right:5px}
+  .ex{margin:8px 0 0;padding-left:16px;font-size:12.5px;font-family:'Source Serif 4',Georgia,serif;color:var(--ink2)}
+  .ex li{margin:2px 0}
+  .more{display:none}
+  .card.open .more{display:block}
+  .group{margin:0 0 22px}
+  .group h2{font-size:13px;letter-spacing:.03em;text-transform:uppercase;color:var(--ink3);margin:0 0 10px;font-weight:650}
+  .empty{color:var(--ink3);padding:30px 0;text-align:center}
+  .hl-yellow{background:#fff4b3} .hl-pink{background:#ffd9ea} .hl-blue{background:#d6ecff} .hl-green{background:#dcf2cf}
+</style>
+</head>
+<body>
+<div id="auth"><div class="box">
+  <h1>Shelf</h1>
+  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="go">Sign in</button>
+  <div class="msg" id="msg"></div>
+</div></div>
+
+<header hidden id="hdr">
+  <div class="top">
+    <h1>Shelf</h1>
+    <input id="q" placeholder="Search everything">
+    <select id="src"><option value="">every text</option></select>
+    <span class="sp"></span>
+    <a href="../sample-reader-1/sample-reader-1.html">Sample reader 1</a>
+    <a href="../lab/reader-lab.html">Lab</a>
+  </div>
+  <nav id="tabs"></nav>
+</header>
+<main id="main" hidden></main>
+
+<script src="../config.js"></script>
+<script src="../store-supabase.js"></script>
+<script>
+"use strict";
+// Pinned to dev under the lab's own key, so it reads the same database the lab and
+// the sample readers write to.
+var ENV_NAME = null;
+try { ENV_NAME = localStorage.getItem('vocabEnvLab'); } catch (e) {}
+if (!VOCAB_ENVS[ENV_NAME]) ENV_NAME = 'dev';
+var sb = supabase.createClient(VOCAB_ENVS[ENV_NAME].url, VOCAB_ENVS[ENV_NAME].anon,
+  { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function lab(k, d){ try{ var v = localStorage.getItem("vc.readerlab." + k); return v ? JSON.parse(v) : d; }catch(e){ return d; } }
+function day(ms){ return ms ? new Date(ms).toLocaleDateString() : ""; }
+var COLS = {yellow:"#ffe14d", pink:"#ff9ccb", blue:"#6cc0ff", green:"#9ed98a"};
+
+$("go").onclick = async function(){
+  var r = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("pw").value });
+  if (r.error) $("msg").textContent = r.error.message;
+};
+$("pw").addEventListener("keydown", function(e){ if (e.key === "Enter") $("go").click(); });
+var started = false;
+sb.auth.onAuthStateChange(function(_e, s){ if (s) start(s.user); });
+sb.auth.getSession().then(function(r){ if (r.data.session) start(r.data.session.user); });
+
+var D = null, TAB = lab("shelftab", "items") || "items";
+async function start(user){
+  if (started) return; started = true;
+  $("auth").remove(); $("hdr").hidden = false; $("main").hidden = false;
+  $("main").innerHTML = '<div class="empty">Loading…</div>';
+  try{ await VocabStore.init(sb, user.id); D = await VocabStore.getAll(); }
+  catch(e){ $("main").innerHTML = '<div class="empty">Could not load: ' + esc(e.message || e) + "</div>"; return; }
+  paintSources(); paint();
+}
+
+/* ── what each tab holds ──────────────────────────────────────────── */
+function textName(id){ var t = D.texts && D.texts[id]; return t ? (t.name || "Untitled") : ""; }
+function openLink(id){ return "../sample-reader-1/sample-reader-1.html#text=" + encodeURIComponent(id); }
+function marked(ctx, term){
+  var c = esc(ctx || ""), t = esc(term || "");
+  if (!t) return c;
+  var i = c.toLowerCase().indexOf(t.toLowerCase());
+  return i < 0 ? c : c.slice(0, i) + "<b>" + c.slice(i, i + t.length) + "</b>" + c.slice(i + t.length);
+}
+function tabs(){
+  var terms = Object.values(D.terms || {}).filter(function(t){ return !t.deletedAt && !t.masterId; });
+  var hls = Object.values(D.highlights || {}).filter(function(h){ return !h.deletedAt; });
+  var notes = (lab("notes", []) || []).filter(function(n){ return n.profile; });
+  var bins = lab("bins", []) || [], kept = lab("kept", []) || [];
+  var classes = lab("classes", []) || [], caps = lab("caps", []) || [];
+  var texts = Object.values(D.texts || {}).filter(function(t){ return !t.deletedAt && (t.body || t.videoId); });
+  return [
+    {id:"items", label:"Saved items", rows:terms, db:true},
+    {id:"profiles", label:"Profiles", rows:notes},
+    {id:"collections", label:"Collections", rows:kept, groups:bins},
+    {id:"classes", label:"Focus classes", rows:caps, groups:classes},
+    {id:"highlights", label:"Highlights", rows:hls, db:true},
+    {id:"texts", label:"Texts", rows:texts, db:true}
+  ];
+}
+function rowText(tab, r){
+  if (tab === "items") return [r.term, r.translation, r.context, r.sourceTitle].join(" ");
+  if (tab === "profiles") return [r.term, r.text, r.profile && r.profile.meaning, (r.profile.examples || []).map(function(e){ return e.text; }).join(" ")].join(" ");
+  if (tab === "collections") return [r.text, r.sentence, r.binName, r.textName].join(" ");
+  if (tab === "classes") return [r.hit, r.sentence, r.clsName, r.textName].join(" ");
+  if (tab === "highlights") return [r.text, r.note, r.sourceTitle].join(" ");
+  return [r.name, r.body && r.body.slice(0, 400)].join(" ");
+}
+function rowSource(tab, r){
+  if (tab === "items" || tab === "highlights") return r.sourceTitle || "";
+  if (tab === "profiles") return textName(r.textId);
+  if (tab === "collections" || tab === "classes") return r.textName || textName(r.textId);
+  return r.name || "";
+}
+function paintSources(){
+  var names = {};
+  tabs().forEach(function(t){ if (t.id !== "texts") t.rows.forEach(function(r){ var s = rowSource(t.id, r); if (s) names[s] = 1; }); });
+  $("src").innerHTML = '<option value="">every text</option>' + Object.keys(names).sort().map(function(n){
+    return '<option value="' + esc(n) + '">' + esc(n.length > 50 ? n.slice(0, 50) + "…" : n) + "</option>"; }).join("");
+}
+
+/* ── the cards ─────────────────────────────────────────────────────── */
+function card(tab, r){
+  if (tab === "items") return '<div class="card"><div class="h">' + esc(r.term) + "</div>"
+    + (r.translation ? '<div class="m">' + esc(r.translation) + "</div>" : "")
+    + (r.context ? '<div class="c">' + marked(r.context, r.term) + "</div>" : "")
+    + '<div class="f">' + (r.sourceTitle ? "<span>" + esc(r.sourceTitle) + "</span>" : "") + "<span>" + day(r.createdAt) + "</span></div></div>";
+  if (tab === "profiles"){
+    var p = r.profile, lang = p.lang || "de";
+    return '<div class="card click" data-open>'
+      + '<div class="h">' + esc(p.item) + "</div>"
+      + '<div class="m">' + esc(p.meaning || "") + "</div>"
+      + '<div class="f"><span class="tag ' + lang + '">' + (lang === "en" ? "English" : "German") + "</span>"
+      + (p.pos ? '<span class="tag">' + esc(p.pos) + "</span>" : "")
+      + (p.tricky ? '<span class="tag trk">tricky sound</span>' : "")
+      + (p.gender ? '<span class="tag">' + esc(p.gender) + "</span>" : "")
+      + "<span>" + esc(textName(r.textId)) + "</span><span>" + day(r.when) + "</span></div>"
+      + '<div class="more">'
+      + (r.about && r.about.sentence ? '<div class="c">' + marked(r.about.sentence, (p.pieces || [])[0] || p.item) + "</div>" : "")
+      + ((p.examples || []).length ? '<ol class="ex">' + p.examples.map(function(e){
+          return "<li>" + esc(e.text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>") + (e.tr ? ' <span style="color:#a0a4a8">— ' + esc(e.tr) + "</span>" : "") + "</li>"; }).join("") + "</ol>" : "")
+      + ((p.forms || []).length ? '<div class="f">' + p.forms.map(function(f){ return esc(f.label) + ": " + esc(f.form); }).join(" · ") + "</div>" : "")
+      + (p.plural ? '<div class="f">plural: ' + esc(p.plural) + "</div>" : "")
+      + (p.participle ? '<div class="f">perfect: ' + esc(p.participle) + "</div>" : "")
+      + (p.note || p.watch_out ? '<div class="c">' + esc(p.watch_out || "") + " " + esc(p.note || "") + "</div>" : "")
+      + (r.textId ? '<div class="f"><a href="' + openLink(r.textId) + '">open the text</a></div>' : "")
+      + "</div></div>";
+  }
+  if (tab === "collections") return '<div class="card"><div class="h" style="font-size:14.5px;font-weight:500">' + esc(r.text) + "</div>"
+    + (r.sentence && r.sentence !== r.text ? '<div class="c">' + marked(r.sentence, r.text) + "</div>" : "")
+    + '<div class="f"><span class="tag">' + esc(r.size || "") + "</span><span>" + esc(r.textName || "") + "</span><span>" + day(r.when) + "</span>"
+    + (r.textId ? '<a href="' + openLink(r.textId) + '">open</a>' : "") + "</div></div>";
+  if (tab === "classes") return '<div class="card"><div class="h" style="font-size:15px">' + esc(r.hit) + "</div>"
+    + (r.sentence ? '<div class="c">' + marked(r.sentence, r.hit) + "</div>" : "")
+    + '<div class="f"><span>' + esc(r.textName || "") + "</span><span>" + day(r.when) + "</span>"
+    + (r.textId ? '<a href="' + openLink(r.textId) + '">open</a>' : "") + "</div></div>";
+  if (tab === "highlights") return '<div class="card"><div class="c" style="font-size:14px;margin:0"><span class="hl-' + esc(r.color || "yellow") + '">' + esc(r.text) + "</span></div>"
+    + (r.note ? '<div class="m" style="margin-top:6px">' + esc(r.note) + "</div>" : "")
+    + '<div class="f">' + (r.sourceTitle ? "<span>" + esc(r.sourceTitle) + "</span>" : "") + "<span>" + day(r.createdAt) + "</span></div></div>";
+  var marks = (r.marks || []).length;
+  return '<div class="card"><div class="h" style="font-size:15px">' + (r.videoId ? "▶ " : "") + esc(r.name || "Untitled") + "</div>"
+    + '<div class="c">' + esc((r.body || "").slice(0, 180)) + ((r.body || "").length > 180 ? "…" : "") + "</div>"
+    + '<div class="f"><span>' + marks + " mark" + (marks === 1 ? "" : "s") + "</span><span>" + day(r.lastActiveAt || r.updatedAt) + "</span>"
+    + '<a href="' + openLink(r.id) + '">open in sample reader 1</a></div></div>';
+}
+function paint(){
+  var all = tabs(), q = $("q").value.trim().toLowerCase(), src = $("src").value;
+  $("tabs").innerHTML = all.map(function(t){
+    return '<button data-t="' + t.id + '" class="' + (t.id === TAB ? "on" : "") + '">' + esc(t.label) + '<span class="n">' + t.rows.length + "</span></button>"; }).join("");
+  $("tabs").querySelectorAll("[data-t]").forEach(function(b){ b.onclick = function(){
+    TAB = b.dataset.t; try{ localStorage.setItem("vc.readerlab.shelftab", JSON.stringify(TAB)); }catch(e){} paint(); }; });
+  var t = all.filter(function(x){ return x.id === TAB; })[0] || all[0];
+  var rows = t.rows.filter(function(r){
+    return (!q || rowText(t.id, r).toLowerCase().indexOf(q) >= 0) && (!src || rowSource(t.id, r) === src); });
+  rows.sort(function(a, b){ return (b.when || b.createdAt || b.lastActiveAt || 0) - (a.when || a.createdAt || a.lastActiveAt || 0); });
+  var head = '<p class="note">' + (t.db ? "From the database (dev)." : "From this browser only — made in the lab or the sample reader on this device.")
+    + " " + rows.length + " shown.</p>";
+  var body;
+  if (!rows.length) body = '<div class="empty">Nothing here' + (q || src ? " that matches" : " yet") + ".</div>";
+  else if (t.groups){
+    // collections and focus classes: one group per collection or class
+    var key = t.id === "collections" ? "bin" : "cls";
+    body = t.groups.map(function(g){
+      var mine = rows.filter(function(r){ return r[key] === g.id; });
+      if (!mine.length) return "";
+      return '<div class="group"><h2><span class="sw" style="background:' + (COLS[g.colour] || "#ccc") + '"></span>' + esc(g.name)
+        + ' <span style="font-weight:400">· ' + mine.length + '</span></h2><div class="grid">' + mine.map(function(r){ return card(t.id, r); }).join("") + "</div></div>";
+    }).join("") || '<div class="empty">Nothing here yet.</div>';
+  }
+  else body = '<div class="grid">' + rows.slice(0, 600).map(function(r){ return card(t.id, r); }).join("") + "</div>"
+    + (rows.length > 600 ? '<p class="note">Showing the newest 600. Search to narrow it down.</p>' : "");
+  $("main").innerHTML = head + body;
+  $("main").querySelectorAll("[data-open]").forEach(function(c){
+    c.onclick = function(e){ if (e.target.tagName === "A") return; c.classList.toggle("open"); }; });
+}
+$("q").oninput = function(){ paint(); };
+$("src").onchange = function(){ paint(); };
+</script>
+</body>
+</html>
