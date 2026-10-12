@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sample reader 1</title>
 <!--
-  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-10-12 (Contractor 17: the word card, sr1-card.js; was sr1 · 2026-09-27b, Contractor 14).  SCAFFOLDING.
+  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-10-12b (Contractor 17: the word card, sr1-card.js; was sr1 · 2026-09-27b, Contractor 14).  SCAFFOLDING.
 
   SAMPLE READER 1. The first of several reader versions, each at its own address,
   to be built messily and compared. Forked from lab/reader-lab.html at stamp
@@ -740,8 +740,31 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <button class="lb sm lvlb" data-lvl="A1">A1</button><button class="lb sm lvlb" data-lvl="A2">A2</button>
       <button class="lb sm lvlb" data-lvl="B1">B1</button><button class="lb sm lvlb" data-lvl="B2">B2</button>
       <button class="lb sm lvlb" data-lvl="C1">C1</button><button class="lb sm lvlb" data-lvl="C2">C2</button></div>
-    <div class="r"><label class="inl">Panel look</label>
-      <button class="lb sm pfsb" data-v="card" title="The word card from Card Machine 8">card</button>
+    <div class="r"><label class="inl">JSON</label>
+      <span id="schemamode" style="flex:1;font-size:11.5px;color:#6B7178"></span>
+      <button class="lb sm" id="schemareset">Try schema again</button></div>
+    <div class="r" style="margin-top:9px"><label class="inl">Saved</label>
+      <span id="notescount" style="flex:1;font-size:11.5px;color:#6B7178"></span>
+      <button class="lb sm" id="notescopy">Copy all</button>
+      <button class="lb sm warn" id="notesclear">Clear</button></div>
+  </div>
+
+  <div class="card">
+    <h3>Panel look</h3>
+    <p>The word card from <a href="https://claude.ai/artifact/4CXzneQmpqdCXdvzk4Rgj3" target="_blank" rel="noopener">Card Machine 8</a>.
+      Its colours follow the reader's page. To bring a look over, tune it in Card Machine, press Copy all there, and paste it here.</p>
+    <div class="r"><label class="inl">Card</label>
+      <button class="lb sm cardst" data-v="plain">plain</button>
+      <button class="lb sm cardst" data-v="glass">glass</button>
+      <button class="lb sm cardst" data-v="hand">handwritten</button>
+      <button class="lb sm cardst" data-v="graphite">graphite</button>
+      <button class="lb sm cardst" data-v="ivory">ivory</button></div>
+    <div class="r"><label class="inl">Paste</label>
+      <input type="text" id="cardpaste" placeholder="Card Machine 8 {…}" style="flex:1">
+      <button class="lb sm" id="cardload">Load</button><button class="lb sm" id="cardreset">Reset</button></div>
+    <div id="cardmsg" style="font-size:11.5px;color:#6B7178;margin-top:4px"></div>
+    <div class="r" style="margin-top:9px"><label class="inl">Older panels</label>
+      <button class="lb sm pfsb" data-v="card" title="The word card">card</button>
       <button class="lb sm pfsb" data-v="auto" title="Graphite when the reader is dark, ivory otherwise">follow reader</button>
       <button class="lb sm pfsb" data-v="graphite">graphite</button>
       <button class="lb sm pfsb" data-v="ivory">ivory</button>
@@ -754,13 +777,6 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <button class="lb sm pfab" data-v="paired">as picked</button>
       <button class="lb sm pfab" data-v="center">centre</button>
       <button class="lb sm pfab" data-v="left">left</button></div>
-    <div class="r"><label class="inl">JSON</label>
-      <span id="schemamode" style="flex:1;font-size:11.5px;color:#6B7178"></span>
-      <button class="lb sm" id="schemareset">Try schema again</button></div>
-    <div class="r" style="margin-top:9px"><label class="inl">Saved</label>
-      <span id="notescount" style="flex:1;font-size:11.5px;color:#6B7178"></span>
-      <button class="lb sm" id="notescopy">Copy all</button>
-      <button class="lb sm warn" id="notesclear">Clear</button></div>
   </div>
 
   <div class="card">
@@ -2857,6 +2873,8 @@ function pfFont(which){
 }
 function readerIsDark(){ return !!document.querySelector(".reader-wrap.theme-dark, .reader-fs.theme-dark"); }
 function pfLook(){
+  // The word card became the default on 2026-10-12; a look saved before then is moved to it once.
+  if (!load("cardmoved", false)){ saveL("pfstyle", "card"); saveL("cardmoved", true); }
   var st = load("pfstyle", "card");
   if (st === "card") return {style:"card", frame:"", align:""};
   if (st === "auto") st = readerIsDark() ? "graphite" : "ivory";
@@ -4643,6 +4661,22 @@ document.querySelectorAll(".lvlb").forEach(function(b){
   paint();
 });
 $("schemareset").onclick = function(){ saveL("aischemaMode", "schema"); paintLevel(); };
+/* Panel look (Contractor 17): the card's style, and a look pasted from Card Machine. */
+function paintCardLook(){
+  var on = load("pfstyle", "card") === "card", st = window.cardLook ? window.cardLook.get().style : "";
+  document.querySelectorAll(".cardst").forEach(function(b){ b.classList.toggle("on", on && b.dataset.v === st); });
+  document.querySelectorAll(".pfsb").forEach(function(b){ b.classList.toggle("on", b.dataset.v === load("pfstyle", "card")); });
+}
+document.querySelectorAll(".cardst").forEach(function(b){ b.onclick = function(){
+  saveL("pfstyle", "card"); if (window.cardLook) window.cardLook.set({style:b.dataset.v});
+  say("Card: " + b.dataset.v); paintCardLook(); if (PF) paintProfile(); }; });
+$("cardload").onclick = function(){
+  try{ window.cardLook.paste($("cardpaste").value); saveL("pfstyle", "card"); $("cardmsg").textContent = "Look loaded.";
+    $("cardpaste").value = ""; paintCardLook(); if (PF) paintProfile(); }
+  catch(e){ $("cardmsg").textContent = "That text is not a look. Copy it again from Card Machine with Copy all."; } };
+$("cardreset").onclick = function(){ if (window.cardLook) window.cardLook.reset(); $("cardmsg").textContent = "Back to the starting look."; paintCardLook(); if (PF) paintProfile(); };
+document.querySelectorAll(".pfsb").forEach(function(b){ b.addEventListener("click", function(){ setTimeout(paintCardLook, 0); }); });
+paintCardLook();
 paintLevel();
 paintBench();
 document.querySelectorAll(".mlb").forEach(function(b){ b.onclick = function(){ saveL("mlogby", b.dataset.by); paintMistakes(); }; });
@@ -4660,7 +4694,7 @@ window.LAB = { esc:esc, findInSentence:findInSentence, pfExampleHTML:pfExampleHT
   readerIsDark:readerIsDark, noteById:noteById, saveL:saveL, say:say, labPaint:labPaint,
   paintNotesCount:paintNotesCount, reportMark:reportMark, pickAlt:pickAlt, addCompanion:addCompanion,
   runStage1:runStage1, runStage2:runStage2, paintProfile:paintProfile, speakDE:speakDE,
-  speakLines:speakLines, audioLines:audioLines, pfPlace:pfPlace,
+  speakLines:speakLines, audioLines:audioLines, pfPlace:pfPlace, askAI:askAI,
   saveNotes: function(){ saveL("notes", NOTES); },
   removeNote: function(id){ NOTES = NOTES.filter(function(x){ return x.id !== id; }); saveL("notes", NOTES); },
   isLive: function(P){ return PF === P; }, dropLive: function(){ PF = null; } };
