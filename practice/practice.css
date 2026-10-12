@@ -1,0 +1,49 @@
+/* practice/practice.css — build stamp: practice-css · 2026-10-12 (Contractor 17, RL).
+   Shared by My words and the practice games. Flat and quiet, like the word card. */
+/* layout: one column of rows, a sticky bar at the foot; games centre one card */
+:root{
+  --bg:#EEF1EA; --paper:#FFFFFF; --ink:#1D1F1C; --ink2:#585E57; --ink3:#8D928A;
+  --line:rgba(29,31,28,.12); --band:hsla(210,62%,45%,.05); --hov:hsla(210,40%,40%,.08);
+  --acc:hsl(210,62%,40%); --accbg:hsla(210,62%,48%,.12); --good:#3E8E5A; --goodbg:rgba(62,142,90,.14);
+  --bad:#B4513F; --badbg:rgba(180,81,63,.13); --der:#2F6DB5; --die:#B5475F; --das:#B07A1F;
+  --serif:'Source Serif 4',Georgia,serif; --sans:'Inter',system-ui,-apple-system,sans-serif;
+  --ease:cubic-bezier(.2,.75,.2,1);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1C1D1F; --paper:#2A2B2E; --ink:#ECEDE8; --ink2:#B4B7AF; --ink3:#81847C;
+  --line:rgba(255,255,255,.12); --band:rgba(255,255,255,.04); --hov:rgba(255,255,255,.07);
+  --acc:hsl(210,70%,74%); --accbg:hsla(210,70%,70%,.16); --good:#7CC795; --goodbg:rgba(124,199,149,.16);
+  --bad:#E39A8B; --badbg:rgba(227,154,139,.16); --der:#7FB0EA; --die:#E58FA3; --das:#E2B76A; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1C1D1F; --paper:#2A2B2E; --ink:#ECEDE8; --ink2:#B4B7AF; --ink3:#81847C;
+  --line:rgba(255,255,255,.12); --band:rgba(255,255,255,.04); --hov:rgba(255,255,255,.07);
+  --acc:hsl(210,70%,74%); --accbg:hsla(210,70%,70%,.16); --good:#7CC795; --goodbg:rgba(124,199,149,.16);
+  --bad:#E39A8B; --badbg:rgba(227,154,139,.16); --der:#7FB0EA; --die:#E58FA3; --das:#E2B76A; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+a{color:var(--acc)}
+.wrap{max-width:860px;margin:0 auto;padding-inline:16px}
+.btn{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:7px 14px;font-size:13px}
+.btn:hover{background:var(--hov)}
+.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn.primary:disabled{opacity:.35;cursor:default}
+.btn.quiet{border-color:transparent;background:none;color:var(--ink2)}
+.chip{display:inline-block;font:600 10.5px/1 var(--sans);letter-spacing:.04em;padding:4px 6px;border-radius:6px;background:var(--accbg);color:var(--acc)}
+.tag{font-size:11px;color:var(--ink3)}
+.field{border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:9px;padding:7px 10px;font:inherit;font-size:13px;min-width:0}
+/* sign in */
+#auth{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:20;padding:16px}
+#auth .box{width:100%;max-width:330px;background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:24px;display:grid;gap:10px}
+#auth h1{font:600 20px var(--serif);margin:0 0 4px}
+#auth .msg{font-size:12.5px;color:var(--bad);min-height:1em}
+/* a game's frame */
+.gtop{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:14px}
+.gtop h1{font:600 18px var(--serif);margin:0}
+.gtop .sp{flex:1}
+.stage{display:grid;place-items:center;min-height:calc(100vh - 140px);padding-block:12px 40px}
+.empty{color:var(--ink3);text-align:center;padding:40px 16px;max-width:440px;margin:0 auto}
+.kbd{font:500 11px var(--sans);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:0 5px;color:var(--ink2)}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}

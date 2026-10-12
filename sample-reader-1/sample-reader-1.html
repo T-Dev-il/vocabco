@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sample reader 1</title>
 <!--
-  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-09-27b (Contractor 14).  SCAFFOLDING.
+  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-10-12 (Contractor 17: the word card, sr1-card.js; was sr1 · 2026-09-27b, Contractor 14).  SCAFFOLDING.
 
   SAMPLE READER 1. The first of several reader versions, each at its own address,
   to be built messily and compared. Forked from lab/reader-lab.html at stamp
@@ -150,6 +150,7 @@ async function start(user){
     await loadScript('../icons.js').catch(()=>{});   // optional; only if your app.js uses it
     await loadScript('sr1-app.js');     // boots itself, renders into #root
     if (window.labInit) window.labInit();   // the composer, once the reader exists
+    if (window.LabProfiles) LabProfiles.syncAll(sb, NOTES).then(function(k){ if (k) console.log("[lab-profiles] " + k + " profiles sent"); });
   }catch(e){
     boot.textContent = 'Failed to start: ' + (e.message||e);
     return;
@@ -741,6 +742,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
       <button class="lb sm lvlb" data-lvl="B1">B1</button><button class="lb sm lvlb" data-lvl="B2">B2</button>
       <button class="lb sm lvlb" data-lvl="C1">C1</button><button class="lb sm lvlb" data-lvl="C2">C2</button></div>
     <div class="r"><label class="inl">Panel look</label>
+      <button class="lb sm pfsb" data-v="card" title="The word card from Card Machine 8">card</button>
       <button class="lb sm pfsb" data-v="auto" title="Graphite when the reader is dark, ivory otherwise">follow reader</button>
       <button class="lb sm pfsb" data-v="graphite">graphite</button>
       <button class="lb sm pfsb" data-v="ivory">ivory</button>
@@ -1426,7 +1428,7 @@ function reportMark(n){
    "Remove" takes it away and keeps it away for this panel. */
 function autoSave(P){
   var settled = P.s1.state === "done" && P.s2a.state !== "waiting" && P.s2b.state !== "waiting"
-    && (!P.s3 || P.s3.state !== "waiting") && (!P.s4 || P.s4.state !== "waiting");
+    && (!P.s3 || P.s3.state !== "waiting") && (!P.s4 || P.s4.state !== "waiting") && (!P.s5 || P.s5.state !== "waiting");
   if (!settled || P.removed) return;
   ppSet(P, (P.alts && P.alts.length) ? "attn" : "plain");
   var snap = profileSnapshot(P);
@@ -1437,13 +1439,15 @@ function autoSave(P){
     if (JSON.stringify(n.profile) === JSON.stringify(snap) && JSON.stringify(n.ranges) === JSON.stringify(ranges)) return;
     n.profile = snap; n.ranges = ranges; n.term = snap.item; n.text = snap.item + " — " + snap.meaning;
     n.updated = Date.now(); saveL("notes", NOTES);
+    if (window.LabProfiles) LabProfiles.save(sb, n);
     say("  saved profile updated: " + snap.item); labPaint(); return;
   }
   n = { id:"n" + Date.now().toString(36), slot:"profile", label:"Profile",
     term:snap.item, textId:P.textId, ranges:ranges, text: snap.item + " — " + snap.meaning,
-    profile:snap, marked:!P.markOff, model:P.model, when:Date.now(),
+    profile:snap, marked:!P.markOff, model:P.model, when:Date.now(), termId:P.ppId || null,
     about:{term:P.about.term, sentence:P.about.sentence} };
   NOTES.unshift(n); saveL("notes", NOTES);
+  if (window.LabProfiles) LabProfiles.save(sb, n);
   P.noteId = n.id; P.saved = true;
   if (P.ppId){ PP_NOTE[P.ppId] = n.id; ppPaint(); }
   say("Profile saved: " + snap.item);
@@ -1834,6 +1838,12 @@ var SCHEMA2A_EN = {type:"OBJECT", properties:{
   watch_out:{type:"STRING"}, note:{type:"STRING"}, meaning:{type:"STRING"}},
   required:["forms","countable","where_used","register","watch_out","note"]};
 var SCHEMA_SAY = {type:"OBJECT", properties:{script:{type:"ARRAY", items:{type:"STRING"}}}, required:["script"]};
+/* The word card (Contractor 17): what the card shows that the other calls do not. */
+var SCHEMA_CARD = {type:"OBJECT", properties:{
+  short:{type:"STRING"}, here:{type:"STRING"}, more:{type:"STRING"},
+  key_label:{type:"STRING"}, key_form:{type:"STRING"},
+  level:{type:"STRING", enum:["A1","A2","B1","B2","C1","C2"]}, sentence_tr:{type:"STRING"}},
+  required:["short","here","more","key_label","key_form","level","sentence_tr"]};
 
 /* ── the profile bench (profile-bench-brief.md) ─────────────────────────
    Three plain lists decide everything a profile does:
@@ -2101,12 +2111,42 @@ var CALL_DEFAULTS = {
     if (C[k].prompt === C[k.replace(/_def$|_rich$/, "")].prompt) console.warn("[lab] an English variant prompt did not change: " + k); });
   if (C.nuance_en.prompt === C.nuance.prompt) console.warn("[lab] the English nuance prompt did not change");
 })();
+(function(){
+  var C = CALL_DEFAULTS;
+  C.card = {id:"card", group:"card", label:"Card", variant:"", state:"s5", schema:SCHEMA_CARD,
+    fills:["short","here","more","key_form","cefr","sentence_tr"],
+    provider:"gemini", model:"", prompt_version:1, prompt:
+"German lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
++ "As used in: \"{{sentence}}\"\n"
++ "The learner's language is {{learner_language}}; the learner is at level {{level}}.\n\n"
++ "Return, in {{learner_language}} unless said otherwise:\n"
++ "- short: the core meaning as a dictionary would give it, 1 to 5 words.\n"
++ "- here: what it means in THIS sentence, one plain line under 16 words. Say it directly; do not begin with \"here\", \"in this text\" or \"in this sentence\".\n"
++ "- more: 2 or 3 short sentences that help a learner understand and use it: how it is used and what it often suggests. Plain words, no grammar terms unless needed.\n"
++ "- key_label and key_form: the ONE form a learner needs at a glance, in German. Noun: key_label \"Plural\", key_form the plural with its article (die Seen), or \"no plural\". Verb: key_label \"Perfekt\", key_form the past participle with its helper verb (ist aufgestanden). Anything else: two empty strings. Never show a wrong form.\n"
++ "- level: the CEFR level at which a learner usually meets this item in this meaning (A1, A2, B1, B2, C1 or C2).\n"
++ "- sentence_tr: a natural translation of the whole sentence into {{learner_language}}, using exactly the meaning above.\n\n"
++ "Answer with JSON only."};
+  C.card_en = Object.assign({}, C.card, {id:"card_en", lang:"en", variant:"English", prompt:
+"English lexical item: \"{{item}}\" ({{pos}}), meaning here: \"{{meaning}}\".\n"
++ "As used in: \"{{sentence}}\"\n"
++ "The learner's language is {{learner_language}}; the learner is at level {{level}}.\n\n"
++ "Return, in {{learner_language}} unless said otherwise:\n"
++ "- short: the core meaning as a dictionary would give it, 1 to 5 words.\n"
++ "- here: what it means in THIS sentence, one plain line under 16 words. Say it directly; do not begin with \"here\", \"in this text\" or \"in this sentence\".\n"
++ "- more: 2 or 3 short sentences that help a learner understand and use it: how it is used and what it often suggests. Plain words, no grammar terms unless needed.\n"
++ "- key_label and key_form: the ONE form a learner needs at a glance, in English, only when it is irregular. Irregular verb: key_label \"Past\", key_form past and past participle (put · put). Irregular plural: key_label \"Plural\" (children). Otherwise two empty strings. Never show a wrong form, and never mention one.\n"
++ "- level: the CEFR level at which a learner usually meets this item in this meaning (A1, A2, B1, B2, C1 or C2).\n"
++ "- sentence_tr: a natural translation of the whole sentence into {{learner_language}}, using exactly the meaning above.\n\n"
++ "Answer with JSON only."});
+})();
 var GROUPS = [
   {id:"identify", label:"Find the item", required:true},
   {id:"grammar",  label:"Grammar"},
   {id:"examples", label:"Examples"},
   {id:"nuance",   label:"Nuance"},
-  {id:"sayit",    label:"Say it"}
+  {id:"sayit",    label:"Say it"},
+  {id:"card",     label:"Card"}
 ];
 function callLang(id){ return (CALL_DEFAULTS[id] || {}).lang || "de"; }
 function groupOf(id){ return (CALL_DEFAULTS[id] || {}).group || id; }
@@ -2231,14 +2271,16 @@ var CALL_APPLY = {
     var n = (j.synonyms || []).length, c = (j.collocations || []).length;
     return n + " near words, " + c + " partners" + (j.connotation ? ", a feel" : "") + (j.region ? ", a region" : "");
   },
-  sayit: function(P, j){ return (j.script || []).length + " lines"; }
+  sayit: function(P, j){ return (j.script || []).length + " lines"; },
+  card: function(P, j){ return (j.level || "") + (j.key_form ? ", " + j.key_form : ""); }
 };
 var CALL_VALUE = {
   identify: function(j){ return j; },
   grammar:  function(j){ return j; },
   examples: function(j){ return (j.examples || []).slice(0, 4); },
   nuance:   function(j){ return j; },
-  sayit:    function(j){ return {script:(j.script || []).map(String).filter(function(x){ return x.trim(); })}; }
+  sayit:    function(j){ return {script:(j.script || []).map(String).filter(function(x){ return x.trim(); })}; },
+  card:     function(j){ return j; }
 };
 
 /* Run one call on the live profile. Other calls are untouched. */
@@ -2279,10 +2321,10 @@ async function runCall(P, id){
 }
 
 async function runStage1(P){
-  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); P.s4 = slotW(); paintProfile();
+  P.gen++; P.s1 = slotW(); P.s2a = slotW(); P.s2b = slotW(); P.s3 = slotW(); P.s4 = slotW(); P.s5 = slotW(); paintProfile();
   var ok = await runCall(P, identifyId(P.lang));
   if (P !== PF) return;
-  if (!ok){ P.s2a = P.s2b = P.s3 = P.s4 = slotF("waits on finding the item"); ppSet(P, "fail"); paintProfile(); return; }
+  if (!ok){ P.s2a = P.s2b = P.s3 = P.s4 = P.s5 = slotF("waits on finding the item"); ppSet(P, "fail"); paintProfile(); return; }
   if (P.itemCount > 2){ bounceTooMany(P); return; }
   runStage2(P);
 }
@@ -2332,8 +2374,11 @@ function runStage2(P){
   var t0 = Date.now();
   var pr = activePreset(P.lang);
   var calls = pr.calls.filter(function(id){ return groupOf(id) !== "identify" && CALL_DEFAULTS[id]; });
+  // The word card's call runs whatever the preset says (Contractor 17).
+  var cardCall = variantsOf("card", P.lang || "de")[0];
+  if (cardCall && calls.indexOf(cardCall) < 0) calls.push(cardCall);
   GROUPS.forEach(function(G){
-    if (G.id === "identify" || presetCall(pr, G.id)) return;
+    if (G.id === "identify" || G.id === "card" || presetCall(pr, G.id)) return;
     var k = CALL_DEFAULTS[variantsOf(G.id)[0]].state;
     if (!P[k] || P[k].state !== "done") P[k] = slotV(G.id === "examples" ? [] : {});   // not asked for: keep what is there
   });
@@ -2664,7 +2709,7 @@ function startProfileOn(a, anchor, ppId){
   var lang = textLang();
   PF = { run: ++PF_RUN, about: a, textId: a.textId, anchor: anchor, ppId: ppId || null, lang: lang,
     item: {item:a.term, on_page:[a.term], added:[], companions:[], pos:"", meaning:""},
-    s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), s4: slotW(), alts: [], altsOpen: false,
+    s1: slotW(), s2a: slotW(), s2b: slotW(), s3: slotW(), s4: slotW(), s5: slotW(), alts: [], altsOpen: false,
     ranges: a.ranges, missing: [], gen: 0, t0: Date.now(), times: {}, mode: "", model: "" };
   PF.model = callModel(callDef(identifyId(lang)));
   labHide();
@@ -2770,6 +2815,7 @@ function nu(P){ return P.s3 && P.s3.state === "done" && P.s3.value ? P.s3.value 
 function profileSnapshot(P){
   var g = P.s2a.state === "done" ? P.s2a.value : {};
   var sy = P.s4 && P.s4.state === "done" && P.s4.value ? P.s4.value : {};
+  var cd = P.s5 && P.s5.state === "done" && P.s5.value ? P.s5.value : {};
   return { lang:P.lang || "de", variety: P.lang === "en" ? variety() : "",
     tricky: !!P.item.tricky, script: sy.script || [],
     forms: g.forms || [], countable: g.countable || "", where_used: g.where_used || "", watch_out: g.watch_out || "",
@@ -2784,6 +2830,9 @@ function profileSnapshot(P){
     preset: activePreset(P.lang).id,
     alternatives: P.alts.filter(function(x){ return !x.mine; })
       .map(function(x){ return {item:x.item, kind:x.kind, meaning:x.meaning}; }),
+    short:cd.short || "", here:cd.here || "", more:cd.more || "",
+    key_label:cd.key_label || "", key_form:cd.key_form || "", cefr:cd.level || "", sentence_tr:cd.sentence_tr || "",
+    sentence:(P.about && P.about.sentence) || "",
     by:"ai", model:P.model, meta:P.meta || {}, learnerLang:learnLang(P.lang), level:load("level","B1") };
 }
 
@@ -2809,7 +2858,8 @@ function pfFont(which){
 }
 function readerIsDark(){ return !!document.querySelector(".reader-wrap.theme-dark, .reader-fs.theme-dark"); }
 function pfLook(){
-  var st = load("pfstyle", "auto");
+  var st = load("pfstyle", "card");
+  if (st === "card") return {style:"card", frame:"", align:""};
   if (st === "auto") st = readerIsDark() ? "graphite" : "ivory";
   var fr = load("pfframe", "paired");
   if (fr === "paired") fr = st === "graphite" ? "trim" : "corner";
@@ -3195,6 +3245,7 @@ function pfDoodle(card, live){
 /* Build if needed, then bring every slot up to date. */
 function pfRender(box, key, v, states, live, note, anchor, instant){
   var look = pfLook();
+  if (look.style === "card" && window.cardRender) return window.cardRender(box, key, v, states, live, note, anchor, instant);
   pfFont(look.style === "hand" ? "hand" : "lacq");
   var fresh = box.dataset.pfkey !== key || box.dataset.pflook !== JSON.stringify(look);
   if (fresh){
@@ -3322,6 +3373,7 @@ function pfWire(box, v, live, note){
   var rm = $("pfremove");
   if (rm) rm.onclick = function(){
     NOTES = NOTES.filter(function(x){ return x.id !== n.id; }); saveL("notes", NOTES);
+    if (window.LabProfiles) LabProfiles.remove(sb, n.id);
     say("Profile removed: " + (v.item || n.term)); labPaint(); paintNotesCount();
     if (live){ live.noteId = null; live.saved = false; live.removed = true; pfControls(card, v, live, null); pfWire(box, v, live, null); }
     else { box.className = ""; box.dataset.pfkey = ""; }
@@ -3349,6 +3401,7 @@ function paintProfile(){
     ex: P.s1.state === "failed" ? "waiting" : st(P.s2b),
     nuance: P.s1.state === "failed" ? "waiting" : st(P.s3 || slotV({})),
     say: P.s1.state === "failed" ? "waiting" : st(P.s4 || slotV({})),
+    card: P.s1.state === "failed" ? "waiting" : st(P.s5 || slotV({})),
     itemErr: P.s1.err, grammarErr: P.s2a.err, exErr: P.s2b.err, nuanceErr: (P.s3 || {}).err, sayErr: (P.s4 || {}).err };
   autoSave(P);
   pfRender($("labai"), "live|" + P.run + "|" + P.gen, v, states, P, null, P.anchor, false);
@@ -3358,7 +3411,7 @@ function paintProfile(){
 /* A saved profile, on hover: the same panel, filled at once. */
 function showProfile(snap, anchor, note){
   PF = null;
-  pfRender($("labai"), "saved|" + note.id, snap, {item:"done", grammar:"done", ex:"done", nuance:"done", say:"done"},
+  pfRender($("labai"), "saved|" + note.id, snap, {item:"done", grammar:"done", ex:"done", nuance:"done", say:"done", card:"done"},
            null, note, anchor, true);
 }
 
@@ -4582,7 +4635,7 @@ $("voicetest").onclick = function(){
 paintLang();
 document.querySelectorAll(".lvlb").forEach(function(b){
   b.onclick = function(){ saveL("level", b.dataset.lvl); paintLevel(); say("Level " + b.dataset.lvl); }; });
-[["pfsb","pfstyle","auto"],["pffb","pfframe","paired"],["pfab","pfalign","paired"]].forEach(function(g){
+[["pfsb","pfstyle","card"],["pffb","pfframe","paired"],["pfab","pfalign","paired"]].forEach(function(g){
   function paint(){ var v = load(g[1], g[2]);
     document.querySelectorAll("." + g[0]).forEach(function(b){ b.classList.toggle("on", b.dataset.v === v); }); }
   document.querySelectorAll("." + g[0]).forEach(function(b){
@@ -4606,5 +4659,7 @@ say("Composer ready");
 };
 </script>
 
+<script src="../practice/lab-profiles.js"></script>
+<script src="sr1-card.js"></script>
 </body>
 </html>

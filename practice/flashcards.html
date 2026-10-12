@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flashcards</title>
+<!--
+  practice/flashcards.html — build stamp: flashcards · 2026-10-12 (Contractor 17, RL).  SCAFFOLDING.
+  Basic flashcards on the deck My words sends (compile.js). Front: the word, or
+  its meaning. Back: the other side, the key form and an example. Again puts a
+  card back in the pile; Got it takes it out.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="practice.css">
+<style>
+  .seg{display:inline-flex;background:var(--line);border-radius:999px;padding:2px}
+  .seg button{border:0;background:none;border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--ink2)}
+  .seg button.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .card{width:min(420px,100%);min-height:300px;background:var(--paper);border-radius:24px;box-shadow:0 1px 2px rgba(0,0,0,.06),0 14px 34px -14px rgba(0,0,0,.3);
+    display:flex;flex-direction:column;cursor:pointer;user-select:none;overflow:hidden;transition:transform .35s var(--ease)}
+  .card:active{transform:scale(.995)}
+  .face{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px 24px;gap:10px}
+  .big{font:600 34px/1.15 var(--serif);overflow-wrap:anywhere}
+  .big.mean{font:400 28px/1.25 var(--serif)}
+  .hint{font-size:12px;color:var(--ink3)}
+  .back{border-top:1px solid var(--line);background:var(--band);padding:18px 24px 20px;display:grid;gap:10px;text-align:center;animation:show .35s var(--ease) both}
+  @keyframes show{from{opacity:0;transform:translateY(6px)}}
+  .back .ans{font:600 24px/1.2 var(--serif)}
+  .back .ans.mean{font:400 22px/1.25 var(--serif)}
+  .back .here{color:var(--ink2);font-size:13.5px}
+  .back .key{font-size:12.5px;color:var(--ink2)}.back .key small{color:var(--ink3);margin-right:4px}
+  .back .ex{font:15.5px/1.45 var(--serif)}.back .ex b{color:var(--acc);font-weight:600}
+  .back .tr{font:15px/1.45 var(--serif);color:var(--ink3)}
+  .play{width:34px;height:34px;border-radius:50%;border:0;background:none;box-shadow:inset 0 0 0 1.25px currentColor;display:grid;place-items:center;opacity:.7}
+  .play svg{width:10px;height:10px;margin-left:2px}
+  .acts{display:flex;gap:10px;justify-content:center;margin-top:18px}
+  .acts .btn{min-width:130px;padding:10px 16px}
+  .acts .again{border-color:var(--bad);color:var(--bad)}
+  .acts .got{border-color:var(--good);color:var(--good)}
+  .prog{height:4px;border-radius:2px;background:var(--line);width:min(420px,100%);margin:0 auto 16px;overflow:hidden}
+  .prog i{display:block;height:100%;background:var(--acc);transition:width .4s var(--ease)}
+  .keys{text-align:center;color:var(--ink3);font-size:12px;margin-top:14px}
+  .done{width:min(460px,100%);text-align:center;display:grid;gap:14px}
+  .done h2{font:600 24px var(--serif);margin:0}
+  .done ul{list-style:none;padding:0;margin:0;display:grid;gap:6px;text-align:left}
+  .done li{background:var(--paper);border-radius:12px;padding:8px 12px;display:flex;justify-content:space-between;gap:10px}
+  .done li span{color:var(--ink3);font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="gtop"><h1>Flashcards</h1><span class="tag" id="left"></span><span class="sp"></span>
+    <span class="seg" id="dir"><button data-v="word">Word first</button><button data-v="mean">Meaning first</button></span>
+    <a class="btn quiet" href="words.html">My words</a></div>
+</div>
+<div class="wrap stage" id="stage"></div>
+
+<script src="compile.js"></script>
+<script>
+"use strict";
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function bold(t){ return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
+var PLAY = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 0l9 5-9 5z" fill="currentColor"/></svg>';
+function speak(t, lang){ try{ var u = new SpeechSynthesisUtterance(t); u.lang = lang === "en" ? "en-GB" : "de-DE"; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
+
+var deck = Practice.readDeck("flashcards");
+var DIR = "word"; try{ DIR = localStorage.getItem("vc.practice.fcdir") || "word"; }catch(e){}
+var pile = [], again = {}, total = 0, done = 0, flipped = false, cur = null;
+
+function startRound(items){
+  pile = items.slice().sort(function(){ return Math.random() - .5; });
+  total = pile.length; done = 0; again = {}; next();
+}
+function next(){
+  flipped = false; cur = pile.shift() || null;
+  if (!cur) return finish();
+  draw();
+}
+function draw(){
+  $("left").textContent = (pile.length + 1) + " left";
+  var wordFirst = DIR === "word", ex = cur.examples[0];
+  var front = wordFirst
+    ? '<div class="big">' + esc(cur.head) + '</div><button class="play" data-a="say" aria-label="Play the word">' + PLAY + "</button>"
+    : '<div class="big mean">' + esc(cur.meaning) + "</div>";
+  var back = !flipped ? "" : '<div class="back">'
+    + (wordFirst ? '<div class="ans mean">' + esc(cur.meaning) + "</div>"
+                 : '<div class="ans">' + esc(cur.head) + ' <button class="play" data-a="say" aria-label="Play the word" style="display:inline-grid;vertical-align:middle">' + PLAY + "</button></div>")
+    + (cur.here ? '<div class="here">' + esc(cur.here) + "</div>" : "")
+    + (cur.key ? '<div class="key"><small>' + esc(cur.key.label) + "</small>" + esc(cur.key.form) + "</div>" : "")
+    + (ex ? '<div class="ex">' + bold(ex.marked) + "</div>" + (ex.tr ? '<div class="tr">' + esc(ex.tr) + "</div>" : "") : "")
+    + "</div>";
+  $("stage").innerHTML = '<div><div class="prog"><i style="width:' + Math.round(done / Math.max(1, total) * 100) + '%"></i></div>'
+    + '<div class="card" data-a="flip" role="button" tabindex="0" aria-label="' + (flipped ? "Card" : "Turn the card") + '">'
+    + '<div class="face">' + front + (flipped ? "" : '<div class="hint">tap to turn</div>') + "</div>" + back + "</div>"
+    + (flipped ? '<div class="acts"><button class="btn again" data-a="again">Again</button><button class="btn got" data-a="got">Got it</button></div>' : "")
+    + '<div class="keys"><span class="kbd">Space</span> turn · <span class="kbd">1</span> again · <span class="kbd">2</span> got it</div></div>';
+}
+function flip(){ if (!cur || flipped) return; flipped = true; draw(); }
+function grade(ok){
+  if (!cur || !flipped) return;
+  if (ok){ done++; }
+  else { again[cur.id] = (again[cur.id] || 0) + 1; var at = Math.min(pile.length, 3 + Math.floor(Math.random() * 3)); pile.splice(at, 0, cur); }
+  next();
+}
+function finish(){
+  $("left").textContent = "";
+  var hard = deck.items.filter(function(x){ return again[x.id]; });
+  $("stage").innerHTML = '<div class="done"><h2>Done</h2><p class="tag">' + total + " cards" + (hard.length ? ", " + hard.length + " needed another go" : ", every one first time") + ".</p>"
+    + (hard.length ? "<ul>" + hard.map(function(x){ return "<li><b>" + esc(x.head) + "</b><span>" + esc(x.meaning) + " · " + again[x.id] + "×</span></li>"; }).join("") + "</ul>" : "")
+    + '<div class="acts">' + (hard.length ? '<button class="btn primary" data-a="hard">Go again with these</button>' : "")
+    + '<button class="btn" data-a="all">The whole deck again</button></div>'
+    + '<a href="words.html">Back to My words</a></div>';
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-a]"); if (!b) return;
+  var a = b.dataset.a;
+  if (a === "say"){ e.stopPropagation(); speak(cur.head, cur.lang); return; }
+  if (a === "flip") return flip();
+  if (a === "again") return grade(false);
+  if (a === "got") return grade(true);
+  if (a === "hard") return startRound(deck.items.filter(function(x){ return again[x.id]; }));
+  if (a === "all") return startRound(deck.items);
+});
+document.addEventListener("keydown", function(e){
+  if (e.key === " " || e.key === "Enter"){ e.preventDefault(); flip(); }
+  if (e.key === "1") grade(false);
+  if (e.key === "2") grade(true);
+});
+function paintDir(){ document.querySelectorAll("#dir button").forEach(function(b){ b.classList.toggle("on", b.dataset.v === DIR); }); }
+$("dir").onclick = function(e){ var b = e.target.closest("button"); if (!b) return; DIR = b.dataset.v;
+  try{ localStorage.setItem("vc.practice.fcdir", DIR); }catch(er){} paintDir(); if (cur) draw(); };
+paintDir();
+if (!deck || !deck.items.length) $("stage").innerHTML = '<div class="empty">No deck yet. Open <a href="words.html">My words</a>, tick some words, press Compile and pick Flashcards.</div>';
+else startRound(deck.items);
+</script>
+</body>
+</html>

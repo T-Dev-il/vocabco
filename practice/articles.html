@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>der, die, das</title>
+<!--
+  practice/articles.html — build stamp: articles · 2026-10-12 (Contractor 17, RL).  SCAFFOLDING.
+  Big T's German gender game (React, about two years old), rebuilt as a plain
+  page and fed with his own nouns from My words. Same rules: 20 seconds to
+  start, +3 for each right answer up to 30, keys 1 2 3. English and audio can be
+  switched on. Pictures are left out until nouns have pictures of their own.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="practice.css">
+<style>
+  .hud{display:flex;gap:18px;font:600 15px var(--sans);font-variant-numeric:tabular-nums}
+  .hud .t.low{color:var(--bad)}
+  .tog{display:flex;gap:6px}
+  .tog button{border:1px solid var(--line);background:var(--paper);border-radius:999px;padding:5px 11px;font-size:12.5px;color:var(--ink2)}
+  .tog button.on{background:var(--accbg);color:var(--acc);border-color:transparent}
+  .play{width:min(420px,100%);display:grid;gap:14px}
+  .en{background:var(--paper);border-radius:18px;padding:14px;text-align:center;font:400 20px var(--serif);color:var(--ink2)}
+  .card{background:var(--paper);border-radius:24px;box-shadow:0 1px 2px rgba(0,0,0,.06),0 14px 34px -14px rgba(0,0,0,.3);padding:34px 22px 22px;text-align:center}
+  .noun{font:600 44px/1.1 var(--serif);overflow-wrap:anywhere;animation:pop .32s var(--ease) both}
+  @keyframes pop{from{opacity:0;transform:scale(.9)}}
+  .ans{height:34px;margin-top:6px;font:400 22px var(--serif);color:var(--ink2)}
+  .ans b{font-weight:600}
+  .arts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
+  .arts button{border:0;border-radius:999px;padding:13px 0;font:600 20px var(--sans);color:#fff;transition:transform .15s var(--ease),filter .2s,background .2s}
+  .arts button:hover{filter:brightness(1.07)}
+  .arts button:active{transform:scale(.96)}
+  .arts .der{background:var(--der)}.arts .die{background:var(--die)}.arts .das{background:var(--das)}
+  .arts button.right{background:var(--good)!important;box-shadow:0 0 0 3px var(--goodbg)}
+  .arts button.wrong{background:var(--bad)!important;box-shadow:0 0 0 3px var(--badbg)}
+  .arts button:disabled{cursor:default}
+  .keys{text-align:center;color:var(--ink3);font-size:12px}
+  .intro,.over{width:min(440px,100%);text-align:center;display:grid;gap:14px;justify-items:center}
+  .intro h2,.over h2{font:600 26px var(--serif);margin:0}
+  .intro p,.over p{margin:0;color:var(--ink2)}
+  .over ul{list-style:none;padding:0;margin:0;display:grid;gap:6px;width:100%;text-align:left}
+  .over li{background:var(--paper);border-radius:12px;padding:8px 12px;display:flex;justify-content:space-between;gap:10px}
+  .over li span{color:var(--ink3);font-size:12.5px}
+  .btn.go{padding:11px 26px;font-size:15px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="gtop"><h1>der, die, das</h1>
+    <span class="hud" id="hud" hidden><span id="score">Score 0</span><span class="t" id="time">20s</span></span>
+    <span class="sp"></span>
+    <span class="tog"><button data-t="en">English</button><button data-t="audio">Audio</button></span>
+    <a class="btn quiet" href="words.html">My words</a></div>
+</div>
+<div class="wrap stage" id="stage"></div>
+
+<script src="compile.js"></script>
+<script>
+"use strict";
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function speak(t){ try{ var u = new SpeechSynthesisUtterance(t); u.lang = "de-DE"; speechSynthesis.cancel(); speechSynthesis.speak(u); }catch(e){} }
+
+var deck = Practice.readDeck("articles");
+var words = deck ? deck.items.filter(function(x){ return x.article; }) : [];
+var OPT = {en:false, audio:false};
+try{ Object.assign(OPT, JSON.parse(localStorage.getItem("vc.practice.artopt") || "{}")); }catch(e){}
+var cur = null, last = null, score = 0, time = 20, timer = 0, busy = false, live = false, misses = {};
+
+function paintOpt(){ document.querySelectorAll(".tog button").forEach(function(b){ b.classList.toggle("on", !!OPT[b.dataset.t]); }); }
+document.querySelector(".tog").onclick = function(e){ var b = e.target.closest("button"); if (!b) return;
+  OPT[b.dataset.t] = !OPT[b.dataset.t]; try{ localStorage.setItem("vc.practice.artopt", JSON.stringify(OPT)); }catch(er){}
+  paintOpt(); if (live && cur) draw(); };
+paintOpt();
+
+function intro(){
+  $("hud").hidden = true;
+  if (!words.length){ $("stage").innerHTML = '<div class="empty">No nouns in this deck. Open <a href="words.html">My words</a>, tick some German nouns, press Compile and pick der, die, das.</div>'; return; }
+  $("stage").innerHTML = '<div class="intro"><h2>' + words.length + " noun" + (words.length === 1 ? "" : "s") + "</h2>"
+    + "<p>20 seconds on the clock. Every right answer adds 3, up to 30.</p>"
+    + '<button class="btn primary go" data-a="start">Start</button>'
+    + '<div class="keys"><span class="kbd">1</span> der · <span class="kbd">2</span> die · <span class="kbd">3</span> das</div></div>';
+}
+function start(){
+  score = 0; time = 20; misses = {}; live = true; $("hud").hidden = false; hud();
+  clearInterval(timer);
+  timer = setInterval(function(){ time--; hud(); if (time <= 0) over(); }, 1000);
+  pick();
+}
+function hud(){ $("score").textContent = "Score " + score; $("time").textContent = Math.max(0, time) + "s"; $("time").classList.toggle("low", time <= 5); }
+function pick(){
+  var pool = words.length > 1 ? words.filter(function(x){ return x !== last; }) : words;
+  cur = pool[Math.floor(Math.random() * pool.length)]; last = cur; busy = false; draw();
+}
+function draw(){
+  $("stage").innerHTML = '<div class="play">'
+    + (OPT.en ? '<div class="en">' + esc(cur.meaning) + "</div>" : "")
+    + '<div class="card"><div class="noun">' + esc(cur.item) + '</div><div class="ans" id="ans"></div>'
+    + '<div class="arts">' + ["der","die","das"].map(function(a){ return '<button class="' + a + '" data-art="' + a + '">' + a + "</button>"; }).join("") + "</div></div>"
+    + '<div class="keys"><span class="kbd">1</span> der · <span class="kbd">2</span> die · <span class="kbd">3</span> das</div></div>';
+}
+function guess(a){
+  if (!live || busy || !cur) return; busy = true;
+  var ok = a === cur.article;
+  document.querySelectorAll("[data-art]").forEach(function(b){
+    b.disabled = true;
+    if (b.dataset.art === cur.article) b.classList.add("right");
+    else if (b.dataset.art === a) b.classList.add("wrong");
+  });
+  $("ans").innerHTML = "<b>" + esc(cur.article) + "</b> " + esc(cur.item);
+  if (ok){ score++; time = Math.min(time + 3, 30); }
+  else misses[cur.id] = (misses[cur.id] || 0) + 1;
+  hud();
+  if (OPT.audio) speak(cur.article + " " + cur.item);
+  setTimeout(function(){ if (live) pick(); }, ok ? 900 : 1500);
+}
+function over(){
+  live = false; clearInterval(timer); hud();
+  var best = 0; try{ best = +localStorage.getItem("vc.practice.artbest") || 0; }catch(e){}
+  var isBest = score > best; if (isBest) try{ localStorage.setItem("vc.practice.artbest", score); }catch(e){}
+  var wrong = words.filter(function(x){ return misses[x.id]; });
+  $("stage").innerHTML = '<div class="over"><h2>Score ' + score + "</h2><p>" + (isBest ? "A new best." : "Best so far: " + best + ".") + "</p>"
+    + (wrong.length ? '<ul>' + wrong.map(function(x){ return "<li><b>" + esc(x.article + " " + x.item) + "</b><span>" + esc(x.meaning) + "</span></li>"; }).join("") + "</ul>" : "")
+    + '<button class="btn primary go" data-a="start">Play again</button><a href="words.html">Back to My words</a></div>';
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-art],[data-a]"); if (!b) return;
+  if (b.dataset.art) return guess(b.dataset.art);
+  if (b.dataset.a === "start") start();
+});
+document.addEventListener("keydown", function(e){
+  if (!live){ if (e.key === "Enter" && document.querySelector('[data-a="start"]')) start(); return; }
+  if (e.key === "1") guess("der"); if (e.key === "2") guess("die"); if (e.key === "3") guess("das");
+});
+intro();
+</script>
+</body>
+</html>

@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My words</title>
+<!--
+  practice/words.html — build stamp: words · 2026-10-12 (Contractor 17, RL).  SCAFFOLDING.
+
+  Every profiled word in one place, and the way into practice: tick a batch,
+  press Compile, pick a game. The compiler (compile.js) says which games suit
+  the batch and how many of the words each one can use.
+
+  Reads the experimental table lab_profiles on dev. If it is not there yet, it
+  reads the profiles saved in this browser instead, and says so.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="practice.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .hd{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;padding-block:14px 8px}
+  .hd h1{font:600 22px var(--serif);margin:0}
+  .hd .n{color:var(--ink3);font-size:13px}
+  .hd .sp{flex:1}
+  .hd a{font-size:13px;color:var(--ink2)}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;padding-bottom:12px;align-items:center}
+  .filters #q{flex:1 1 180px}
+  .note{font-size:12.5px;color:var(--ink3);margin:12px 0}
+  .rows{display:grid;gap:8px;padding-bottom:120px}
+  .row{background:var(--paper);border:1px solid var(--line);border-radius:14px;display:grid;grid-template-columns:auto 1fr;gap:0 12px;padding:12px 14px;align-items:start}
+  .row.sel{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+  .row input{margin-top:6px;width:17px;height:17px;accent-color:var(--acc)}
+  .row .main{min-width:0;cursor:pointer}
+  .row .l1{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .row .hw{font:600 19px/1.2 var(--serif);overflow-wrap:anywhere}
+  .row .mean{color:var(--ink2);overflow-wrap:anywhere}
+  .row .meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:2px}
+  .row .det{display:none;grid-column:2;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px}
+  .row.open .det{display:grid;gap:8px}
+  .det .here{color:var(--ink2)}
+  .det ol{margin:0;padding-left:18px;font-family:var(--serif);font-size:14.5px}
+  .det ol li{margin:3px 0}
+  .det ol b{color:var(--acc);font-weight:600}
+  .det .tr{color:var(--ink3);font-size:13px}
+  .det .ps{font-family:var(--serif);color:var(--ink2)}
+  .bar{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--paper);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+  .bar .wrap{display:flex;align-items:center;gap:10px;padding-block:12px;flex-wrap:wrap}
+  .bar .sp{flex:1}
+  /* the compile sheet */
+  #sheet{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.28);display:grid;align-items:end;justify-items:center}
+  #sheet[hidden]{display:none}
+  #sheet .in{width:100%;max-width:620px;background:var(--paper);border-radius:20px 20px 0 0;padding:20px 18px calc(22px + env(safe-area-inset-bottom,0px));max-height:85vh;overflow:auto;
+    animation:up .32s var(--ease) both}
+  @keyframes up{from{transform:translateY(24px);opacity:0}}
+  #sheet h2{font:600 19px var(--serif);margin:0 0 2px}
+  #sheet .sub{color:var(--ink3);font-size:13px;margin:0 0 14px}
+  .game{display:grid;grid-template-columns:1fr auto;gap:4px 14px;align-items:center;padding:14px 0;border-top:1px solid var(--line)}
+  .game h3{font:600 15px var(--sans);margin:0}
+  .game p{margin:0;color:var(--ink2);font-size:13px;grid-column:1}
+  .game .fit{grid-column:1;font-size:12.5px;color:var(--ink3)}
+  .game .fit b{color:var(--ink);font-weight:600}
+  .game .btn{grid-row:1 / span 3;grid-column:2}
+</style>
+</head>
+<body>
+<div id="auth"><div class="box">
+  <h1>My words</h1>
+  <input class="field" id="email" type="email" placeholder="Email" autocomplete="username" aria-label="Email">
+  <input class="field" id="pw" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password">
+  <button class="btn primary" id="go">Sign in</button>
+  <div class="msg" id="msg"></div>
+</div></div>
+
+<header hidden id="hdr"><div class="wrap">
+  <div class="hd"><h1>My words</h1><span class="n" id="count"></span><span class="sp"></span>
+    <a href="../sample-reader-1/sample-reader-1.html">Sample reader 1</a><a href="../shelf/shelf.html">Shelf</a></div>
+  <div class="filters">
+    <input class="field" id="q" placeholder="Search your words" aria-label="Search your words">
+    <select class="field" id="lang" aria-label="Language"><option value="">every language</option><option value="de">German</option><option value="en">English</option></select>
+    <select class="field" id="src" aria-label="Text"><option value="">every text</option></select>
+    <button class="btn quiet" id="all">Tick all shown</button>
+    <button class="btn quiet" id="none">Clear</button>
+  </div>
+</div></header>
+
+<main class="wrap" id="main" hidden>
+  <p class="note" id="note"></p>
+  <div class="rows" id="rows"></div>
+</main>
+
+<div class="bar" id="bar" hidden><div class="wrap">
+  <span id="nsel">Nothing ticked</span><span class="sp"></span>
+  <button class="btn primary" id="compile" disabled>Compile</button>
+</div></div>
+
+<div id="sheet" hidden><div class="in" role="dialog" aria-labelledby="sh2">
+  <h2 id="sh2">Practise these words</h2>
+  <p class="sub" id="shsub"></p>
+  <div id="games"></div>
+  <div style="padding-top:12px"><button class="btn quiet" id="shclose">Back to the list</button></div>
+</div></div>
+
+<script src="../config.js"></script>
+<script src="../store-supabase.js"></script>
+<script src="lab-profiles.js"></script>
+<script src="compile.js"></script>
+<script>
+"use strict";
+var ENV_NAME = null;
+try { ENV_NAME = localStorage.getItem("vocabEnvLab"); } catch (e) {}
+if (!VOCAB_ENVS[ENV_NAME]) ENV_NAME = "dev";
+var sb = supabase.createClient(VOCAB_ENVS[ENV_NAME].url, VOCAB_ENVS[ENV_NAME].anon,
+  { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
+var $ = function(id){ return document.getElementById(id); };
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+  return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+
+$("go").onclick = async function(){
+  var r = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("pw").value });
+  if (r.error) $("msg").textContent = r.error.message;
+};
+$("pw").addEventListener("keydown", function(e){ if (e.key === "Enter") $("go").click(); });
+var started = false;
+sb.auth.onAuthStateChange(function(_e, s){ if (s) start(s.user); });
+sb.auth.getSession().then(function(r){ if (r.data.session) start(r.data.session.user); });
+
+var ITEMS = [], SEL = {}, OPEN = {}, NAMES = {}, SOURCE = "";
+async function start(user){
+  if (started) return; started = true;
+  $("auth").remove(); $("hdr").hidden = false; $("main").hidden = false; $("bar").hidden = false;
+  $("note").textContent = "Loading your words…";
+  try{ await VocabStore.init(sb, user.id); var D = await VocabStore.getAll();
+    Object.values(D.texts || {}).forEach(function(t){ NAMES[t.id] = t.name || "Untitled"; }); }catch(e){}
+  var rows = [];
+  try{ rows = await LabProfiles.list(sb); SOURCE = "db"; }catch(e){ SOURCE = ""; }
+  if (!rows.length){
+    try{ rows = (JSON.parse(localStorage.getItem("vc.readerlab.notes") || "[]") || [])
+      .filter(function(n){ return n && n.profile; })
+      .map(function(n){ return {note_id:n.id, item:n.term, profile:n.profile, about:n.about, text_id:n.textId, when:n.when}; });
+      SOURCE = rows.length ? "browser" : SOURCE; }catch(e){}
+  }
+  ITEMS = rows.map(Practice.normalize).filter(function(x){ return x.head; });
+  var texts = {}; ITEMS.forEach(function(x){ if (x.textId) texts[x.textId] = NAMES[x.textId] || "A text"; });
+  $("src").innerHTML = '<option value="">every text</option>' + Object.keys(texts).map(function(id){
+    var n = texts[id]; return '<option value="' + esc(id) + '">' + esc(n.length > 46 ? n.slice(0, 46) + "…" : n) + "</option>"; }).join("");
+  paint();
+}
+
+function shown(){
+  var q = $("q").value.trim().toLowerCase(), lg = $("lang").value, src = $("src").value;
+  return ITEMS.filter(function(x){
+    if (lg && x.lang !== lg) return false;
+    if (src && x.textId !== src) return false;
+    if (!q) return true;
+    return [x.head, x.meaning, x.here].concat(x.examples.map(function(e){ return e.text; })).join(" ").toLowerCase().indexOf(q) >= 0;
+  }).sort(function(a, b){ return (b.when || 0) - (a.when || 0); });
+}
+function bold(t){ return esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); }
+function rowHTML(x){
+  var on = !!SEL[x.id];
+  return '<div class="row' + (on ? " sel" : "") + (OPEN[x.id] ? " open" : "") + '" data-id="' + esc(x.id) + '">'
+    + '<input type="checkbox" aria-label="Tick ' + esc(x.head) + '"' + (on ? " checked" : "") + ">"
+    + '<div class="main"><div class="l1"><span class="hw">' + esc(x.head) + "</span>"
+    + (x.cefr ? '<span class="chip">' + esc(x.cefr) + "</span>" : "")
+    + '<span class="mean">' + esc(x.meaning) + "</span></div>"
+    + '<div class="meta">' + (x.key ? '<span class="tag">' + esc(x.key.label) + " " + esc(x.key.form) + "</span>" : "")
+    + (x.pos ? '<span class="tag">' + esc(x.pos) + "</span>" : "")
+    + '<span class="tag">' + (x.lang === "en" ? "English" : "German") + "</span>"
+    + (x.textId && NAMES[x.textId] ? '<span class="tag">' + esc(NAMES[x.textId]) + "</span>" : "") + "</div></div>"
+    + '<div class="det">'
+    + (x.here ? '<div class="here">' + esc(x.here) + "</div>" : "")
+    + (x.more ? "<div>" + esc(x.more) + "</div>" : "")
+    + (x.sentence ? '<div class="ps">' + esc(x.sentence) + (x.sentence_tr ? '<div class="tr">' + esc(x.sentence_tr) + "</div>" : "") + "</div>" : "")
+    + (x.examples.length ? "<ol>" + x.examples.map(function(e){ return "<li>" + bold(e.marked) + (e.tr ? '<div class="tr">' + esc(e.tr) + "</div>" : "") + "</li>"; }).join("") + "</ol>" : "")
+    + "</div></div>";
+}
+function paint(){
+  var list = shown();
+  $("count").textContent = ITEMS.length + " word" + (ITEMS.length === 1 ? "" : "s");
+  $("note").textContent = SOURCE === "db" ? "From the database (dev). " + list.length + " shown."
+    : SOURCE === "browser" ? "From this browser only: the database table is not set up yet. " + list.length + " shown."
+    : "";
+  $("rows").innerHTML = list.length ? list.map(rowHTML).join("")
+    : '<div class="empty">' + (ITEMS.length ? "Nothing matches." : "No profiled words yet. In Sample reader 1, select a word and press Add++ — it lands here.") + "</div>";
+  paintBar();
+}
+function picked(){ return ITEMS.filter(function(x){ return SEL[x.id]; }); }
+function paintBar(){
+  var n = picked().length;
+  $("nsel").textContent = n ? n + " ticked" : "Nothing ticked";
+  $("compile").disabled = !n;
+}
+$("rows").addEventListener("click", function(e){
+  var r = e.target.closest(".row"); if (!r) return;
+  var id = r.dataset.id;
+  if (e.target.matches("input")){ SEL[id] = e.target.checked; r.classList.toggle("sel", SEL[id]); paintBar(); return; }
+  if (e.target.closest(".main")){ OPEN[id] = !OPEN[id]; r.classList.toggle("open", OPEN[id]); }
+});
+$("q").oninput = paint; $("lang").onchange = paint; $("src").onchange = paint;
+$("all").onclick = function(){ shown().forEach(function(x){ SEL[x.id] = true; }); paint(); };
+$("none").onclick = function(){ SEL = {}; paint(); };
+
+/* Compile: which games suit this batch, and how many of the words each can use. */
+$("compile").onclick = function(){
+  var items = picked(); if (!items.length) return;
+  $("shsub").textContent = items.length + " word" + (items.length === 1 ? "" : "s") + " ticked. Each game takes the ones it can use.";
+  $("games").innerHTML = Practice.fitsOf(items).map(function(f, i){
+    return '<div class="game"><h3>' + esc(f.game.name) + "</h3><p>" + esc(f.game.about) + "</p>"
+      + '<div class="fit">' + (f.count ? "<b>" + f.count + "</b> of " + f.total + " fit" + (f.count < f.total ? " · it needs " + esc(f.game.needs) : "")
+                                      : "None of these fit · it needs " + esc(f.game.needs)) + "</div>"
+      + '<button class="btn primary" data-g="' + i + '"' + (f.count ? "" : " disabled") + ">Play</button></div>";
+  }).join("");
+  $("sheet").hidden = false;
+};
+$("games").addEventListener("click", function(e){
+  var b = e.target.closest("[data-g]"); if (!b) return;
+  var f = Practice.fitsOf(picked())[+b.dataset.g];
+  if (!Practice.sendDeck(f.game, f.items, "My words · " + new Date().toLocaleDateString())) { alert("This browser would not hold the deck."); return; }
+  location.href = f.game.url;
+});
+$("shclose").onclick = function(){ $("sheet").hidden = true; };
+$("sheet").addEventListener("click", function(e){ if (e.target.id === "sheet") $("sheet").hidden = true; });
+document.addEventListener("keydown", function(e){ if (e.key === "Escape") $("sheet").hidden = true; });
+</script>
+</body>
+</html>
