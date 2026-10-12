@@ -150,7 +150,6 @@ async function start(user){
     await loadScript('../icons.js').catch(()=>{});   // optional; only if your app.js uses it
     await loadScript('sr1-app.js');     // boots itself, renders into #root
     if (window.labInit) window.labInit();   // the composer, once the reader exists
-    if (window.LabProfiles) LabProfiles.syncAll(sb, NOTES).then(function(k){ if (k) console.log("[lab-profiles] " + k + " profiles sent"); });
   }catch(e){
     boot.textContent = 'Failed to start: ' + (e.message||e);
     return;
@@ -4655,6 +4654,17 @@ paintNotesCount();
 syncClassSlots();
 paintAll();
 labPaint();
+/* The doorway for sr1-card.js (Contractor 17): the lab's functions live inside
+   labInit, so the card reaches them through window.LAB and nothing else. */
+window.LAB = { esc:esc, findInSentence:findInSentence, pfExampleHTML:pfExampleHTML, pfBlanking:pfBlanking,
+  readerIsDark:readerIsDark, noteById:noteById, saveL:saveL, say:say, labPaint:labPaint,
+  paintNotesCount:paintNotesCount, reportMark:reportMark, pickAlt:pickAlt, addCompanion:addCompanion,
+  runStage1:runStage1, runStage2:runStage2, paintProfile:paintProfile, speakDE:speakDE,
+  speakLines:speakLines, audioLines:audioLines, pfPlace:pfPlace,
+  saveNotes: function(){ saveL("notes", NOTES); },
+  removeNote: function(id){ NOTES = NOTES.filter(function(x){ return x.id !== id; }); saveL("notes", NOTES); },
+  isLive: function(P){ return PF === P; }, dropLive: function(){ PF = null; } };
+if (window.LabProfiles) LabProfiles.syncAll(sb, NOTES).then(function(k){ if (k) console.log("[lab-profiles] " + k + " profiles sent"); });
 say("Composer ready");
 };
 </script>

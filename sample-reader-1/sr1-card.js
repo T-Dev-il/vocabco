@@ -22,6 +22,7 @@
 */
 (function(){
 "use strict";
+var L = {};   // filled from window.LAB at each render
 
 var CSS = [
 ".cm{position:relative;--ink:#1D1F1C;--bg:#fff;--band:hsla(210,62%,45%,.05);--line:hsla(210,12%,30%,.16);--hov:hsla(210,62%,40%,.08);",
@@ -159,7 +160,7 @@ function sentenceWords(sentence, pieces){
   var spans = [], from = 0;
   (pieces || []).forEach(function(pc){
     pc = String(pc || "").trim(); if (!pc) return;
-    var f = findInSentence(sentence, pc, from); if (f){ spans.push(f); from = f[1]; }
+    var f = L.findInSentence(sentence, pc, from); if (f){ spans.push(f); from = f[1]; }
   });
   var out = [], at = 0;
   function plain(t){ t.split(/(?<=\s)/).forEach(function(w){ if (w) out.push({k:false, t:w}); }); }
@@ -171,33 +172,33 @@ function sentenceWords(sentence, pieces){
 /* ── drawing ─────────────────────────────────────────────────────────── */
 function build(box, v, states, live, note){
   var S = box._cm, ok = function(g){ return states[g] === "done"; };
-  var dark = readerIsDark();
+  var dark = L.readerIsDark();
   var pieces = (v.pieces && v.pieces.length) ? v.pieces : [v.item || ""];
-  var onp = esc(pieces.join(" … "));
+  var onp = L.esc(pieces.join(" … "));
   var sent = sentenceOf(live, note);
   var ws = sentenceWords(sent, pieces);
   var cardDone = ok("card"), gramDone = ok("grammar");
 
-  var lv = cardDone && v.cefr ? '<span class="cm-lv">' + esc(v.cefr) + "</span>"
+  var lv = cardDone && v.cefr ? '<span class="cm-lv">' + L.esc(v.cefr) + "</span>"
          : (states.card === "waiting" ? '<span class="cm-lv cm-ld">B1</span>' : "");
   var kf = keyForm(v);
-  var kl = (cardDone || gramDone) && kf ? '<div class="cm-kl" data-g="card"><small>' + esc(kf.label) + "</small>" + esc(kf.form) + "</div>"
+  var kl = (cardDone || gramDone) && kf ? '<div class="cm-kl" data-g="card"><small>' + L.esc(kf.label) + "</small>" + L.esc(kf.form) + "</div>"
          : (states.card === "waiting" ? '<div class="cm-kl">' + ph(14) + "</div>" : "");
-  var head = ok("item") ? esc(headword(v)) : ph(Math.max(4, (v.item || "word").length));
+  var head = ok("item") ? L.esc(headword(v)) : ph(Math.max(4, (v.item || "word").length));
   var facts = factsOf(v);
   var det = '<div class="cm-det">'
-    + (facts.length ? '<div class="cm-facts">' + facts.map(function(p){ return "<span><small>" + esc(p[0]) + "</small>" + esc(p[1]) + "</span>"; }).join("") + "</div>" : "")
-    + (v.note && v.note !== v.more ? "<div>" + esc(v.note) + "</div>" : "")
-    + (v.ipa ? '<div class="cm-ipa">' + esc(v.ipa) + "</div>" : "")
+    + (facts.length ? '<div class="cm-facts">' + facts.map(function(p){ return "<span><small>" + L.esc(p[0]) + "</small>" + L.esc(p[1]) + "</span>"; }).join("") + "</div>" : "")
+    + (v.note && v.note !== v.more ? "<div>" + L.esc(v.note) + "</div>" : "")
+    + (v.ipa ? '<div class="cm-ipa">' + L.esc(v.ipa) + "</div>" : "")
     + (!facts.length && !v.note && !v.ipa ? '<div style="opacity:.5">Nothing more on this word yet.</div>' : "") + "</div>";
 
-  var L = layers(v), meanReady = ok("item");
-  S.l = Math.min(S.l, Math.max(1, L.length));
-  var dots = L.length > 1 ? '<span class="cm-dots">' + L.map(function(_, i){ return '<button data-cm="step" data-i="' + (i + 1) + '" class="' + (i < S.l ? "on" : "") + '" aria-label="Meaning, layer ' + (i + 1) + '"></button>'; }).join("") + "</span>" : "";
+  var LY = layers(v), meanReady = ok("item");
+  S.l = Math.min(S.l, Math.max(1, LY.length));
+  var dots = LY.length > 1 ? '<span class="cm-dots">' + LY.map(function(_, i){ return '<button data-cm="step" data-i="' + (i + 1) + '" class="' + (i < S.l ? "on" : "") + '" aria-label="Meaning, layer ' + (i + 1) + '"></button>'; }).join("") + "</span>" : "";
   var mean = meanReady
-    ? dots + '<div class="cm-l1" data-cm="l1" data-g="item">' + esc(L[0] || "") + "</div>"
-      + '<div class="cm-fold cm-l2' + (S.l >= 2 ? " open" : "") + '"><div><div>' + esc(L[1] || "") + "</div></div></div>"
-      + '<div class="cm-fold cm-l3' + (S.l >= 3 ? " open" : "") + '"><div><div>' + esc(L[2] || "") + "</div></div></div>"
+    ? dots + '<div class="cm-l1" data-cm="l1" data-g="item">' + L.esc(LY[0] || "") + "</div>"
+      + '<div class="cm-fold cm-l2' + (S.l >= 2 ? " open" : "") + '"><div><div>' + L.esc(LY[1] || "") + "</div></div></div>"
+      + '<div class="cm-fold cm-l3' + (S.l >= 3 ? " open" : "") + '"><div><div>' + L.esc(LY[2] || "") + "</div></div></div>"
     : '<div class="cm-l1">' + ph(16) + "</div>";
 
   var ex;
@@ -206,32 +207,32 @@ function build(box, v, states, live, note){
   else {
     var es = v.examples; S.ex = S.ex % es.length; var e = es[S.ex];
     ex = '<div class="cm-exrow"><button class="cm-side l" data-cm="prev" aria-label="Previous example">‹</button><button class="cm-side r" data-cm="next" aria-label="Next example">›</button>'
-      + '<div class="cm-sentbox" data-cm="tapsent"><span class="cm-sent" data-g="ex">' + pfExampleHTML(e, live, S.ex, v) + "</span></div></div>"
-      + '<div class="cm-fold cm-extr' + (S.extr ? " open" : "") + '"><div><div>' + esc(e.tr || "") + "</div></div></div>"
+      + '<div class="cm-sentbox" data-cm="tapsent"><span class="cm-sent" data-g="ex">' + L.pfExampleHTML(e, live, S.ex, v) + "</span></div></div>"
+      + '<div class="cm-fold cm-extr' + (S.extr ? " open" : "") + '"><div><div>' + L.esc(e.tr || "") + "</div></div></div>"
       + '<div class="cm-cnt">' + (S.ex + 1) + " of " + es.length + "</div>";
   }
   var fail1 = states.item === "failed" ? '<div class="cm-fail">The word didn’t load. <button data-cm="retry1">Try again</button></div>' : "";
 
-  var n = live ? (live.noteId && noteById(live.noteId)) : note;
+  var n = live ? (live.noteId && L.noteById(live.noteId)) : note;
   var marked = n ? n.marked : !(live && live.markOff);
   var foot = '<div class="cm-foot">'
     + "<span>" + (n ? "saved" : live && !live.removed ? "saves when ready" : "not saved") + "</span>"
     + (live && live.alts && live.alts.length ? '<button data-cm="alts">other options (' + live.alts.length + ")</button>" : "")
-    + ((v.companions || []).length && live ? (v.companions || []).map(function(c){ return '<button data-comp="' + esc(c) + '">add “' + esc(c) + '”</button>'; }).join("") : "")
+    + ((v.companions || []).length && live ? (v.companions || []).map(function(c){ return '<button data-comp="' + L.esc(c) + '">add “' + L.esc(c) + '”</button>'; }).join("") : "")
     + '<label><input type="checkbox" data-cm="mark"' + (marked ? " checked" : "") + (live && live.removed ? " disabled" : "") + "> mark in text</label>"
-    + ((v.examples || []).length ? '<button data-cm="blank">' + (pfBlanking() ? "show the word" : "hide the word") + "</button>" : "")
+    + ((v.examples || []).length ? '<button data-cm="blank">' + (L.pfBlanking() ? "show the word" : "hide the word") + "</button>" : "")
     + (n ? '<button class="warn" data-cm="remove">Remove</button>' : "")
     + '<span class="sp"></span><button data-cm="close">Close</button>'
     + (live && live.altsOpen ? '<div class="cm-alts">' + live.alts.map(function(x, i){
-        return '<button data-alt="' + i + '"><b>' + esc(x.item) + "</b>" + (x.meaning ? " — " + esc(x.meaning) : "") + "</button>"; }).join("") + "</div>" : "")
+        return '<button data-alt="' + i + '"><b>' + L.esc(x.item) + "</b>" + (x.meaning ? " — " + L.esc(x.meaning) : "") + "</button>"; }).join("") + "</div>" : "")
     + "</div>";
 
   var trOn = !!v.sentence_tr;
   var xp = '<div class="cm-xp" aria-hidden="' + (S.ps ? "false" : "true") + '"><div class="in">'
     + '<div class="cm-pshead"><span class="cm-tag">Full sentence</span><span class="keys">' + onp + '</span><span class="sp"></span>'
     + '<button class="cm-play sm" data-cm="saypage" aria-label="Play the sentence">' + PLAY + "</button></div>"
-    + '<div class="cm-pss">' + ws.map(function(w){ return '<span class="w' + (w.k ? " k on" : "") + '">' + esc(w.t) + "</span>"; }).join("") + "</div>"
-    + '<div class="cm-pstr">' + (trOn ? esc(v.sentence_tr) : (states.card === "waiting" ? ph(40) : "")) + "</div>"
+    + '<div class="cm-pss">' + ws.map(function(w){ return '<span class="w' + (w.k ? " k on" : "") + '">' + L.esc(w.t) + "</span>"; }).join("") + "</div>"
+    + '<div class="cm-pstr">' + (trOn ? L.esc(v.sentence_tr) : (states.card === "waiting" ? ph(40) : "")) + "</div>"
     + "</div></div>";
 
   return '<div class="cm' + (dark ? " cm-dark" : "") + (S.ps ? " cm-ps" : "") + '">' + xp
@@ -302,39 +303,39 @@ function closePS(box){ var S = box._cm; if (!S.ps) return; S.ps = false; wordsIn
 function wire(box, v, live, note){
   var S = box._cm, root = box.querySelector(".cm");
   root.onclick = function(e){
-    var al = e.target.closest("[data-alt]"); if (al){ pickAlt(+al.dataset.alt); return; }
-    var cp = e.target.closest("[data-comp]"); if (cp){ addCompanion(cp.dataset.comp); return; }
+    var al = e.target.closest("[data-alt]"); if (al){ L.pickAlt(+al.dataset.alt); return; }
+    var cp = e.target.closest("[data-comp]"); if (cp){ L.addCompanion(cp.dataset.comp); return; }
     var bl = e.target.closest(".pf-blank"); if (bl){ e.stopPropagation(); bl.classList.toggle("show"); return; }
     if (!S.ps && e.target.closest(".cm-xp")){ openPS(box); return; }
     var b = e.target.closest("[data-cm]"); if (!b) return;
     var a = b.dataset.cm, es = v.examples || [];
     if (a === "ps") return S.ps ? closePS(box) : openPS(box);
-    if (a === "say"){ if (!v.item) return; if ((v.lang || "de") !== "en") speakDE(v.item); else speakLines(audioLines(v), "en", b); return; }
-    if (a === "saypage"){ var s = sentenceOf(live, note); if (s){ if ((v.lang || "de") !== "en") speakDE(s); else speakLines([s], "en", b); } return; }
+    if (a === "say"){ if (!v.item) return; if ((v.lang || "de") !== "en") L.speakDE(v.item); else L.speakLines(L.audioLines(v), "en", b); return; }
+    if (a === "saypage"){ var s = sentenceOf(live, note); if (s){ if ((v.lang || "de") !== "en") L.speakDE(s); else L.speakLines([s], "en", b); } return; }
     if (a === "word"){ S.word = !S.word; b.classList.toggle("on", S.word); box.querySelector('[data-f="word"]').classList.toggle("open", S.word); return; }
     if (a === "l1"){ S.l = S.l % Math.max(1, layers(v).length) + 1; return steps(box); }
     if (a === "step"){ S.l = +b.dataset.i; return steps(box); }
     if (a === "next" || a === "prev") return stepEx(box, v, live, a === "next" ? 1 : -1);
     if (a === "tapsent"){ if (String(getSelection()).trim()) return; S.extr = !S.extr; var f = box.querySelector(".cm-extr"); if (f) f.classList.toggle("open", S.extr); return; }
-    if (a === "alts"){ if (live){ live.altsOpen = !live.altsOpen; paintProfile(); } return; }
-    if (a === "retry1"){ if (live) runStage1(live); return; }
-    if (a === "retry"){ if (live) runStage2(live); return; }
-    if (a === "blank"){ saveL("pfblank", !pfBlanking()); redraw(box); return; }
-    if (a === "close"){ box.className = ""; box.dataset.pfkey = ""; if (live && PF === live) PF = null; labPaint(); return; }
+    if (a === "alts"){ if (live){ live.altsOpen = !live.altsOpen; L.paintProfile(); } return; }
+    if (a === "retry1"){ if (live) L.runStage1(live); return; }
+    if (a === "retry"){ if (live) L.runStage2(live); return; }
+    if (a === "blank"){ L.saveL("pfblank", !L.pfBlanking()); redraw(box); return; }
+    if (a === "close"){ box.className = ""; box.dataset.pfkey = ""; if (live && L.isLive(live)) L.dropLive(); L.labPaint(); return; }
     if (a === "remove"){
-      var n = live ? (live.noteId && noteById(live.noteId)) : note; if (!n) return;
-      NOTES = NOTES.filter(function(x){ return x.id !== n.id; }); saveL("notes", NOTES);
+      var n = live ? (live.noteId && L.noteById(live.noteId)) : note; if (!n) return;
+      L.removeNote(n.id);
       if (window.LabProfiles) LabProfiles.remove(sb, n.id);
-      say("Profile removed: " + (v.item || n.term)); labPaint(); paintNotesCount();
+      L.say("Profile removed: " + (v.item || n.term)); L.labPaint(); L.paintNotesCount();
       if (live){ live.noteId = null; live.saved = false; live.removed = true; redraw(box); }
       else { box.className = ""; box.dataset.pfkey = ""; }
     }
   };
   var mk = root.querySelector('[data-cm="mark"]');
   if (mk) mk.onchange = function(){
-    var n = live ? (live.noteId && noteById(live.noteId)) : note;
+    var n = live ? (live.noteId && L.noteById(live.noteId)) : note;
     if (live) live.markOff = !mk.checked;
-    if (n){ n.marked = mk.checked; saveL("notes", NOTES); labPaint(); if (n.marked) reportMark(n); }
+    if (n){ n.marked = mk.checked; L.saveNotes(); L.labPaint(); if (n.marked) L.reportMark(n); }
   };
   /* hover over the strip, or the peeking panel, shows the peek */
   var zone = function(el){ return !!(el && el.closest && el.closest(".cm-top,.cm-xp")); };
@@ -375,7 +376,7 @@ function stepEx(box, v, live, d){
   el.animate([{transform:"none", opacity:1}, {transform:"translateX(" + (-d * 26) + "px)", opacity:0}], {duration:200, easing:"cubic-bezier(.4,0,1,1)", fill:"forwards"}).onfinish = function(){
     S.ex = (S.ex + d + es.length) % es.length;
     var e = es[S.ex];
-    el.innerHTML = pfExampleHTML(e, live, S.ex, v);
+    el.innerHTML = L.pfExampleHTML(e, live, S.ex, v);
     var t = box.querySelector(".cm-extr > div > div"); if (t) t.textContent = e.tr || "";
     var c = box.querySelector(".cm-cnt"); if (c) c.textContent = (S.ex + 1) + " of " + es.length;
     el.getAnimations().forEach(function(a){ a.cancel(); });
@@ -386,6 +387,7 @@ function redraw(box){ var a = box._cmArgs; if (a) render.apply(null, a); }
 
 /* Build if needed, then bring every slot up to date. Same arguments as pfRender. */
 function render(box, key, v, states, live, note, anchor, instant){
+  L = window.LAB || L;
   setup();
   box._cmArgs = [box, key, v, states, live, note, anchor, true];
   var fresh = box.dataset.pfkey !== key || box.dataset.pflook !== "card";
@@ -393,7 +395,7 @@ function render(box, key, v, states, live, note, anchor, instant){
     box.className = "on pf"; box.dataset.pinned = "";
     box.dataset.pfkey = key; box.dataset.pflook = "card";
     box._cm = {l:1, ex:0, extr:false, word:false, ps:false, peek:false, shown:{}};
-    pfPlace(box, anchor);
+    L.pfPlace(box, anchor);
   }
   var S = box._cm, scroll = box.querySelector(".cm-card") ? box.querySelector(".cm-card").scrollTop : 0;
   box.innerHTML = build(box, v, states, live, note);
