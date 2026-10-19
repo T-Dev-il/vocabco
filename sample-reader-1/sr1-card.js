@@ -86,7 +86,7 @@ const CSS = `/* ═══ the machine ═══ */
 .xp .s.ps::after{display:none}
 .xp.nt{transition:none}
 .mrow{display:flex;gap:12px;align-items:flex-start}.mcol{flex:1;min-width:0}
-.ho-caretline .hw.on{box-shadow:inset 0 -2px 0 color-mix(in srgb,currentColor 50%,transparent)}
+.ho-caretline .hw.on [data-slot="z"]{box-shadow:inset 0 -1px 0 color-mix(in srgb,currentColor 32%,transparent)}
 .ho-caretline .hw.on .car,.ho-underline .hw.on .car{color:inherit}
 .wheel .s.ex .cnt{cursor:var(--excur)}
 .s.ex .sent.tap{cursor:pointer;border-radius:8px;padding:2px 6px;margin:-2px -6px;transition:background .2s}
@@ -115,7 +115,7 @@ const CSS = `/* ═══ the machine ═══ */
 .hw .car{display:inline-block;font:400 14px var(--sans);opacity:.3;margin-left:7px;transition:transform var(--T) var(--ease),opacity .3s,color .3s;vertical-align:.25em;text-shadow:none}
 .hw.on .car{transform:rotate(90deg);opacity:.9;color:var(--hwc)}
 .ho-col .hw.on,.ho-caretcol .hw.on{color:var(--hwc)}
-.ho-underline .hw.on{box-shadow:inset 0 -2px 0 var(--hwc)}
+.ho-underline .hw.on [data-slot="z"]{box-shadow:inset 0 -1px 0 color-mix(in srgb,var(--hwc) 55%,transparent)}
 .onp{border:0;background:none;padding:0;font:italic 13px var(--bf);opacity:.55;text-align:left;color:inherit;transition:opacity .2s,box-shadow .3s}
 .onp.above{font-size:12px;margin-bottom:1px;align-self:flex-start}
 .onp.on{opacity:.95}
@@ -269,9 +269,9 @@ button:focus-visible,input:focus-visible{outline:2px solid #5B8DEF;outline-offse
 .card{max-height:var(--pfmax,80vh);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
 .lv:empty{display:none}
 /* the strip above the headword: hover peeks the Full sentence, click opens it */
-.ptop{display:flex;align-items:center;margin:0 -18px 0;padding:3px 60px 3px 62px;min-height:24px;cursor:pointer}
+.ptop{display:flex;width:max-content;max-width:calc(100% - 60px);align-items:center;margin:0 0 0 44px;padding:3px 12px 3px 0;min-height:24px;cursor:pointer}
 .ptop .onp{margin:0}
-.hit{position:absolute;left:0;right:0;top:-22px;height:24px;z-index:4;cursor:pointer}
+.hit{position:absolute;left:44px;width:190px;top:-22px;height:24px;z-index:4;cursor:pointer}
 .mach.ps-open .hit{pointer-events:none}
 .pkeys{font:italic 13px var(--bf);opacity:.8;margin-left:8px;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .xp.on .pkeys{opacity:0}
@@ -301,6 +301,12 @@ button:focus-visible,input:focus-visible{outline:2px solid #5B8DEF;outline-offse
 .fail{font-size:12px;opacity:.85;padding:6px 0}.fail button{border:0;background:none;padding:0;text-decoration:underline}
 .prov{opacity:.62}
 .prov-n{display:block;font:500 10px var(--sans);letter-spacing:.04em;opacity:.45;margin-top:2px;text-transform:uppercase}
+/* a quiet scrollbar, only while the pointer is on the card */
+.card{scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .3s}
+.card:hover{scrollbar-color:color-mix(in srgb,currentColor 22%,transparent) transparent}
+.card::-webkit-scrollbar{width:6px}.card::-webkit-scrollbar-track{background:transparent}
+.card::-webkit-scrollbar-thumb{background:transparent;border-radius:3px}
+.card:hover::-webkit-scrollbar-thumb{background:color-mix(in srgb,currentColor 22%,transparent)}
 /* the item hidden in an example (the lab's "hide the word") */
 .pf-blank{color:transparent!important;background:var(--accbg);border-radius:3px;cursor:pointer}
 .pf-blank.show{color:var(--acct)!important;background:none;font-weight:600}
@@ -691,6 +697,8 @@ ON('click',e=>{
     return askReal(x.qa[U.q]); }
   if(a==='tapsent'&&String(getSelection()).trim()) return;
   if(a==='tapsent'&&e.target.closest('.pf-blank')){ e.target.closest('.pf-blank').classList.toggle('show'); return; }
+  /* one click: the translation, a moment later so a double click can win; two: the audio */
+  if(a==='tapsent'&&S.tapS!=='none'&&S.tapS!=='play'){ clearTimeout(tapT); tapT=setTimeout(()=>{ U.extr=!U.extr; upd(); },230); return; }
   if(a==='extr'||(a==='tapsent'&&S.tapS!=='none')){
     if(a==='tapsent'&&S.tapS==='play') return say(x.examples[U.ex][0],x.voice);
     U.extr=!U.extr; upd(); if(a==='tapsent'&&S.tapS==='trplay'&&U.extr) say(x.examples[U.ex][0],x.voice); return; }
@@ -880,6 +888,13 @@ function LABACT(a, b, e){
   }
   return false;
 }
+let tapT = 0;
+ON("dblclick", e => {
+  const s = e.target.closest("#sent"), p = e.target.closest("#pss");
+  if (!s && !p) return;
+  clearTimeout(tapT); try{ getSelection().removeAllRanges(); }catch(er){}
+  const x = it(); say(s ? x.examples[U.ex][0] : x.psent, x.voice);
+});
 ON("change", e => {
   if (!e.target.matches("[data-mark]")) return;
   const n = LIVE ? (LIVE.noteId && LB.noteById(LIVE.noteId)) : NOTE;
@@ -923,8 +938,7 @@ async function quick(live){
 }
 /* the reader's page colour: the card's look follows it, as in Card Machine */
 function readPage(){
-  const vid = document.getElementById("yt-player-wrap");
-  READER.video = !!(vid && vid.getBoundingClientRect().height);
+
   let el = document.querySelector(".reader-fs.on, .reader-fs:not([hidden]) .reader-render, .reader-wrap") || document.body, c = "";
   while (el){ c = getComputedStyle(el).backgroundColor; if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) break; el = el.parentElement; }
   const m = (c || "rgb(255,255,255)").match(/\d+(\.\d+)?/g) || [255, 255, 255], rgb = m.slice(0, 3).map(Number);
@@ -983,7 +997,7 @@ function cardRender(box, key, v, states, live, note, anchor, instant){
   if (sig === SIG) return; SIG = sig;
   box.style.width = S.width + "px";
   const keep = {frost: S.frost, gblur: S.gblur};
-  if (READER.video && S.style === "glass"){ S.frost = Math.max(S.frost, S.vidFrost); S.gblur = Math.max(S.gblur, 28); }
+  if (READER.overVideo && S.style === "glass"){ S.frost = Math.max(S.frost, S.vidFrost); S.gblur = Math.max(S.gblur, 28); }
   render();
   S.frost = keep.frost; S.gblur = keep.gblur;
   mach.classList.toggle("mini", !!U.mini);
@@ -996,18 +1010,21 @@ function cardRender(box, key, v, states, live, note, anchor, instant){
    if that still covers the video, beside it. */
 function clearVideo(){
   const vid = document.getElementById("yt-player-wrap");
-  if (!vid || !BOX || !BOX.classList.contains("on")) return;
+  if (!vid || !BOX || !BOX.classList.contains("on")) return overVideo(false);
   const vr = vid.getBoundingClientRect(); if (!vr.width || !vr.height) return;
   const hit = r => r.left < vr.right && r.right > vr.left && r.top < vr.bottom && r.bottom > vr.top;
-  let br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  let br = BOX.getBoundingClientRect(); if (!hit(br)) return overVideo(false);
   const a = (ARGS && ARGS[6]) || {top: vr.bottom, bottom: vr.bottom, left: br.left};
   BOX.style.bottom = ""; BOX.style.top = ((a.bottom || a.top) + 8) + "px";
   BOX.style.setProperty("--pfmax", Math.max(200, innerHeight - (a.bottom || a.top) - 24) + "px");
-  br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  br = BOX.getBoundingClientRect(); if (!hit(br)) return overVideo(false);
   const w = br.width;
   if (innerWidth - vr.right >= w + 16) BOX.style.left = (vr.right + 12) + "px";
   else if (vr.left >= w + 16) BOX.style.left = (vr.left - w - 12) + "px";
+  overVideo(hit(BOX.getBoundingClientRect()));
 }
+/* glass frosts more only while it actually sits over the video */
+function overVideo(on){ if (!!READER.overVideo === on) return; READER.overVideo = on; refresh(); }
 
 /* the look: Big T's Card Machine settings, kept in this browser */
 const LSK = "vc.readerlab.cardlook";

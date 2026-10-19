@@ -31,6 +31,11 @@ css = rep(css, '.wheel .s.ex .sentbox,.wheel .s.ex .cnt{cursor:var(--excur)}',
 css = rep(css, '.onp.on .opl{transform:rotate(45deg)}', '')
 # no line under the page form and its circle when the sentence is open (Big T, 2026-10-19)
 css = rep(css, '.onp.on{opacity:.95;box-shadow:inset 0 -1.5px 0 var(--acct)}', '.onp.on{opacity:.95}')
+# the open headword: a soft line under the word only, never under the chevron (Big T, 2026-10-19)
+css = rep(css, '.ho-caretline .hw.on{box-shadow:inset 0 -2px 0 color-mix(in srgb,currentColor 50%,transparent)}',
+  '.ho-caretline .hw.on [data-slot="z"]{box-shadow:inset 0 -1px 0 color-mix(in srgb,currentColor 32%,transparent)}')
+css = rep(css, '.ho-underline .hw.on{box-shadow:inset 0 -2px 0 var(--hwc)}',
+  '.ho-underline .hw.on [data-slot="z"]{box-shadow:inset 0 -1px 0 color-mix(in srgb,var(--hwc) 55%,transparent)}')
 css += r'''
 /* ── in the reader (Contractor 17) ── */
 :host{all:initial;display:block;--serif:'Source Serif 4',Georgia,serif;--sans:'Inter',system-ui,-apple-system,sans-serif;
@@ -43,9 +48,9 @@ button:focus-visible,input:focus-visible{outline:2px solid #5B8DEF;outline-offse
 .card{max-height:var(--pfmax,80vh);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain}
 .lv:empty{display:none}
 /* the strip above the headword: hover peeks the Full sentence, click opens it */
-.ptop{display:flex;align-items:center;margin:0 -18px 0;padding:3px 60px 3px 62px;min-height:24px;cursor:pointer}
+.ptop{display:flex;width:max-content;max-width:calc(100% - 60px);align-items:center;margin:0 0 0 44px;padding:3px 12px 3px 0;min-height:24px;cursor:pointer}
 .ptop .onp{margin:0}
-.hit{position:absolute;left:0;right:0;top:-22px;height:24px;z-index:4;cursor:pointer}
+.hit{position:absolute;left:44px;width:190px;top:-22px;height:24px;z-index:4;cursor:pointer}
 .mach.ps-open .hit{pointer-events:none}
 .pkeys{font:italic 13px var(--bf);opacity:.8;margin-left:8px;transition:opacity .25s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .xp.on .pkeys{opacity:0}
@@ -75,6 +80,12 @@ button:focus-visible,input:focus-visible{outline:2px solid #5B8DEF;outline-offse
 .fail{font-size:12px;opacity:.85;padding:6px 0}.fail button{border:0;background:none;padding:0;text-decoration:underline}
 .prov{opacity:.62}
 .prov-n{display:block;font:500 10px var(--sans);letter-spacing:.04em;opacity:.45;margin-top:2px;text-transform:uppercase}
+/* a quiet scrollbar, only while the pointer is on the card */
+.card{scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .3s}
+.card:hover{scrollbar-color:color-mix(in srgb,currentColor 22%,transparent) transparent}
+.card::-webkit-scrollbar{width:6px}.card::-webkit-scrollbar-track{background:transparent}
+.card::-webkit-scrollbar-thumb{background:transparent;border-radius:3px}
+.card:hover::-webkit-scrollbar-thumb{background:color-mix(in srgb,currentColor 22%,transparent)}
 /* the item hidden in an example (the lab's "hide the word") */
 .pf-blank{color:transparent!important;background:var(--accbg);border-radius:3px;cursor:pointer}
 .pf-blank.show{color:var(--acct)!important;background:none;font-weight:600}
@@ -128,7 +139,7 @@ js = rep(js, '''    return answer(`${x.qa[U.q][1]}<small>Sample answer. In the r
             '''    return askReal(x.qa[U.q]); }''')
 js = rep(js, '''  answer(`You asked: “${v.replace(/</g,'&lt;')}”<small>In the reader this goes to the AI with the word, its sentence and the page. The lab only shows where the answer lands.</small>`); });''',
             '''  askReal(v); });''')
-js = rep(js, "if(a==='tapsent'&&String(getSelection()).trim()) return;", "if(a==='tapsent'&&String(getSelection()).trim()) return;\n  if(a==='tapsent'&&e.target.closest('.pf-blank')){ e.target.closest('.pf-blank').classList.toggle('show'); return; }")
+js = rep(js, "if(a==='tapsent'&&String(getSelection()).trim()) return;", "if(a==='tapsent'&&String(getSelection()).trim()) return;\n  if(a==='tapsent'&&e.target.closest('.pf-blank')){ e.target.closest('.pf-blank').classList.toggle('show'); return; }\n  /* one click: the translation, a moment later so a double click can win; two: the audio */\n  if(a==='tapsent'&&S.tapS!=='none'&&S.tapS!=='play'){ clearTimeout(tapT); tapT=setTimeout(()=>{ U.extr=!U.extr; upd(); },230); return; }")
 # the wheel: the strip and the hit zone count as the sentence's zone
 js = rep(js, "const sec=e.target.closest('.onp,.s.ps,.xp')?'ps'", "const sec=e.target.closest('.onp,.ptop,.hit,.s.ps,.xp')?'ps'")
 js = rep(js, "let peekT=0; const peekZone=el=>!!(el&&el.closest&&el.closest('.onp,#xp'));",

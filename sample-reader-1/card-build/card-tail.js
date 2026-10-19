@@ -150,6 +150,13 @@ function LABACT(a, b, e){
   }
   return false;
 }
+let tapT = 0;
+ON("dblclick", e => {
+  const s = e.target.closest("#sent"), p = e.target.closest("#pss");
+  if (!s && !p) return;
+  clearTimeout(tapT); try{ getSelection().removeAllRanges(); }catch(er){}
+  const x = it(); say(s ? x.examples[U.ex][0] : x.psent, x.voice);
+});
 ON("change", e => {
   if (!e.target.matches("[data-mark]")) return;
   const n = LIVE ? (LIVE.noteId && LB.noteById(LIVE.noteId)) : NOTE;
@@ -193,8 +200,7 @@ async function quick(live){
 }
 /* the reader's page colour: the card's look follows it, as in Card Machine */
 function readPage(){
-  const vid = document.getElementById("yt-player-wrap");
-  READER.video = !!(vid && vid.getBoundingClientRect().height);
+
   let el = document.querySelector(".reader-fs.on, .reader-fs:not([hidden]) .reader-render, .reader-wrap") || document.body, c = "";
   while (el){ c = getComputedStyle(el).backgroundColor; if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) break; el = el.parentElement; }
   const m = (c || "rgb(255,255,255)").match(/\d+(\.\d+)?/g) || [255, 255, 255], rgb = m.slice(0, 3).map(Number);
@@ -253,7 +259,7 @@ function cardRender(box, key, v, states, live, note, anchor, instant){
   if (sig === SIG) return; SIG = sig;
   box.style.width = S.width + "px";
   const keep = {frost: S.frost, gblur: S.gblur};
-  if (READER.video && S.style === "glass"){ S.frost = Math.max(S.frost, S.vidFrost); S.gblur = Math.max(S.gblur, 28); }
+  if (READER.overVideo && S.style === "glass"){ S.frost = Math.max(S.frost, S.vidFrost); S.gblur = Math.max(S.gblur, 28); }
   render();
   S.frost = keep.frost; S.gblur = keep.gblur;
   mach.classList.toggle("mini", !!U.mini);
@@ -266,18 +272,21 @@ function cardRender(box, key, v, states, live, note, anchor, instant){
    if that still covers the video, beside it. */
 function clearVideo(){
   const vid = document.getElementById("yt-player-wrap");
-  if (!vid || !BOX || !BOX.classList.contains("on")) return;
+  if (!vid || !BOX || !BOX.classList.contains("on")) return overVideo(false);
   const vr = vid.getBoundingClientRect(); if (!vr.width || !vr.height) return;
   const hit = r => r.left < vr.right && r.right > vr.left && r.top < vr.bottom && r.bottom > vr.top;
-  let br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  let br = BOX.getBoundingClientRect(); if (!hit(br)) return overVideo(false);
   const a = (ARGS && ARGS[6]) || {top: vr.bottom, bottom: vr.bottom, left: br.left};
   BOX.style.bottom = ""; BOX.style.top = ((a.bottom || a.top) + 8) + "px";
   BOX.style.setProperty("--pfmax", Math.max(200, innerHeight - (a.bottom || a.top) - 24) + "px");
-  br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  br = BOX.getBoundingClientRect(); if (!hit(br)) return overVideo(false);
   const w = br.width;
   if (innerWidth - vr.right >= w + 16) BOX.style.left = (vr.right + 12) + "px";
   else if (vr.left >= w + 16) BOX.style.left = (vr.left - w - 12) + "px";
+  overVideo(hit(BOX.getBoundingClientRect()));
 }
+/* glass frosts more only while it actually sits over the video */
+function overVideo(on){ if (!!READER.overVideo === on) return; READER.overVideo = on; refresh(); }
 
 /* the look: Big T's Card Machine settings, kept in this browser */
 const LSK = "vc.readerlab.cardlook";
