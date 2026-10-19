@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sample reader 1</title>
 <!--
-  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-10-12b (Contractor 17: the word card, sr1-card.js; was sr1 · 2026-09-27b, Contractor 14).  SCAFFOLDING.
+  sample-reader-1/sample-reader-1.html — build stamp: sr1 · 2026-10-19 (Contractor 17: the word card, sr1-card.js; was sr1 · 2026-09-27b, Contractor 14).  SCAFFOLDING.
 
   SAMPLE READER 1. The first of several reader versions, each at its own address,
   to be built messily and compared. Forked from lab/reader-lab.html at stamp
@@ -753,12 +753,7 @@ sb.auth.onAuthStateChange((_e, session)=>{ if(session) start(session.user); });
     <h3>Panel look</h3>
     <p>The word card from <a href="https://claude.ai/artifact/4CXzneQmpqdCXdvzk4Rgj3" target="_blank" rel="noopener">Card Machine 8</a>.
       Its colours follow the reader's page. To bring a look over, tune it in Card Machine, press Copy all there, and paste it here.</p>
-    <div class="r"><label class="inl">Card</label>
-      <button class="lb sm cardst" data-v="plain">plain</button>
-      <button class="lb sm cardst" data-v="glass">glass</button>
-      <button class="lb sm cardst" data-v="hand">handwritten</button>
-      <button class="lb sm cardst" data-v="graphite">graphite</button>
-      <button class="lb sm cardst" data-v="ivory">ivory</button></div>
+    <div id="cardctl"></div>
     <div class="r"><label class="inl">Paste</label>
       <input type="text" id="cardpaste" placeholder="Card Machine 8 {…}" style="flex:1">
       <button class="lb sm" id="cardload">Load</button><button class="lb sm" id="cardreset">Reset</button></div>
@@ -1416,11 +1411,13 @@ document.addEventListener("mouseout", function(e){
   var to = e.relatedTarget;
   if (to && to.closest && (to.closest("#labai") || to.closest(".lab-note"))) return;
   clearTimeout(noteTimer);
+  /* A short grace, so the pointer can cross the gap from the word to its card
+     (Contractor 17, 2026-10-19: it used to close the moment the word was left). */
   noteTimer = setTimeout(function(){
     var box = $("labai");
     if (box.dataset.pinned === "1") return;
-    if (box.querySelector("#aidel") || (box.dataset.pfkey || "").indexOf("saved|") === 0){ box.className = ""; box.dataset.pfkey = ""; }
-  }, 0);
+    if (box.querySelector("#aidel") || (box.dataset.pfkey || "").indexOf("saved|") === 0){ box.className = ""; box.dataset.pfkey = ""; box.dataset.pflook = ""; box.innerHTML = ""; }
+  }, 450);
 }, true);
 
 /* After a save: is the mark actually on the page, and if not, why not.
@@ -4663,13 +4660,13 @@ document.querySelectorAll(".lvlb").forEach(function(b){
 $("schemareset").onclick = function(){ saveL("aischemaMode", "schema"); paintLevel(); };
 /* Panel look (Contractor 17): the card's style, and a look pasted from Card Machine. */
 function paintCardLook(){
-  var on = load("pfstyle", "card") === "card", st = window.cardLook ? window.cardLook.get().style : "";
-  document.querySelectorAll(".cardst").forEach(function(b){ b.classList.toggle("on", on && b.dataset.v === st); });
+  if (window.cardLook && window.cardLook.repaint) window.cardLook.repaint();
   document.querySelectorAll(".pfsb").forEach(function(b){ b.classList.toggle("on", b.dataset.v === load("pfstyle", "card")); });
 }
-document.querySelectorAll(".cardst").forEach(function(b){ b.onclick = function(){
-  saveL("pfstyle", "card"); if (window.cardLook) window.cardLook.set({style:b.dataset.v});
-  say("Card: " + b.dataset.v); paintCardLook(); if (PF) paintProfile(); }; });
+if (window.cardLook && window.cardLook.mount){
+  window.cardLook.mount($("cardctl"));
+  window.cardLook.onchange = function(){ paintCardLook(); if (PF && !PF._cardHidden) paintProfile(); };
+}
 $("cardload").onclick = function(){
   try{ window.cardLook.paste($("cardpaste").value); saveL("pfstyle", "card"); $("cardmsg").textContent = "Look loaded.";
     $("cardpaste").value = ""; paintCardLook(); if (PF) paintProfile(); }
@@ -4694,7 +4691,16 @@ window.LAB = { esc:esc, findInSentence:findInSentence, pfExampleHTML:pfExampleHT
   readerIsDark:readerIsDark, noteById:noteById, saveL:saveL, say:say, labPaint:labPaint,
   paintNotesCount:paintNotesCount, reportMark:reportMark, pickAlt:pickAlt, addCompanion:addCompanion,
   runStage1:runStage1, runStage2:runStage2, paintProfile:paintProfile, speakDE:speakDE,
-  speakLines:speakLines, audioLines:audioLines, pfPlace:pfPlace, askAI:askAI,
+  speakLines:speakLines, audioLines:audioLines, pfPlace:pfPlace, askAI:askAI, load:load,
+  domSentence: function(term, piece){
+    /* The sentence around the word, from the text on the screen, for when the
+       stored body gave none. Plain text of the reader, the word's first place. */
+    var root = document.getElementById("r-render"); if (!root) return "";
+    var t = String(root.innerText || "").replace(/\s+/g, " "), w = String(piece || term || "").trim();
+    var i = w ? t.indexOf(w) : -1; if (i < 0) return "";
+    var bd = sentenceBounds(t, i, i + w.length);
+    return t.slice(bd.start, bd.end).trim();
+  },
   saveNotes: function(){ saveL("notes", NOTES); },
   removeNote: function(id){ NOTES = NOTES.filter(function(x){ return x.id !== id; }); saveL("notes", NOTES); },
   isLive: function(P){ return PF === P; }, dropLive: function(){ PF = null; } };

@@ -1,8 +1,7 @@
 
 /* ════════ the reader's seams (Contractor 17) ════════ */
 const NOISE = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency=".8" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 .55  0 0 0 0 .5  0 0 0 0 .42  0 0 0 .18 0"/></filter><rect width="160" height="160" filter="url(#n)"/></svg>')}")`;
-const WT = '<button data-act="mini" aria-label="Minimise the card" title="Minimise"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 6h7"/></svg></button>'
-  + '<button data-act="close" aria-label="Close the card" title="Close (Esc)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg></button>';
+const WT = '<button data-act="close" aria-label="Close the card" title="Close (Esc)"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l6 6M9 3l-6 6"/></svg></button>';
 const LANGCODE = {English:"EN", German:"DE", French:"FR", Spanish:"ES", Italian:"IT", Portuguese:"PT", Dutch:"NL", Polish:"PL",
   Czech:"CS", Swedish:"SV", Danish:"DA", Norwegian:"NO", Finnish:"FI", Greek:"EL", Turkish:"TR", Ukrainian:"UK", Russian:"RU",
   Romanian:"RO", Hungarian:"HU", Hebrew:"HE", Arabic:"AR", Persian:"FA", Hindi:"HI", Chinese:"ZH", Japanese:"JA", Korean:"KO",
@@ -38,7 +37,12 @@ function factsOf(v){
   return f;
 }
 function sentenceOf(live, note, v){
-  return (live && live.about && live.about.sentence) || (note && note.about && note.about.sentence) || v.sentence || "";
+  const s = (live && live.about && live.about.sentence) || (note && note.about && note.about.sentence) || v.sentence || "";
+  if (s) return s;
+  /* The reader cuts the sentence from the text's stored body. When that came
+     back empty, take it from the words on the screen instead. */
+  const term = (live && live.about && live.about.term) || (note && note.about && note.about.term) || v.item || "";
+  return LB.domSentence ? LB.domSentence(term, (v.pieces || [])[0]) : "";
 }
 /* the sentence as HTML, with the item's pieces in <b>, found in order */
 function markSentence(sentence, pieces){
@@ -154,8 +158,10 @@ ON("change", e => {
 });
 function closeCard(){
   if (!BOX) return;
-  BOX.className = ""; BOX.dataset.pfkey = ""; BOX.dataset.pflook = ""; BOX.innerHTML = ""; BOX.style.width = "";
-  if (LIVE && LB.isLive(LIVE)) LB.dropLive();
+  BOX.className = ""; BOX.dataset.pfkey = ""; BOX.dataset.pflook = ""; BOX.dataset.pinned = ""; BOX.innerHTML = ""; BOX.style.width = "";
+  /* A card still loading is only hidden: its calls carry on and it saves as
+     usual. Selecting another word starts a new profile, which replaces it. */
+  if (LIVE) LIVE._cardHidden = true;
   LB.labPaint(); ARGS = null;
 }
 /* Ask, for real: the word, its sentence and the question go to the AI */
@@ -187,6 +193,8 @@ async function quick(live){
 }
 /* the reader's page colour: the card's look follows it, as in Card Machine */
 function readPage(){
+  const vid = document.getElementById("yt-player-wrap");
+  READER.video = !!(vid && vid.getBoundingClientRect().height);
   let el = document.querySelector(".reader-fs.on, .reader-fs:not([hidden]) .reader-render, .reader-wrap") || document.body, c = "";
   while (el){ c = getComputedStyle(el).backgroundColor; if (c && !/rgba\(0, 0, 0, 0\)|transparent/.test(c)) break; el = el.parentElement; }
   const m = (c || "rgb(255,255,255)").match(/\d+(\.\d+)?/g) || [255, 255, 255], rgb = m.slice(0, 3).map(Number);
@@ -202,6 +210,14 @@ function setupOnce(){
   l.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Architects+Daughter&display=swap";
   document.head.appendChild(l);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && BOX && BOX.dataset.pflook === "card2" && BOX.classList.contains("on")) closeCard(); });
+  /* A press anywhere outside the card closes it: not on the card, not on a
+     saved word (that opens its own card), not in the composer. */
+  document.addEventListener("pointerdown", e => {
+    if (!BOX || BOX.dataset.pflook !== "card2" || !BOX.classList.contains("on")) return;
+    const t = e.target;
+    if (BOX.contains(t) || (t.closest && t.closest(".lab-note, #labdr, #labbtn"))) return;
+    closeCard();
+  }, true);
 }
 function mount(box){
   box.innerHTML = ""; box.style.width = S.width + "px";
@@ -213,11 +229,12 @@ function mount(box){
   HANDLERS.forEach(h => mach.addEventListener(h[0], h[1], h[2]));
   box._cmHost = host;
 }
-function refresh(){ if (ARGS){ SIG = ""; cardRender.apply(null, ARGS); } }
+function refresh(){ if (ARGS && BOX && BOX.dataset.pflook === "card2" && BOX.classList.contains("on")){ SIG = ""; cardRender.apply(null, ARGS); } }
 
 /* Same arguments as the reader's pfRender. */
 function cardRender(box, key, v, states, live, note, anchor, instant){
   LB = window.LAB || LB;
+  if (live && live._cardHidden) return;
   ARGS = [box, key, v, states, live, note, anchor, true];
   BOX = box; LIVE = live; NOTE = note; SNAP = v; STATES = states;
   setupOnce();
@@ -235,11 +252,31 @@ function cardRender(box, key, v, states, live, note, anchor, instant){
   const sig = JSON.stringify([CUR, states, S, U.foot, LB.pfBlanking && LB.pfBlanking(), live && [live.noteId, live.removed, live.markOff, live.alts && live.alts.length], note && note.marked]);
   if (sig === SIG) return; SIG = sig;
   box.style.width = S.width + "px";
+  const keep = {frost: S.frost, gblur: S.gblur};
+  if (READER.video && S.style === "glass"){ S.frost = Math.max(S.frost, S.vidFrost); S.gblur = Math.max(S.gblur, 28); }
   render();
+  S.frost = keep.frost; S.gblur = keep.gblur;
   mach.classList.toggle("mini", !!U.mini);
   failBanners(states);
   applySlots(readyOf(states, v), !instant);
   if (U.ps){ $$("#pss .w", mach).forEach(w => w.classList.remove("dim", "hide")); const t = $("#pstr", mach); if (t) t.classList.add("on"); }
+  requestAnimationFrame(clearVideo);
+}
+/* The card must not sit on the video. If it does, it moves below the word;
+   if that still covers the video, beside it. */
+function clearVideo(){
+  const vid = document.getElementById("yt-player-wrap");
+  if (!vid || !BOX || !BOX.classList.contains("on")) return;
+  const vr = vid.getBoundingClientRect(); if (!vr.width || !vr.height) return;
+  const hit = r => r.left < vr.right && r.right > vr.left && r.top < vr.bottom && r.bottom > vr.top;
+  let br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  const a = (ARGS && ARGS[6]) || {top: vr.bottom, bottom: vr.bottom, left: br.left};
+  BOX.style.bottom = ""; BOX.style.top = ((a.bottom || a.top) + 8) + "px";
+  BOX.style.setProperty("--pfmax", Math.max(200, innerHeight - (a.bottom || a.top) - 24) + "px");
+  br = BOX.getBoundingClientRect(); if (!hit(br)) return;
+  const w = br.width;
+  if (innerWidth - vr.right >= w + 16) BOX.style.left = (vr.right + 12) + "px";
+  else if (vr.left >= w + 16) BOX.style.left = (vr.left - w - 12) + "px";
 }
 
 /* the look: Big T's Card Machine settings, kept in this browser */
@@ -247,6 +284,7 @@ const LSK = "vc.readerlab.cardlook";
 function loadLook(){ try{ const j = JSON.parse(localStorage.getItem(LSK) || "null"); if (j) Object.keys(DEF).forEach(k => { if (k in j) S[k] = j[k]; }); }catch(e){} }
 function saveLook(){ try{ localStorage.setItem(LSK, JSON.stringify(S)); }catch(e){} }
 loadLook();
+if (S.vidFrost == null) S.vidFrost = 75;   // glass over a video frosts this much at least
 window.cardLook = {
   get: () => Object.assign({}, S),
   set: patch => { Object.assign(S, patch); saveLook(); refresh(); },
@@ -257,6 +295,35 @@ window.cardLook = {
     saveLook(); refresh(); return true;
   },
   reset: () => { Object.keys(DEF).forEach(k => S[k] = DEF[k]); saveLook(); refresh(); }
+};
+/* The look's controls, drawn into the composer's Panel look section. */
+window.cardLook.mount = function(host){
+  const chips = (k, label, opts) => '<div class="r"><label class="inl">' + label + "</label>" + opts.map(o =>
+    '<button class="lb sm" data-ck="' + k + '" data-cv="' + o[0] + '">' + o[1] + "</button>").join("") + "</div>";
+  const slide = (k, label, min, max) => '<div class="r"><label class="inl">' + label + '</label><input type="range" data-cs="' + k + '" min="' + min + '" max="' + max + '" style="flex:1"><span data-co="' + k + '" style="width:30px;text-align:right;font-size:11px;color:#8b9099"></span></div>';
+  const cap = n => n[0].toUpperCase() + n.slice(1);
+  host.innerHTML = chips("style", "Card", [["plain","plain"],["glass","glass"],["hand","handwritten"],["graphite","graphite"],["ivory","ivory"]])
+    + '<div data-for="glass">' + chips("gtone", "Glass tone", Object.keys(GT).map(n => [n, cap(n)]))
+    + chips("uiCol", "Marks take", [["tone","the glass tone"],["neutral","neutral"],["accent","the accent"]])
+    + slide("frost", "Frost", 0, 90) + slide("gblur", "Blur", 0, 40) + slide("vidFrost", "Frost on video", 0, 95) + slide("glow", "Text glow", 0, 100) + "</div>"
+    + '<div data-for="hand">' + chips("hpaper", "Paper", Object.keys(PAPERS).map(n => [n, cap(n)]))
+    + chips("hink", "Ink", [["graphite","graphite"],["blue","blue-black"],["sepia","sepia"]]) + "</div>"
+    + chips("acc", "Accent", Object.keys(ACC).map(n => [n, cap(n)]));
+  const paint = () => {
+    host.querySelectorAll("[data-ck]").forEach(b => b.classList.toggle("on", (LB.load ? LB.load("pfstyle", "card") === "card" : true) && String(S[b.dataset.ck]) === b.dataset.cv));
+    host.querySelectorAll("[data-cs]").forEach(i => { i.value = S[i.dataset.cs]; });
+    host.querySelectorAll("[data-co]").forEach(o => { o.textContent = S[o.dataset.co]; });
+    host.querySelectorAll("[data-for]").forEach(d => { d.style.display = S.style === d.dataset.for ? "" : "none"; });
+  };
+  host.onclick = e => { const b = e.target.closest("[data-ck]"); if (!b) return;
+    const k = b.dataset.ck, v = b.dataset.cv, patch = {}; patch[k] = v;
+    if (k === "acc"){ const c = ACC[v]; patch.accH = c[0]; patch.accS = c[1]; patch.accL = c[2]; }
+    if (LB.saveL) LB.saveL("pfstyle", "card");
+    window.cardLook.set(patch); paint(); if (window.cardLook.onchange) window.cardLook.onchange(); };
+  host.oninput = e => { const i = e.target.closest("[data-cs]"); if (!i) return;
+    const patch = {}; patch[i.dataset.cs] = +i.value; window.cardLook.set(patch); paint(); };
+  window.cardLook.repaint = paint;
+  paint();
 };
 window.cardRender = cardRender;
 })();

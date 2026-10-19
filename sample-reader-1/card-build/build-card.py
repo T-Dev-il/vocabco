@@ -29,6 +29,8 @@ css = rep(css, '.wheel .s.ex .sentbox,.wheel .s.ex .cnt{cursor:var(--excur)}',
   '.s.ex .sent.tap{cursor:pointer;border-radius:8px;padding:2px 6px;margin:-2px -6px;transition:background .2s}\n'
   '.react .s.ex .sent.tap:hover{background:var(--hov)}')
 css = rep(css, '.onp.on .opl{transform:rotate(45deg)}', '')
+# no line under the page form and its circle when the sentence is open (Big T, 2026-10-19)
+css = rep(css, '.onp.on{opacity:.95;box-shadow:inset 0 -1.5px 0 var(--acct)}', '.onp.on{opacity:.95}')
 css += r'''
 /* ── in the reader (Contractor 17) ── */
 :host{all:initial;display:block;--serif:'Source Serif 4',Georgia,serif;--sans:'Inter',system-ui,-apple-system,sans-serif;
