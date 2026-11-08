@@ -1,4 +1,4 @@
-// cadence · 2026-11-08b
+// cadence · 2026-11-08c
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -118,19 +118,45 @@
   }
 
   // YouTube IFrame player (already created, onReady fired).
-  function youtubeClock(player) {
+  // YouTube IFrame player (already created, onReady fired).
+  // Ad guard: during an ad the player says "playing" and its clock is the ad's.
+  // We call it an ad when the player reports a different video id, or a length
+  // clearly shorter than where this text's words end. During an ad the clock
+  // holds at the last good time and says it isn't playing, so nothing follows.
+  // opts: { videoId, textEnd (ms, the last timed word's end) }
+  function youtubeClock(player, opts) {
+    const want = opts && opts.videoId, textEnd = (opts && opts.textEnd) || 0;
     const st = () => { try { return player.getPlayerState(); } catch (e) { return -1; } };
-    const playing = () => st() === 1; // 1 = playing (3 = buffering counts as paused)
+    function adNow() {
+      try {
+        const d = player.getVideoData && player.getVideoData();
+        if (want && d && d.video_id && d.video_id !== want) return true;
+      } catch (e) {}
+      try {
+        const len = (player.getDuration() || 0) * 1000;
+        // a text whose words run past the media's end can't be this media
+        if (len > 0 && textEnd > 30000 && len + 5000 < textEnd * 0.9) return true;
+      } catch (e) {}
+      return false;
+    }
+    // checked on every read: the player answers from its own cached state, so it
+    // is cheap, and a cached answer would let the ad's clock slip through
+    let held = 0;
+    const checkAd = adNow;
+    const realPlaying = () => st() === 1; // 1 = playing (3 = buffering counts as paused)
+    const playing = () => realPlaying() && !checkAd();
     const rate = () => { try { return player.getPlaybackRate() || 1; } catch (e) { return 1; } };
-    const time = smoother(() => { try { return player.getCurrentTime() * 1000; } catch (e) { return NaN; } }, playing, rate);
+    const smooth = smoother(() => { try { return player.getCurrentTime() * 1000; } catch (e) { return NaN; } }, playing, rate);
+    const time = () => { if (checkAd()) return held; held = smooth(); return held; };
     return {
       kind: 'youtube', time, playing,
+      adPlaying: () => realPlaying() && checkAd(),
       play() { try { player.playVideo(); } catch (e) {} },
       pause() { try { player.pauseVideo(); } catch (e) {} },
-      toggle() { playing() ? this.pause() : this.play(); },
+      toggle() { realPlaying() ? this.pause() : this.play(); },
       seek(ms) { try { player.seekTo(Math.max(0, ms) / 1000, true); } catch (e) {} },
       rate, setRate(x) { try { player.setPlaybackRate(x); } catch (e) {} },
-      duration: () => { try { return (player.getDuration() || 0) * 1000; } catch (e) { return 0; } }
+      duration: () => { if (checkAd()) return 0; try { return (player.getDuration() || 0) * 1000; } catch (e) { return 0; } }
     };
   }
 

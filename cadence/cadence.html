@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-08c · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-08d · Contractor 20. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -148,7 +148,7 @@
     clock.setRate(r); $('rate').textContent = r + '×';
   };
   const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-  let wasPlaying = null;
+  let wasPlaying = null, wasAd = false;
   (function ui() {
     if (clock) {
       const p = clock.playing(), t = clock.time(), d = clock.duration();
@@ -159,7 +159,9 @@
         document.body.classList.toggle('cd-paused', !p);
         if (p) { panel.hideCard(); picked(null); }
       }
-      $('time').textContent = fmt(t) + (d ? ' / ' + fmt(d) : '');
+      const adOn = !!(clock.adPlaying && clock.adPlaying());
+      $('time').textContent = adOn ? 'Ad playing' : fmt(t) + (d ? ' / ' + fmt(d) : '');
+      if (adOn !== wasAd) { wasAd = adOn; $('play').innerHTML = adOn ? ICON.pause + ' Ad' : $('play').innerHTML; if (!adOn) wasPlaying = null; }
       if (follow && follow.state().paused) showState(follow.state());
     }
     setTimeout(ui, 150);
@@ -533,7 +535,7 @@
       yt = new YT.Player('cd-yt', {
         videoId, host: 'https://www.youtube-nocookie.com',
         playerVars: { rel: 0, modestbranding: 1, playsinline: 1, fs: 0, origin: location.origin },
-        events: { onReady: e => { setClock(TTClock.youtube(e.target)); $('rate').textContent = '1×'; }, onStateChange: () => follow && follow.kick() }
+        events: { onReady: e => { setClock(TTClock.youtube(e.target, { videoId, textEnd: index ? index.duration : 0 })); $('rate').textContent = '1×'; }, onStateChange: () => follow && follow.kick() }
       });
     });
   }
