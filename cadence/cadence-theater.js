@@ -1,4 +1,4 @@
-// cadence-theater · 2026-11-08
+// cadence-theater · 2026-11-08b
 //
 // The two ways to watch a video in Cadence, around one YouTube player that is
 // never moved or rebuilt (moving an iframe reloads it):
@@ -127,6 +127,11 @@
       return `<div class="cd-sub" data-l="${esc(lid)}"><div class="cd-sub-o">${sp}${words}</div>` +
         (mode === 'both' ? `<div class="cd-sub-t${c == null ? ' wait' : ''}">${c == null ? '…' : esc(c)}</div>` : '') + `</div>`;
     }
+    // order: 'orig' (original on top) | 'trans'; blur: 'none' | 'trans' | 'orig' | 'both'
+    function look(o) {
+      if (o.order) el.dataset.order = o.order;
+      if (o.blur) el.dataset.blur = o.blur;
+    }
     function show(ids) {
       if (ids.length === shown.length && ids.every((x, i) => x === shown[i])) return;
       shown = ids.slice();
@@ -173,7 +178,15 @@
       prefetch(t);
     }
     frameOff = follow.onFrame(frame);
+    look({ order: o.order || 'orig', blur: o.blur || 'none' });
+    // a finger can't hover: a tap on a blurred line shows it until the line changes
+    el.addEventListener('click', e => {
+      const part = e.target.closest('.cd-sub-o, .cd-sub-t');
+      if (part && !e.target.closest('.cd-sw') && el.dataset.blur !== 'none') part.classList.toggle('shown');
+    });
     return {
+      look,
+      get order() { return el.dataset.order || 'orig'; }, get blur() { return el.dataset.blur || 'none'; },
       setMode(m) { mode = m; shown = []; el.innerHTML = ''; aheadAt = -1; el.dataset.mode = m; follow.kick(); },
       get mode() { return mode; },
       setDoc(d) { doc = d; shown = []; el.innerHTML = ''; aheadAt = -1; },
@@ -217,7 +230,15 @@
           ${[['en', 'English'], ['de', 'German'], ['fr', 'French'], ['es', 'Spanish'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['pl', 'Polish'], ['ru', 'Russian'], ['tr', 'Turkish'], ['ar', 'Arabic'], ['he', 'Hebrew'], ['zh-CN', 'Chinese'], ['ja', 'Japanese']]
             .map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}
         </select>
-        <button class="cd-tb cd-tplay" title="Play / pause (Space)">▶</button>
+        <button class="cd-tb cd-tset" title="Subtitle settings" aria-haspopup="true">⚙</button>
+        <button class="cd-tb cd-tkeys" title="Keyboard shortcuts">⌨</button>
+        <button class="cd-tb cd-tplay" title="Play / pause">▶</button>
+        <div class="cd-menu" hidden>
+          <div class="cd-menu-h">On top</div>
+          <div class="cd-seg cd-order"><button data-order="orig">Original</button><button data-order="trans">Translation</button></div>
+          <div class="cd-menu-h">Blur until you hover</div>
+          <div class="cd-seg cd-blur"><button data-blur="none">None</button><button data-blur="trans">Translation</button><button data-blur="orig">Original</button><button data-blur="both">Both</button></div>
+        </div>
       </div>
       <div class="cd-card" hidden></div>`;
     document.body.appendChild(p);
@@ -320,6 +341,13 @@
     stage.addEventListener('pointerup', endDrag);
     stage.addEventListener('pointercancel', endDrag);
     addEventListener('resize', () => place());
+    // the toolbar can wrap or unwrap (fonts load, buttons change): re-place then too
+    if (window.ResizeObserver) {
+      let raf = 0;
+      const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { if (p.style.display !== 'none' && st.mode === 'docked') place(); }); });
+      ro.observe(opts.scroller);
+      if (opts.scroller.previousElementSibling) ro.observe(opts.scroller.previousElementSibling);
+    }
     // in full screen, show the bar when the pointer moves, hide it after a while
     let idle = 0;
     function wake() { p.classList.add('cd-awake'); clearTimeout(idle); idle = setTimeout(() => p.classList.remove('cd-awake'), 2600); }
@@ -346,6 +374,8 @@
       onMode(f) { listeners.push(f); },
       show(v) { p.style.display = v ? '' : 'none'; if (!v && st.mode === 'theater') setMode('docked'); if (!v && opts.page) opts.page.style.paddingTop = ''; if (v) place(); },
       showCard, hideCard, get cardEl() { return card; },
+      // a box that must show in full screen too (only the panel is visible there)
+      host: () => (st.mode === 'theater' ? p : document.body),
       $
     };
   }

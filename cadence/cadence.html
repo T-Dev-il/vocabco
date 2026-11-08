@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-08b · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-08c · Contractor 20. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -41,6 +41,7 @@
   <div class="rc-right">
     <span class="cd-note" id="note"></span>
     <select class="cd-pick" id="pick" aria-label="Choose a text"><option value="demo">Demo text</option></select>
+    <button class="ib-label" id="keys" title="Keyboard shortcuts and options">⌨ Keys</button>
     <button class="ib-label" id="full" title="Watch full screen with subtitles (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Full screen</button>
   </div>
 </div>
@@ -111,7 +112,8 @@
       follow = TTFollow({ page, index, clock: c, scroller: $('scroll'), topInset: panel.topInset,
         highlight: store('cadence-hl') !== '0', follow: store('cadence-fo') !== '0' });
       follow.on(showState);
-      subs = CadenceSubs(panel.subsEl, { doc: d, follow, translate, mode: store('cadence-subs') || 'both' });
+      subs = CadenceSubs(panel.subsEl, { doc: d, follow, translate, mode: store('cadence-subs') || 'both',
+        order: store('cadence-order') || 'orig', blur: store('cadence-blur') || 'none' });
     } else { follow.setIndex(index); subs.setDoc(d); }
     setClock(c);
     showState(follow.state());
@@ -163,21 +165,20 @@
     setTimeout(ui, 150);
   })();
 
-  // Double-click a word in the text: play from there, and follow again.
-  $('page').addEventListener('dblclick', e => {
-    const id = page.wordAt(e.target);
-    if (!id || !clock || !index) return;
+  // Play from a word (right-click menu, the tooltip's button, or a hotkey).
+  function playFromWord(id) {
+    if (!id || !clock || !index) return false;
     let info = index.wordInfo(id);
     if (info && info.start == null) info = index.words.find(w => w.order > info.order) || null;
-    if (!info) return;
-    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    if (!info) return false;
     clock.seek(info.start); clock.play(); follow.resume(); follow.kick();
-  });
+    return true;
+  }
 
   // ── the two views ─────────────────────────────────────────────────────
   $('full').onclick = () => panel.setMode('theater');
   panel.onMode(m => {
-    panel.hideCard(); picked(null);
+    panel.hideCard(); picked(null); closeTip(); closeCtx();
     if (m === 'theater') { panel.wake(); follow.kick(); }
     else { follow.resume(); }              // back in the reader: at the same place
     showState(follow.state());
@@ -188,11 +189,10 @@
     panel.$('.cd-submode').querySelectorAll('[data-sub]').forEach(b => b.classList.toggle('on', b.dataset.sub === subs.mode));
     panel.$('.cd-target').value = translate.target;
     panel.$('.cd-target').style.display = subs.mode === 'both' ? '' : 'none';
+    panel.$('.cd-order').querySelectorAll('[data-order]').forEach(b => b.classList.toggle('on', b.dataset.order === subs.order));
+    panel.$('.cd-blur').querySelectorAll('[data-blur]').forEach(b => b.classList.toggle('on', b.dataset.blur === subs.blur));
   }
-  panel.$('.cd-submode').onclick = e => {
-    const b = e.target.closest('[data-sub]'); if (!b) return;
-    subs.setMode(b.dataset.sub); store('cadence-subs', b.dataset.sub); showSubMode();
-  };
+  panel.$('.cd-submode').onclick = e => { const b = e.target.closest('[data-sub]'); if (b) setSub(b.dataset.sub); };
   panel.$('.cd-target').onchange = e => { translate.setTarget(e.target.value); store('cadence-target', e.target.value); subs.refresh(); };
 
   // ── a word in the subtitles: hover while paused, or tap/click to pause ─
@@ -226,19 +226,227 @@
   });
   panel.el.addEventListener('click', e => { if (panel.mode === 'theater' && !e.target.closest('.cd-sw, .cd-card, .cd-tbar')) { panel.hideCard(); picked(null); } });
 
-  // ── keys: Space play/pause · ← → lines · F full screen · Esc back ─────
-  document.addEventListener('keydown', e => {
-    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    if (e.key === 'f' || e.key === 'F') { if (panel.el.style.display !== 'none') { e.preventDefault(); panel.setMode(panel.mode === 'theater' ? 'docked' : 'theater'); } return; }
-    if (e.key === 'Escape' && panel.mode === 'theater') { panel.setMode('docked'); return; }
-    if (!clock || !index) return;
-    if (e.code === 'Space') { e.preventDefault(); toggle(); if (panel.mode === 'theater') panel.wake(); }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      const t = index.lineStartNear(clock.time(), e.key === 'ArrowLeft' ? -1 : 1);
-      if (t != null) { e.preventDefault(); clock.seek(t); if (panel.mode !== 'theater') follow.resume(); follow.kick(); }
+  // ── shortcuts: editable, as app.js's Keyboard shortcuts panel ──────
+  // Defaults follow app.js where the action exists there. Esc is fixed.
+  const ACTIONS = [
+    { id: 'play',        label: 'Play / pause',               def: ' ' },
+    { id: 'prevLine',    label: 'Previous line',              def: ',' },
+    { id: 'nextLine',    label: 'Next line',                  def: '.' },
+    { id: 'playFromSel', label: 'Play from selection',        def: '' },
+    { id: 'translate',   label: 'Translate selection',        def: 't' },
+    { id: 'followToggle',label: 'Follow on / off',            def: 'g' },
+    { id: 'hlToggle',    label: 'Highlight on / off',         def: 'h' },
+    { id: 'fullscreen',  label: 'Full screen on / off',       def: 'f' },
+    { id: 'subMode',     label: 'Subtitles: off, original, dual', def: 'c' },
+    { id: 'subBlur',     label: 'Blur: next setting',         def: 'b' },
+    { id: 'subOrder',    label: 'Swap subtitle order',        def: 'o' },
+    { id: 'sizeUp',      label: 'Bigger text',                def: '+' },
+    { id: 'sizeDown',    label: 'Smaller text',               def: '-' },
+    { id: 'speed',       label: 'Next speed',                 def: 's' }
+  ];
+  const OPTIONS = {
+    dbl:   { label: 'Double-click a word', def: 'select', choices: [['select', 'Selects it (and shows the tooltip)'], ['play', 'Plays from there']] },
+    right: { label: 'Right-click a word',  def: 'menu',   choices: [['menu', 'Shows "Play from here"'], ['browser', 'The browser\'s own menu']] },
+    tipWhilePlaying: { label: 'Tooltip while playing', def: 'keep', choices: [['keep', 'Video keeps playing'], ['pause', 'Pauses the video']] }
+  };
+  let keyPrefs = (() => { try { return JSON.parse(store('cadence-keys') || '{}') || {}; } catch (e) { return {}; } })();
+  const key = id => keyPrefs[id] != null ? keyPrefs[id] : (ACTIONS.find(a => a.id === id) || {}).def || '';
+  const opt = id => (keyPrefs['opt:' + id]) || OPTIONS[id].def;
+  const saveKeys = () => store('cadence-keys', JSON.stringify(keyPrefs));
+  const keyName = k => !k ? '—' : k === ' ' ? 'Space' : k.length === 1 ? k.toUpperCase() : k;
+  function keyMap() { const m = {}; for (const a of ACTIONS) { const k = key(a.id); if (k) m[k.toLowerCase()] = a.id; } return m; }
+
+  function selectedWordId() {
+    const sel = getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    const r = sel.getRangeAt(0), host = $('page');
+    if (!host.contains(r.startContainer)) return null;
+    const start = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    return page.wordAt(start) || (start.querySelector && (start.querySelector('.tt-w') || {}).dataset?.w) || null;
+  }
+  const SUBMODES = ['off', 'original', 'both'], BLURS = ['none', 'trans', 'orig', 'both'];
+  function run(id) {
+    switch (id) {
+      case 'play': toggle(); if (panel.mode === 'theater') panel.wake(); return true;
+      case 'prevLine': case 'nextLine': {
+        if (!clock || !index) return false;
+        const t = index.lineStartNear(clock.time(), id === 'prevLine' ? -1 : 1);
+        if (t == null) return false;
+        clock.seek(t); if (panel.mode !== 'theater') follow.resume(); follow.kick(); return true;
+      }
+      case 'playFromSel': { const w = selectedWordId(); if (!w) return false; closeTip(); return playFromWord(w); }
+      case 'translate': return openTipFromSelection(true);
+      case 'followToggle': $('fo').click(); return true;
+      case 'hlToggle': $('hl').click(); return true;
+      case 'fullscreen': if (panel.el.style.display === 'none') return false; panel.setMode(panel.mode === 'theater' ? 'docked' : 'theater'); return true;
+      case 'subMode': setSub(SUBMODES[(SUBMODES.indexOf(subs.mode) + 1) % 3]); if (panel.mode === 'theater') panel.wake(); return true;
+      case 'subBlur': setLook({ blur: BLURS[(BLURS.indexOf(subs.blur) + 1) % 4] }); if (panel.mode === 'theater') panel.wake(); return true;
+      case 'subOrder': setLook({ order: subs.order === 'orig' ? 'trans' : 'orig' }); if (panel.mode === 'theater') panel.wake(); return true;
+      case 'sizeUp': $('sz-up').click(); return true;
+      case 'sizeDown': $('sz-down').click(); return true;
+      case 'speed': $('rate').click(); return true;
     }
+    return false;
+  }
+  document.addEventListener('keydown', e => {
+    if (e.target && (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable)) return;
+    if (document.querySelector('.cd-modal-bg')) return; // the shortcuts panel is listening
+    if (e.key === 'Escape') {
+      if (tipEl || ctxEl) { closeTip(); closeCtx(); return; }
+      if (panel.mode === 'theater') { panel.setMode('docked'); return; }
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const id = keyMap()[e.key.toLowerCase()];
+    if (id && run(id)) e.preventDefault();
   });
 
+  // the panel: click a key, press the new one; a key already in use moves
+  function openKeys() {
+    closeTip(); closeCtx();
+    const bg = document.createElement('div'); bg.className = 'cd-modal-bg';
+    bg.innerHTML = `<div class="cd-modal" role="dialog" aria-label="Keyboard shortcuts">
+      <h3>Keyboard shortcuts</h3><div id="hk-list"></div>
+      <div class="hk-row"><span>Leave full screen, close a tooltip</span><span class="hk-fixed">Esc</span></div>
+      <div class="cd-modal-sub">Options</div><div id="hk-opts"></div>
+      <div class="cd-modal-note">Click a key, then press the new one. Backspace clears it. A key already in use is taken from its old action.</div>
+      <div class="cd-modal-acts"><button id="hk-reset">Reset defaults</button><button class="go" id="hk-done">Done</button></div></div>`;
+    panel.host().appendChild(bg);
+    let listening = null;
+    function draw() {
+      bg.querySelector('#hk-list').innerHTML = ACTIONS.map(a => {
+        const k = key(a.id);
+        return `<div class="hk-row"><span>${esc(a.label)}</span><button class="hk-key${k ? '' : ' none'}${listening === a.id ? ' listen' : ''}" data-hk="${a.id}">${listening === a.id ? 'press a key…' : esc(keyName(k))}</button></div>`;
+      }).join('');
+      bg.querySelector('#hk-opts').innerHTML = Object.entries(OPTIONS).map(([id, o]) =>
+        `<div class="cd-opt"><span>${esc(o.label)}</span><select data-opt="${id}">${o.choices.map(([v, n]) => `<option value="${v}"${opt(id) === v ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></div>`).join('');
+    }
+    draw();
+    const done = () => { document.removeEventListener('keydown', onKey, true); bg.remove(); };
+    function onKey(e) {
+      if (!listening) { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(); } return; }
+      e.preventDefault(); e.stopPropagation();
+      if (e.key === 'Escape') { listening = null; draw(); return; }
+      if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab'].includes(e.key)) return;
+      const k = e.key === 'Backspace' || e.key === 'Delete' ? '' : (e.key.length === 1 ? e.key.toLowerCase() : e.key);
+      if (k) for (const a of ACTIONS) if (a.id !== listening && key(a.id).toLowerCase() === k.toLowerCase()) keyPrefs[a.id] = '';
+      keyPrefs[listening] = k; listening = null; saveKeys(); draw();
+    }
+    document.addEventListener('keydown', onKey, true);
+    bg.addEventListener('click', e => {
+      const b = e.target.closest('[data-hk]');
+      if (b) { listening = b.dataset.hk; draw(); return; }
+      if (e.target.id === 'hk-reset') { keyPrefs = {}; saveKeys(); listening = null; draw(); return; }
+      if (e.target.id === 'hk-done' || e.target === bg) done();
+    });
+    bg.addEventListener('change', e => { const s = e.target.closest('[data-opt]'); if (s) { keyPrefs['opt:' + s.dataset.opt] = s.value; saveKeys(); } });
+  }
+  $('keys').onclick = openKeys;
+  panel.$('.cd-tkeys').onclick = openKeys;
+
+  // ── subtitle settings: order and blur ─────────────────────────────────
+  function setSub(m) { subs.setMode(m); store('cadence-subs', m); showSubMode(); }
+  function setLook(o) {
+    subs.look(o);
+    if (o.order) store('cadence-order', o.order);
+    if (o.blur) store('cadence-blur', o.blur);
+    showSubMode();
+  }
+  const menu = panel.$('.cd-menu');
+  panel.$('.cd-tset').onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; showSubMode(); };
+  menu.addEventListener('click', e => {
+    e.stopPropagation();
+    const o = e.target.closest('[data-order]'), b = e.target.closest('[data-blur]');
+    if (o) setLook({ order: o.dataset.order }); if (b) setLook({ blur: b.dataset.blur });
+  });
+  panel.el.addEventListener('click', e => { if (!e.target.closest('.cd-menu, .cd-tset')) menu.hidden = true; });
+
+  // ── the tooltip on a selection (reader view), also while playing ──────
+  // While it's open the text holds still under it; the highlight carries on.
+  let tipEl = null, ctxEl = null, tipFor = '';
+  function closeTip() { if (tipEl) { tipEl.remove(); tipEl = null; tipFor = ''; follow && follow.hold(false); } }
+  function closeCtx() { if (ctxEl) { ctxEl.remove(); ctxEl = null; } }
+  function place(el, rect) {
+    const w = el.offsetWidth, h = el.offsetHeight;
+    let x = rect.left + rect.width / 2 - w / 2, y = rect.top - h - 10;
+    if (y < 8) y = rect.bottom + 10;
+    el.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+    el.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+  }
+  function openTipFromSelection(force) {
+    const sel = getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return false;
+    const r = sel.getRangeAt(0);
+    if (!$('page').contains(r.commonAncestorContainer)) return false;
+    const text = sel.toString().replace(/\s+/g, ' ').trim();
+    if (!text || text.length > 400) return false;
+    if (!force && text === tipFor && tipEl) return true;
+    const wid = selectedWordId();
+    const lid = wid && index ? index.lineOf(wid) : null;
+    closeTip(); closeCtx();
+    tipFor = text;
+    if (follow) follow.hold(true);
+    if (opt('tipWhilePlaying') === 'pause' && clock && clock.playing()) { clock.pause(); follow.kick(); }
+    tipEl = document.createElement('div'); tipEl.className = 'cd-tip';
+    const lineT = lid ? ((doc.lines[lid].translation || {})[translate.target] ?? translate.cached(TimedText.lineText(doc, lid))) : null;
+    const canPlay = !!(wid && clock && index && index.timedCount);
+    const draw = r2 => {
+      if (!tipEl) return;
+      tipEl.innerHTML = `<div class="cd-tip-w">${esc(text)}</div>` +
+        (r2 ? `<div class="cd-tip-t">${esc(r2.text || '—')}</div>` + (r2.alts || []).slice(0, 2).map(a => `<div class="cd-tip-alt"><b>${esc(a.pos)}</b>${esc(a.words.join(', '))}</div>`).join('')
+            : `<div class="cd-tip-t" style="color:var(--text3)">…</div>`) +
+        (lineT && text.split(' ').length < 6 ? `<div class="cd-tip-line">${esc(lineT)}</div>` : '') +
+        (canPlay ? `<div class="cd-tip-acts"><button data-act="play">${ICON.play} Play from here</button></div>` : '');
+      place(tipEl, r.getBoundingClientRect());
+    };
+    document.body.appendChild(tipEl);
+    draw(null);
+    tipEl.addEventListener('mousedown', e => e.preventDefault()); // keep the selection
+    tipEl.addEventListener('click', e => { if (e.target.closest('[data-act="play"]')) { closeTip(); playFromWord(wid); getSelection().removeAllRanges(); } });
+    const mine = tipFor;
+    const words = text.split(' ').length;
+    (words <= 3 ? translate.word(doc.language || 'auto', text)
+                : translate.lines(doc.language || 'auto', [{ key: 'sel', text }]).then(o => o.sel != null ? { text: o.sel, alts: [] } : null))
+      .then(res => { if (tipEl && tipFor === mine) draw(res || { text: 'Translation not available', alts: [] }); });
+    return true;
+  }
+  // mouse: after the button comes up; touch: after the selection settles
+  $('page').addEventListener('mouseup', () => setTimeout(() => {
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) openTipFromSelection(false);
+  }, 10));
+  let selT = 0;
+  document.addEventListener('selectionchange', () => {
+    clearTimeout(selT);
+    selT = setTimeout(() => {
+      const sel = getSelection();
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) { if (tipEl && !tipEl.matches(':hover')) closeTip(); return; }
+      if (matchMedia('(pointer: coarse)').matches) openTipFromSelection(false);
+    }, 450);
+  });
+  document.addEventListener('mousedown', e => {
+    if (tipEl && !tipEl.contains(e.target) && !$('page').contains(e.target)) closeTip();
+    if (ctxEl && !ctxEl.contains(e.target)) closeCtx();
+  });
+  $('page').addEventListener('mousedown', e => { if (tipEl && !tipEl.contains(e.target) && e.button === 0) closeTip(); });
+  // double-click: selects (the browser does that) — or plays, if chosen in Keys
+  $('page').addEventListener('dblclick', e => {
+    if (opt('dbl') !== 'play') return;
+    const id = page.wordAt(e.target); if (!id) return;
+    getSelection().removeAllRanges(); closeTip();
+    playFromWord(id);
+  });
+  // right-click a word → "Play from here" (as app.js), unless turned off in Keys
+  $('page').addEventListener('contextmenu', e => {
+    if (opt('right') !== 'menu') return;
+    const id = page.wordAt(e.target);
+    if (!id || !clock || !index || !index.timedCount) return;
+    e.preventDefault(); closeCtx();
+    ctxEl = document.createElement('div'); ctxEl.className = 'cd-ctx';
+    ctxEl.innerHTML = `<button>${ICON.play} Play from here</button>`;
+    document.body.appendChild(ctxEl);
+    place(ctxEl, { left: e.clientX, right: e.clientX, width: 0, top: e.clientY + ctxEl.offsetHeight / 2 + 10, bottom: e.clientY });
+    ctxEl.querySelector('button').onclick = () => { closeCtx(); closeTip(); playFromWord(id); };
+  });
   // ── the demo: timed by hand-written pace, with an overlap and an untimed addition
   function demoDoc() {
     const L = [

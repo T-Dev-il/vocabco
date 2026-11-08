@@ -1,4 +1,4 @@
-// cadence · 2026-11-08
+// cadence · 2026-11-08b
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -161,6 +161,7 @@
     let highlight = opts.highlight !== false;
     let followWanted = opts.follow !== false; // the reader's setting
     let followPaused = false;                 // paused by a gesture, until "Back to the text"
+    let held = false;                         // a tooltip or selection is open: don't scroll under it
     const band = opts.band || [0.22, 0.62];
     const topInset = typeof opts.topInset === 'function' ? opts.topInset : () => 0;
     const frames = [];
@@ -224,7 +225,7 @@
     // Keep the sounding word inside the comfort band; place it a third of the way
     // down when it leaves. Checked when the word changes row, not every frame.
     function keepInView(el, jumped) {
-      if (!el || !followWanted || followPaused) return;
+      if (!el || !followWanted || followPaused || held) return;
       const r = rel(el);
       if (r.top >= r.h * band[0] && r.bottom <= r.h * band[1]) return;
       scrollTo(scroller.scrollTop + r.top - r.h * 0.33, jumped ? 260 : 520);
@@ -314,7 +315,9 @@
         emit();
       },
       setFollow(v) { followWanted = !!v; followPaused = false; if (v) recenter(); emit(); },
-      resume() { followPaused = false; recenter(); emit(); },
+      resume() { followPaused = false; held = false; recenter(); emit(); },
+      // hold(true) while the reader is busy with a selection; hold(false) catches up
+      hold(v) { v = !!v; if (v === held) return; held = v; if (!v) { lastRowTop = null; update(true); } },
       recenter,
       setClock(c) { clock = c; lastT = -1; kick(); },
       setIndex(ix) { index = ix; for (const [el, c] of lit) el.classList.remove(c); lit = []; curWord = null; curLines = new Set(); lastRowTop = null; kick(); },
