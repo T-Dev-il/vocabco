@@ -151,8 +151,10 @@
 
   // ── TTFollow ───────────────────────────────────────────────────────────────
   // opts: { page, index, clock, scroller, highlight: true, follow: true,
-  //         band: [top, bottom] (fractions of the scroller kept as the comfort zone),
-  //         onChange(state) }
+  //         band: [top, bottom] (fractions of the visible text kept as the comfort zone),
+  //         topInset() → px of the scroller covered from the top (a docked video) }
+  // on(f) hears state changes; onFrame(f) hears every update with index.at(now)
+  // and the time, so other views (subtitles) share this one loop.
   function TTFollow(opts) {
     const { page, scroller } = opts;
     let index = opts.index, clock = opts.clock;
@@ -160,18 +162,29 @@
     let followWanted = opts.follow !== false; // the reader's setting
     let followPaused = false;                 // paused by a gesture, until "Back to the text"
     const band = opts.band || [0.22, 0.62];
+    const topInset = typeof opts.topInset === 'function' ? opts.topInset : () => 0;
+    const frames = [];
     let curWord = null, curLines = new Set(), lastRowTop = null, lastT = -1;
     let timer = 0, raf = 0, alive = true, tween = null;
     const listeners = [];
 
     // ── highlight ─────────────────────────────────────────────────────────
+    // The spoken word, with a soft fall-off on two words each side (as app.js's
+    // rd-center / rd-near / rd-far), within its own line only.
+    let lit = [];
     function setWord(id) {
       if (id === curWord) return false;
-      const old = curWord && page.word(curWord);
-      if (old) old.classList.remove('tt-now');
+      for (const [el, c] of lit) el.classList.remove(c);
+      lit = [];
       curWord = id;
       const el = id && highlight && page.word(id);
-      if (el) el.classList.add('tt-now');
+      if (el) {
+        lit.push([el, 'tt-now']);
+        let a = el.previousElementSibling, b = el.nextElementSibling;
+        if (a) { lit.push([a, 'tt-near']); a = a.previousElementSibling; if (a) lit.push([a, 'tt-far']); }
+        if (b) { lit.push([b, 'tt-near']); b = b.nextElementSibling; if (b) lit.push([b, 'tt-far']); }
+        for (const [e, c] of lit) e.classList.add(c);
+      }
       return true;
     }
     function setLines(ids) {
@@ -182,9 +195,10 @@
     }
 
     // ── scrolling ─────────────────────────────────────────────────────────
-    function rel(el) { // element's top/bottom relative to the scroller's view
+    function rel(el) { // element's top/bottom relative to the visible text (below any inset)
       const a = el.getBoundingClientRect(), s = scroller.getBoundingClientRect();
-      return { top: a.top - s.top, bottom: a.bottom - s.top, h: s.height };
+      const inset = Math.max(0, Math.min(s.height * 0.7, topInset() || 0));
+      return { top: a.top - s.top - inset, bottom: a.bottom - s.top - inset, h: s.height - inset };
     }
     function scrollTo(y, ms) {
       cancelTween();
@@ -256,6 +270,7 @@
       const jumped = Math.abs(t - lastT) > 1500;
       lastT = t;
       const r = index.at(t);
+      for (const f of frames) { try { f(r, t); } catch (e) { console.error(e); } }
       const changed = setWord(r.word);
       setLines(r.lines);
       if ((changed || force) && r.word) {
@@ -287,10 +302,12 @@
 
     return {
       state,
+      onFrame(f) { frames.push(f); return () => { const i = frames.indexOf(f); if (i >= 0) frames.splice(i, 1); }; },
+      get clock() { return clock; }, get index() { return index; },
       on(f) { listeners.push(f); return () => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); }; },
       setHighlight(v) {
         highlight = !!v;
-        const old = curWord && page.word(curWord); if (old) old.classList.remove('tt-now');
+        for (const [el, c] of lit) el.classList.remove(c); lit = [];
         for (const id of curLines) { const el = page.line(id); if (el) el.classList.remove('tt-sounding'); }
         curWord = null; curLines = new Set();
         update(false);
@@ -300,7 +317,7 @@
       resume() { followPaused = false; recenter(); emit(); },
       recenter,
       setClock(c) { clock = c; lastT = -1; kick(); },
-      setIndex(ix) { index = ix; curWord = null; curLines = new Set(); lastRowTop = null; kick(); },
+      setIndex(ix) { index = ix; for (const [el, c] of lit) el.classList.remove(c); lit = []; curWord = null; curLines = new Set(); lastRowTop = null; kick(); },
       kick,
       // after a size or layout change: keep the sounding word where it belongs
       relayout() { lastRowTop = null; if (curWord) keepInView(page.word(curWord), true); },
@@ -312,7 +329,7 @@
         scroller.removeEventListener('touchmove', onTouchMove);
         scroller.removeEventListener('pointerdown', onPointerDown);
         document.removeEventListener('keydown', onKey);
-        setWord(null); setLines([]);
+        curWord = '__'; setWord(null); setLines([]);
       }
     };
 

@@ -4,57 +4,98 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-08 · Contractor 20. Cadence, the new reader on timed text. app.js is untouched.
-     Reads only: it never writes to the database. -->
+<!-- cadence.html · 2026-11-08b · Contractor 20. Cadence, the new reader on timed text.
+     Two ways to watch: the reader (video docked or floating over the text) and
+     full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="cadence.css">
+<style>.cd-fake{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#cfd8c6;font:600 15px/1.5 Inter,system-ui,sans-serif;background:radial-gradient(circle at 30% 30%,#33402b,#121510);text-align:center}.cd-fake small{font-weight:400;color:#8f9a86}</style>
 </head>
-<body>
-<header class="rd-top">
-  <a class="rd-home" href="../index.html">← Library</a>
-  <div class="rd-title" id="title">Cadence</div>
-  <select class="rd-pick" id="pick" aria-label="Choose a text"><option value="demo">Demo text</option></select>
-</header>
-
-<div class="rd-stage" id="stage"><div class="rd-screen"><div id="yt-player"></div></div></div>
-
-<div class="rd-bar" id="bar">
-  <button class="rd-btn play" id="play" title="Play / pause (Space)">▶</button>
-  <span class="rd-time" id="time">0:00</span>
-  <button class="rd-btn" id="rate" title="Speed">1×</button>
-  <span class="rd-sp"></span>
-  <span class="rd-note" id="note"></span>
-  <button class="rd-btn on" id="hl" title="Highlight the word being spoken">Highlight</button>
-  <button class="rd-btn on" id="fo" title="Keep the spoken word in view">Follow</button>
-  <button class="rd-btn" id="smaller" title="Smaller text">A−</button>
-  <button class="rd-btn" id="bigger" title="Bigger text">A+</button>
-  <div class="rd-scrub" id="scrub" title="Drag to move through the demo"><i><b id="scrubfill"></b></i></div>
+<body class="th-white">
+<div class="rc" id="rc">
+  <div class="rc-left">
+    <a class="cd-home" href="../index.html">← Library</a>
+    <div class="rc-sep"></div>
+    <span class="rc-lbl">Size</span>
+    <div class="rc-grp"><button class="rc-btn" id="sz-down">A−</button><button class="rc-btn on" id="sz-lbl">M</button><button class="rc-btn" id="sz-up">A+</button></div>
+    <div class="rc-sep"></div>
+    <span class="rc-lbl">Width</span>
+    <input type="range" class="width-slider" id="width" min="40" max="100" step="10" value="60">
+    <div class="rc-sep"></div>
+    <span class="rc-lbl">Theme</span>
+    <div class="rc-grp theme-fan" id="themes">
+      <button class="rc-btn" data-th="white">White</button><button class="rc-btn" data-th="paper">Paper</button><button class="rc-btn" data-th="sepia">Sepia</button><button class="rc-btn" data-th="slate">Slate</button><button class="rc-btn" data-th="dark">Dark</button>
+    </div>
+    <div class="rc-sep"></div>
+    <div class="mode-panel youtube" id="mode">
+      <div class="mode-body">
+        <button class="mode-play" id="play" title="Play / pause (Space)"></button>
+        <span class="mode-time" id="time">0:00</span>
+        <button class="mode-follow" id="rate" title="Speed">1×</button>
+        <button class="mode-follow on" id="fo" title="Text scrolls to follow along"></button>
+        <button class="mode-follow on" id="hl" title="Highlight the word being spoken"></button>
+      </div>
+    </div>
+  </div>
+  <div class="rc-right">
+    <span class="cd-note" id="note"></span>
+    <select class="cd-pick" id="pick" aria-label="Choose a text"><option value="demo">Demo text</option></select>
+    <button class="ib-label" id="full" title="Watch full screen with subtitles (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Full screen</button>
+  </div>
 </div>
 
-<main class="rd-scroll" id="scroll"><article class="rd-page" id="page"></article></main>
-<button class="rd-back" id="back">Back to the text</button>
+<main class="cd-scroll" id="scroll"><article class="cd-page" id="page"></article></main>
+<button class="cd-back" id="back">Follow again</button>
 
 <script src="cadence-shape.js"></script>
 <script src="cadence.js"></script>
+<script src="cadence-theater.js"></script>
 <script>
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
   const params = new URLSearchParams(location.search);
   const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const ICON = {
+    play: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 1.8v8.4L10 6z" fill="currentColor"/></svg>',
+    pause: '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.4" y="1.8" width="2.6" height="8.4" rx=".6" fill="currentColor"/><rect x="7" y="1.8" width="2.6" height="8.4" rx=".6" fill="currentColor"/></svg>',
+    follow: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v7M3 5.5 6 8.5 9 5.5M2 11h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    hl: '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 10h8M3.5 7.5 8 3l1.5 1.5L5 9H3.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>'
+  };
+  $('fo').innerHTML = ICON.follow + ' Follow';
+  $('hl').innerHTML = ICON.hl + ' Highlight';
 
-  // ── the page, the clock, the follower ──────────────────────────────────
+  // ── the page, the clock, the follower, the video, the subtitles ───────
   const page = TTPage($('page'));
-  let follow = null, clock = null, index = null, doc = null, yt = null;
+  let follow = null, clock = null, index = null, doc = null, yt = null, subs = null;
+  const translate = CadenceTranslate({ target: store('cadence-target') || 'en' });
+  const panel = CadencePanel({ scroller: $('scroll'), page: $('page'), onLayout: () => follow && follow.relayout() });
+  panel.show(false);
 
-  // ── text size (8 steps, as the old reader's SIZES) ────────────────────
-  const SIZES = [15, 16, 17, 18, 20, 22, 25, 28];
-  let size = Math.max(0, Math.min(7, +(store('cadenceSize') ?? 4)));
-  function applySize() { document.documentElement.style.setProperty('--size', SIZES[size] + 'px'); if (follow) follow.relayout(); }
-  $('smaller').onclick = () => { size = Math.max(0, size - 1); store('cadenceSize', size); applySize(); };
-  $('bigger').onclick = () => { size = Math.min(7, size + 1); store('cadenceSize', size); applySize(); };
-  applySize();
+  // ── size, width, theme (as app.js: 8 sizes, width 40–100 %, five themes) ─
+  const SIZES = [14, 16, 18, 20, 23, 26, 30, 36], LABELS = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'];
+  let size = Math.max(0, Math.min(7, +(store('cadence-size') ?? 3)));
+  let width = Math.max(40, Math.min(100, +(store('cadence-width') ?? 60)));
+  let theme = store('cadence-theme') || 'white';
+  function applyLook() {
+    document.documentElement.style.setProperty('--size', SIZES[size] + 'px');
+    // width is a share of the pane, as in app.js
+    document.documentElement.style.setProperty('--measure', Math.round(Math.max(420, $('scroll').clientWidth * width / 100)) + 'px');
+    $('sz-lbl').textContent = LABELS[size];
+    $('width').value = width;
+    document.body.className = document.body.className.replace(/\bth-\w+/g, '').trim() + ' th-' + theme;
+    $('themes').querySelectorAll('[data-th]').forEach(b => b.classList.toggle('on', b.dataset.th === theme));
+    panel.place();
+    if (follow) follow.relayout();
+  }
+  $('sz-down').onclick = () => { size = Math.max(0, size - 1); store('cadence-size', size); applyLook(); };
+  $('sz-up').onclick = () => { size = Math.min(7, size + 1); store('cadence-size', size); applyLook(); };
+  $('width').oninput = () => { width = +$('width').value; store('cadence-width', width); applyLook(); };
+  $('themes').onclick = e => { const b = e.target.closest('[data-th]'); if (!b) return; theme = b.dataset.th; store('cadence-theme', theme); applyLook(); };
+  addEventListener('resize', applyLook);
+  applyLook();
 
   // ── open a document with a clock ──────────────────────────────────────
   function open(d, c, title) {
@@ -63,40 +104,41 @@
     if (problems.length) console.warn('[cadence] document problems:', problems);
     page.render(d);
     index = TimedText.buildIndex(d);
-    $('title').textContent = title || 'Cadence';
     document.title = (title || 'Cadence') + ' · Cadence';
-    $('note').textContent = !index.timedCount ? 'No timing: plain page'
-      : problems.length ? problems.length + ' timing problem' + (problems.length > 1 ? 's' : '') + ' ignored' : '';
+    $('note').textContent = !index.timedCount ? 'No timing: plain page' : '';
     $('scroll').scrollTop = 0;
-    setClock(c);
     if (!follow) {
-      follow = TTFollow({ page, index, clock, scroller: $('scroll'),
-        highlight: store('cadenceHl') !== '0', follow: store('cadenceFo') !== '0' });
+      follow = TTFollow({ page, index, clock: c, scroller: $('scroll'), topInset: panel.topInset,
+        highlight: store('cadence-hl') !== '0', follow: store('cadence-fo') !== '0' });
       follow.on(showState);
-    } else follow.setIndex(index);
+      subs = CadenceSubs(panel.subsEl, { doc: d, follow, translate, mode: store('cadence-subs') || 'both' });
+    } else { follow.setIndex(index); subs.setDoc(d); }
+    setClock(c);
     showState(follow.state());
+    showSubMode();
   }
   function setClock(c) {
     clock = c;
     if (follow) follow.setClock(c);
-    $('scrub').classList.toggle('on', !!c && c.kind === 'sim');
-    $('bar').querySelectorAll('#play,#rate,#time').forEach(el => el.style.display = c ? '' : 'none');
+    ['play', 'rate', 'time'].forEach(id => $(id).style.visibility = c ? '' : 'hidden');
+    $('full').style.display = panel.el.style.display === 'none' ? 'none' : '';
   }
 
-  // ── controls ──────────────────────────────────────────────────────────
+  // ── reader controls ───────────────────────────────────────────────────
   function showState(s) {
     $('hl').classList.toggle('on', s.highlight);
     $('fo').classList.toggle('on', s.follow);
     document.body.classList.toggle('no-hl', !s.highlight);
     const back = $('back');
-    const show = s.follow && s.paused && !!(clock && index && index.timedCount);
-    back.classList.toggle('show', show);
+    back.classList.toggle('show', s.follow && s.paused && !!(clock && index && index.timedCount) && panel.mode !== 'theater');
     back.textContent = s.where === 'above' ? 'Back to the text ↑' : s.where === 'below' ? 'Back to the text ↓' : 'Follow again';
   }
-  $('hl').onclick = () => { const v = !follow.state().highlight; store('cadenceHl', v ? '1' : '0'); follow.setHighlight(v); };
-  $('fo').onclick = () => { const v = !follow.state().follow; store('cadenceFo', v ? '1' : '0'); follow.setFollow(v); };
+  $('hl').onclick = () => { const v = !follow.state().highlight; store('cadence-hl', v ? '1' : '0'); follow.setHighlight(v); };
+  $('fo').onclick = () => { const v = !follow.state().follow; store('cadence-fo', v ? '1' : '0'); follow.setFollow(v); };
   $('back').onclick = () => follow.resume();
-  $('play').onclick = () => { if (clock) { clock.toggle(); follow.kick(); } };
+  const toggle = () => { if (clock) { clock.toggle(); follow.kick(); } };
+  $('play').onclick = toggle;
+  panel.$('.cd-tplay').onclick = toggle;
   const RATES = [1, 0.75, 0.5, 1.25, 1.5];
   $('rate').onclick = () => {
     if (!clock) return;
@@ -104,52 +146,98 @@
     clock.setRate(r); $('rate').textContent = r + '×';
   };
   const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
-  (function ui() { // the play button, time and scrub bar, a few times a second
+  let wasPlaying = null;
+  (function ui() {
     if (clock) {
       const p = clock.playing(), t = clock.time(), d = clock.duration();
-      $('play').textContent = p ? '❚❚' : '▶';
+      if (p !== wasPlaying) {
+        wasPlaying = p;
+        $('play').innerHTML = (p ? ICON.pause : ICON.play) + (p ? ' Pause' : (clock.kind === 'sim' ? ' Play' : ' Play video'));
+        panel.$('.cd-tplay').innerHTML = p ? '❚❚' : '▶';
+        document.body.classList.toggle('cd-paused', !p);
+        if (p) { panel.hideCard(); picked(null); }
+      }
       $('time').textContent = fmt(t) + (d ? ' / ' + fmt(d) : '');
-      if (d) $('scrubfill').style.width = Math.min(100, t / d * 100) + '%';
       if (follow && follow.state().paused) showState(follow.state());
     }
-    setTimeout(ui, 200);
+    setTimeout(ui, 150);
   })();
 
-  // Scrub bar (demo clock only)
-  (function () {
-    const el = $('scrub'); let drag = false;
-    const go = e => { const r = el.getBoundingClientRect(); const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); clock.seek(x * clock.duration()); follow.kick(); };
-    el.addEventListener('pointerdown', e => { if (!clock || clock.kind !== 'sim') return; drag = true; el.setPointerCapture(e.pointerId); go(e); });
-    el.addEventListener('pointermove', e => { if (drag) go(e); });
-    el.addEventListener('pointerup', () => { drag = false; });
-  })();
-
-  // Double-click (or double-tap) a word: play from there, and follow again.
+  // Double-click a word in the text: play from there, and follow again.
   $('page').addEventListener('dblclick', e => {
     const id = page.wordAt(e.target);
     if (!id || !clock || !index) return;
     let info = index.wordInfo(id);
-    if (info && info.start == null) { // an untimed word: the next timed word after it
-      const after = index.words.find(w => w.order > info.order);
-      info = after || null;
-    }
+    if (info && info.start == null) info = index.words.find(w => w.order > info.order) || null;
     if (!info) return;
     const sel = window.getSelection(); if (sel) sel.removeAllRanges();
     clock.seek(info.start); clock.play(); follow.resume(); follow.kick();
   });
 
-  // Space: play/pause. ← →: previous / next line.
-  document.addEventListener('keydown', e => {
-    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-    if (!clock || !index) return;
-    if (e.code === 'Space') { e.preventDefault(); clock.toggle(); follow.kick(); }
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-      const t = index.lineStartNear(clock.time(), e.key === 'ArrowLeft' ? -1 : 1);
-      if (t != null) { e.preventDefault(); clock.seek(t); follow.resume(); follow.kick(); }
-    }
+  // ── the two views ─────────────────────────────────────────────────────
+  $('full').onclick = () => panel.setMode('theater');
+  panel.onMode(m => {
+    panel.hideCard(); picked(null);
+    if (m === 'theater') { panel.wake(); follow.kick(); }
+    else { follow.resume(); }              // back in the reader: at the same place
+    showState(follow.state());
   });
 
-  window.addEventListener('resize', () => follow && follow.relayout());
+  // subtitle mode and language
+  function showSubMode() {
+    panel.$('.cd-submode').querySelectorAll('[data-sub]').forEach(b => b.classList.toggle('on', b.dataset.sub === subs.mode));
+    panel.$('.cd-target').value = translate.target;
+    panel.$('.cd-target').style.display = subs.mode === 'both' ? '' : 'none';
+  }
+  panel.$('.cd-submode').onclick = e => {
+    const b = e.target.closest('[data-sub]'); if (!b) return;
+    subs.setMode(b.dataset.sub); store('cadence-subs', b.dataset.sub); showSubMode();
+  };
+  panel.$('.cd-target').onchange = e => { translate.setTarget(e.target.value); store('cadence-target', e.target.value); subs.refresh(); };
+
+  // ── a word in the subtitles: hover while paused, or tap/click to pause ─
+  let pickedEl = null;
+  function picked(el) { if (pickedEl) pickedEl.classList.remove('picked'); pickedEl = el; if (el) el.classList.add('picked'); }
+  async function wordCard(el) {
+    const id = el.dataset.w, lid = index.lineOf(id);
+    const raw = el.textContent, w = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '') || raw;
+    picked(el);
+    const lineT = (doc.lines[lid] && doc.lines[lid].translation && doc.lines[lid].translation[translate.target]) ?? translate.cached(TimedText.lineText(doc, lid));
+    const body = r => `<div class="cd-card-w">${esc(w)}</div>` +
+      (r ? `<div class="cd-card-t">${esc(r.text || '—')}</div>` + r.alts.slice(0, 2).map(a => `<div class="cd-card-alt"><b>${esc(a.pos)}</b>${esc(a.words.join(', '))}</div>`).join('')
+         : `<div class="cd-card-t" style="color:#9b9e96">…</div>`) +
+      (lineT ? `<div class="cd-card-line">${esc(lineT)}</div>` : '');
+    panel.showCard(el, body(null));
+    const r = await translate.word(doc.language || 'auto', w);
+    if (pickedEl === el) panel.showCard(el, body(r || { text: 'Translation not available', alts: [] }));
+  }
+  let hoverT = 0;
+  panel.subsEl.addEventListener('pointerover', e => {
+    const el = e.target.closest('.cd-sw'); if (!el || e.pointerType === 'touch') return;
+    if (!clock || clock.playing()) return;
+    clearTimeout(hoverT); hoverT = setTimeout(() => wordCard(el), 120);
+  });
+  panel.subsEl.addEventListener('pointerout', e => { if (e.target.closest('.cd-sw')) clearTimeout(hoverT); });
+  panel.subsEl.addEventListener('click', e => {
+    const el = e.target.closest('.cd-sw'); if (!el || !clock) return;
+    e.stopPropagation();
+    if (clock.playing()) { clock.pause(); follow.kick(); }
+    wordCard(el);
+  });
+  panel.el.addEventListener('click', e => { if (panel.mode === 'theater' && !e.target.closest('.cd-sw, .cd-card, .cd-tbar')) { panel.hideCard(); picked(null); } });
+
+  // ── keys: Space play/pause · ← → lines · F full screen · Esc back ─────
+  document.addEventListener('keydown', e => {
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === 'f' || e.key === 'F') { if (panel.el.style.display !== 'none') { e.preventDefault(); panel.setMode(panel.mode === 'theater' ? 'docked' : 'theater'); } return; }
+    if (e.key === 'Escape' && panel.mode === 'theater') { panel.setMode('docked'); return; }
+    if (!clock || !index) return;
+    if (e.code === 'Space') { e.preventDefault(); toggle(); if (panel.mode === 'theater') panel.wake(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const t = index.lineStartNear(clock.time(), e.key === 'ArrowLeft' ? -1 : 1);
+      if (t != null) { e.preventDefault(); clock.seek(t); if (panel.mode !== 'theater') follow.resume(); follow.kick(); }
+    }
+  });
 
   // ── the demo: timed by hand-written pace, with an overlap and an untimed addition
   function demoDoc() {
@@ -209,12 +297,15 @@
   }
   function openDemo() {
     const d = demoDoc();
+    stopYt();
     open(d, TTClock.sim(TimedText.buildIndex(d).duration + 1500), 'Demo · Ein ganz normaler Morgen');
-    $('stage').classList.remove('on');
-    $('rate').textContent = '1×';
+    // no video for the demo: a stand-in screen, so both views can be tried
+    panel.screen.querySelector('#cd-yt').innerHTML = '<div class="cd-fake">Demo · no video<br><small>the clock runs on its own</small></div>';
+    panel.show(true);
+    $('full').style.display = '';
   }
 
-  // ── YouTube ───────────────────────────────────────────────────────────
+  // ── YouTube: one player, created once per video, never moved ──────────
   function loadYtApi(cb) {
     if (window.YT && window.YT.Player) return cb();
     (window._ytCbs = window._ytCbs || []).push(cb);
@@ -222,16 +313,19 @@
     window.onYouTubeIframeAPIReady = () => { (window._ytCbs || []).forEach(f => f()); window._ytCbs = []; };
     const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
   }
+  function stopYt() {
+    if (yt) { try { yt.destroy(); } catch (e) {} yt = null; }
+    panel.screen.innerHTML = '<div id="cd-yt"></div>';
+  }
   function openVideo(d, videoId, title) {
-    $('stage').classList.add('on');
+    stopYt();
+    panel.show(true);
     open(d, null, title); // the text first; the clock arrives when the player is ready
-    const ready = player => { setClock(TTClock.youtube(player)); $('rate').textContent = '1×'; };
     loadYtApi(() => {
-      if (yt) { try { yt.destroy(); } catch (e) {} yt = null; $('stage').querySelector('.rd-screen').innerHTML = '<div id="yt-player"></div>'; }
-      yt = new YT.Player('yt-player', {
+      yt = new YT.Player('cd-yt', {
         videoId, host: 'https://www.youtube-nocookie.com',
-        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
-        events: { onReady: e => ready(e.target), onStateChange: () => follow && follow.kick() }
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, fs: 0, origin: location.origin },
+        events: { onReady: e => { setClock(TTClock.youtube(e.target)); $('rate').textContent = '1×'; }, onStateChange: () => follow && follow.kick() }
       });
     });
   }
@@ -248,7 +342,7 @@
     await new Promise(res => { const s = document.createElement('script'); s.src = '../config.js'; s.onload = res; s.onerror = res; document.head.appendChild(s); });
     if (!window.supabase || typeof VOCAB_ENVS === 'undefined') return null;
     let env = store('vocabEnv'); if (!VOCAB_ENVS[env]) env = VOCAB_DEFAULT_ENV;
-    if (env === 'dev') { const b = document.createElement('span'); b.className = 'rd-env'; b.textContent = 'DEV'; $('pick').before(b); }
+    if (env === 'dev') { const b = document.createElement('span'); b.className = 'cd-env'; b.textContent = 'DEV'; $('pick').before(b); }
     sb = supabase.createClient(VOCAB_ENVS[env].url, VOCAB_ENVS[env].anon, { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
     const { data } = await sb.auth.getSession();
     return data && data.session ? sb : null;
@@ -268,16 +362,16 @@
   async function openText(extId) {
     const { data, error } = await sb.from('sources').select('ext_id,title,body,segments,video_id').eq('ext_id', extId).limit(1);
     const r = data && data[0];
-    if (error || !r) { $('page').innerHTML = '<div class="rd-empty">Could not open this text.</div>'; return; }
+    if (error || !r) { $('page').innerHTML = '<div class="cd-empty">Could not open this text.</div>'; return; }
     const d = TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id });
     if (r.video_id) openVideo(d, r.video_id, r.title);
-    else { $('stage').classList.remove('on'); if (yt) { try { yt.pauseVideo(); } catch (e) {} } open(d, null, r.title); }
+    else { stopYt(); panel.show(false); open(d, null, r.title); }
   }
 
   $('pick').onchange = () => {
     const v = $('pick').value;
     const u = new URL(location.href);
-    if (v === 'demo') { u.searchParams.delete('text'); openDemo(); if (yt) { try { yt.pauseVideo(); } catch (e) {} } }
+    if (v === 'demo') { u.searchParams.delete('text'); openDemo(); }
     else { u.searchParams.set('text', v); openText(v); }
     u.searchParams.delete('demo');
     history.replaceState(null, '', u);
@@ -287,10 +381,10 @@
   (async function start() {
     const want = params.get('text');
     if (!want) openDemo();
-    else $('page').innerHTML = '<div class="rd-empty">Opening…</div>';
+    else $('page').innerHTML = '<div class="cd-empty">Opening…</div>';
     const client = await connect().catch(() => null);
     if (!client) {
-      if (want) { $('page').innerHTML = '<div class="rd-empty">Sign in on the Library page first, then come back.</div>'; }
+      if (want) { $('page').innerHTML = '<div class="cd-empty">Sign in on the Library page first, then come back.</div>'; }
       const o = document.createElement('option'); o.disabled = true; o.textContent = 'Sign in on the Library page to see your texts';
       $('pick').appendChild(o);
       return;
@@ -299,7 +393,7 @@
     if (want) { $('pick').value = want; await openText(want); }
   })();
 
-  window.__cadence = { get follow() { return follow; }, get clock() { return clock; }, get index() { return index; }, get doc() { return doc; }, page };
+  window.__cadence = { get follow() { return follow; }, get clock() { return clock; }, get index() { return index; }, get doc() { return doc; }, get subs() { return subs; }, page, panel, translate };
 })();
 </script>
 </body>
