@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cadence</title>
+<!-- cadence.html · 2026-11-08 · Contractor 20. Cadence, the new reader on timed text. app.js is untouched.
+     Reads only: it never writes to the database. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="cadence.css">
+</head>
+<body>
+<header class="rd-top">
+  <a class="rd-home" href="../index.html">← Library</a>
+  <div class="rd-title" id="title">Cadence</div>
+  <select class="rd-pick" id="pick" aria-label="Choose a text"><option value="demo">Demo text</option></select>
+</header>
+
+<div class="rd-stage" id="stage"><div class="rd-screen"><div id="yt-player"></div></div></div>
+
+<div class="rd-bar" id="bar">
+  <button class="rd-btn play" id="play" title="Play / pause (Space)">▶</button>
+  <span class="rd-time" id="time">0:00</span>
+  <button class="rd-btn" id="rate" title="Speed">1×</button>
+  <span class="rd-sp"></span>
+  <span class="rd-note" id="note"></span>
+  <button class="rd-btn on" id="hl" title="Highlight the word being spoken">Highlight</button>
+  <button class="rd-btn on" id="fo" title="Keep the spoken word in view">Follow</button>
+  <button class="rd-btn" id="smaller" title="Smaller text">A−</button>
+  <button class="rd-btn" id="bigger" title="Bigger text">A+</button>
+  <div class="rd-scrub" id="scrub" title="Drag to move through the demo"><i><b id="scrubfill"></b></i></div>
+</div>
+
+<main class="rd-scroll" id="scroll"><article class="rd-page" id="page"></article></main>
+<button class="rd-back" id="back">Back to the text</button>
+
+<script src="cadence-shape.js"></script>
+<script src="cadence.js"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+
+  // ── the page, the clock, the follower ──────────────────────────────────
+  const page = TTPage($('page'));
+  let follow = null, clock = null, index = null, doc = null, yt = null;
+
+  // ── text size (8 steps, as the old reader's SIZES) ────────────────────
+  const SIZES = [15, 16, 17, 18, 20, 22, 25, 28];
+  let size = Math.max(0, Math.min(7, +(store('cadenceSize') ?? 4)));
+  function applySize() { document.documentElement.style.setProperty('--size', SIZES[size] + 'px'); if (follow) follow.relayout(); }
+  $('smaller').onclick = () => { size = Math.max(0, size - 1); store('cadenceSize', size); applySize(); };
+  $('bigger').onclick = () => { size = Math.min(7, size + 1); store('cadenceSize', size); applySize(); };
+  applySize();
+
+  // ── open a document with a clock ──────────────────────────────────────
+  function open(d, c, title) {
+    doc = d;
+    const problems = TimedText.validate(d);
+    if (problems.length) console.warn('[cadence] document problems:', problems);
+    page.render(d);
+    index = TimedText.buildIndex(d);
+    $('title').textContent = title || 'Cadence';
+    document.title = (title || 'Cadence') + ' · Cadence';
+    $('note').textContent = !index.timedCount ? 'No timing: plain page'
+      : problems.length ? problems.length + ' timing problem' + (problems.length > 1 ? 's' : '') + ' ignored' : '';
+    $('scroll').scrollTop = 0;
+    setClock(c);
+    if (!follow) {
+      follow = TTFollow({ page, index, clock, scroller: $('scroll'),
+        highlight: store('cadenceHl') !== '0', follow: store('cadenceFo') !== '0' });
+      follow.on(showState);
+    } else follow.setIndex(index);
+    showState(follow.state());
+  }
+  function setClock(c) {
+    clock = c;
+    if (follow) follow.setClock(c);
+    $('scrub').classList.toggle('on', !!c && c.kind === 'sim');
+    $('bar').querySelectorAll('#play,#rate,#time').forEach(el => el.style.display = c ? '' : 'none');
+  }
+
+  // ── controls ──────────────────────────────────────────────────────────
+  function showState(s) {
+    $('hl').classList.toggle('on', s.highlight);
+    $('fo').classList.toggle('on', s.follow);
+    document.body.classList.toggle('no-hl', !s.highlight);
+    const back = $('back');
+    const show = s.follow && s.paused && !!(clock && index && index.timedCount);
+    back.classList.toggle('show', show);
+    back.textContent = s.where === 'above' ? 'Back to the text ↑' : s.where === 'below' ? 'Back to the text ↓' : 'Follow again';
+  }
+  $('hl').onclick = () => { const v = !follow.state().highlight; store('cadenceHl', v ? '1' : '0'); follow.setHighlight(v); };
+  $('fo').onclick = () => { const v = !follow.state().follow; store('cadenceFo', v ? '1' : '0'); follow.setFollow(v); };
+  $('back').onclick = () => follow.resume();
+  $('play').onclick = () => { if (clock) { clock.toggle(); follow.kick(); } };
+  const RATES = [1, 0.75, 0.5, 1.25, 1.5];
+  $('rate').onclick = () => {
+    if (!clock) return;
+    const r = RATES[(RATES.indexOf(clock.rate()) + 1) % RATES.length] || 1;
+    clock.setRate(r); $('rate').textContent = r + '×';
+  };
+  const fmt = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+  (function ui() { // the play button, time and scrub bar, a few times a second
+    if (clock) {
+      const p = clock.playing(), t = clock.time(), d = clock.duration();
+      $('play').textContent = p ? '❚❚' : '▶';
+      $('time').textContent = fmt(t) + (d ? ' / ' + fmt(d) : '');
+      if (d) $('scrubfill').style.width = Math.min(100, t / d * 100) + '%';
+      if (follow && follow.state().paused) showState(follow.state());
+    }
+    setTimeout(ui, 200);
+  })();
+
+  // Scrub bar (demo clock only)
+  (function () {
+    const el = $('scrub'); let drag = false;
+    const go = e => { const r = el.getBoundingClientRect(); const x = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); clock.seek(x * clock.duration()); follow.kick(); };
+    el.addEventListener('pointerdown', e => { if (!clock || clock.kind !== 'sim') return; drag = true; el.setPointerCapture(e.pointerId); go(e); });
+    el.addEventListener('pointermove', e => { if (drag) go(e); });
+    el.addEventListener('pointerup', () => { drag = false; });
+  })();
+
+  // Double-click (or double-tap) a word: play from there, and follow again.
+  $('page').addEventListener('dblclick', e => {
+    const id = page.wordAt(e.target);
+    if (!id || !clock || !index) return;
+    let info = index.wordInfo(id);
+    if (info && info.start == null) { // an untimed word: the next timed word after it
+      const after = index.words.find(w => w.order > info.order);
+      info = after || null;
+    }
+    if (!info) return;
+    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    clock.seek(info.start); clock.play(); follow.resume(); follow.kick();
+  });
+
+  // Space: play/pause. ← →: previous / next line.
+  document.addEventListener('keydown', e => {
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (!clock || !index) return;
+    if (e.code === 'Space') { e.preventDefault(); clock.toggle(); follow.kick(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      const t = index.lineStartNear(clock.time(), e.key === 'ArrowLeft' ? -1 : 1);
+      if (t != null) { e.preventDefault(); clock.seek(t); follow.resume(); follow.kick(); }
+    }
+  });
+
+  window.addEventListener('resize', () => follow && follow.relayout());
+
+  // ── the demo: timed by hand-written pace, with an overlap and an untimed addition
+  function demoDoc() {
+    const L = [
+      ['heading', null, 'Ein ganz normaler Morgen', 'A perfectly normal morning'],
+      ['paragraph', null, 'Ich stehe jeden Tag um sechs Uhr auf.', 'I get up at six every day.'],
+      ['paragraph', null, 'Zuerst mache ich das Fenster auf und atme die kalte Luft ein.', 'First I open the window and breathe in the cold air.'],
+      ['paragraph', null, 'Dann gehe ich in die Küche, koche Wasser und mache mir einen starken Kaffee.', 'Then I go to the kitchen, boil water and make myself a strong coffee.'],
+      ['paragraph', null, 'Meine Mitbewohnerin schläft meistens noch, also bin ich ganz leise.', 'My flatmate is usually still asleep, so I am very quiet.'],
+      ['dialogue', 'Anna', 'Guten Morgen! Ist noch Kaffee da?', 'Good morning! Is there any coffee left?'],
+      ['dialogue', 'Ben', 'Nein, tut mir leid, ich habe alles getrunken.', 'No, sorry, I drank all of it.'],
+      ['dialogue', 'Anna', 'Was? Schon wieder!', 'What? Again!'],
+      ['paragraph', null, 'Danach lese ich zehn Minuten die Nachrichten auf meinem Handy.', 'Afterwards I read the news on my phone for ten minutes.'],
+      ['paragraph', null, 'Um sieben Uhr ziehe ich mich an und gehe zur Arbeit. Der Bus kommt immer pünktlich, aber er ist immer voll.', 'At seven I get dressed and go to work. The bus always comes on time, but it is always full.'],
+      ['paragraph', null, 'Im Bus höre ich Musik oder ich schaue einfach aus dem Fenster und denke an nichts.', 'On the bus I listen to music, or I just look out of the window and think about nothing.'],
+      ['paragraph', null, 'Wenn ich ankomme, ist es meistens schon hell, und der Tag kann beginnen.', 'When I arrive it is usually light already, and the day can begin.'],
+      ['paragraph', null, 'Später am Abend erzähle ich Anna, dass ich morgen früher aufstehe, damit ich neuen Kaffee kaufen kann.', 'Later in the evening I tell Anna that I will get up earlier tomorrow so I can buy new coffee.'],
+      ['paragraph', null, 'Sie lacht und sagt, dass sie das nicht glaubt.', 'She laughs and says she does not believe it.'],
+      ['untimed', null, '(Dieser Absatz wurde später hinzugefügt und hat keine Zeit. Er wird gelesen, aber nicht verfolgt.)', '(This paragraph was added later and has no time. It is read, but not followed.)']
+    ];
+    const d = { id: 'doc_demo', language: 'de', media: null,
+      origin: { route: 'own_transcript', by: 'creator', created_at: '2026-11-08T00:00:00Z' },
+      blocks: [], lines: {}, notes: [] };
+    let t = 800, wn = 0, ln = 0, lastDlg = null;
+    for (const [type, speaker, text, en] of L) {
+      const lid = 'l' + (++ln);
+      const words = TimedText.tokenize(text).map(x => ({ id: 'w' + (++wn), text: x.text }));
+      const line = { words, translation: { en } };
+      if (speaker) line.speaker = speaker;
+      if (type !== 'untimed') {
+        // a natural-ish pace: ~3 words a second, longer words take longer, pauses at punctuation
+        let s = (type === 'dialogue' && speaker === 'Ben') ? t - 1900 : t; // Ben cuts in over Anna's last words
+        line.start = s;
+        for (const w of words) {
+          const letters = w.text.replace(/[^\p{L}]/gu, '').length;
+          const dur = 150 + letters * 42;
+          w.start = Math.round(s); w.end = Math.round(s + dur); w.by = 'hand';
+          s += dur + (/[.!?]$/.test(w.text) ? 380 : /[,;:]$/.test(w.text) ? 200 : 40);
+        }
+        line.end = words[words.length - 1].end;
+        t = s + (type === 'heading' ? 900 : 500);
+      }
+      d.lines[lid] = line;
+      if (type === 'dialogue') {
+        if (!lastDlg) { lastDlg = { type: 'dialogue', lines: [] }; d.blocks.push(lastDlg); }
+        lastDlg.lines.push(lid);
+      } else {
+        lastDlg = null;
+        d.blocks.push({ type: type === 'untimed' ? 'paragraph' : type, lines: [lid] });
+      }
+    }
+    // one note, to prove notes ride along without touching timing (not drawn yet)
+    const ben = Object.values(d.lines).find(l => l.speaker === 'Ben');
+    d.notes.push({ id: 'n1', words: [ben.words[0].id], kind: 'meant', text: 'Nein, leider nicht.', status: 'open',
+                   history: [{ at: '2026-11-08T00:00:00Z', by: 'creator', did: 'raised' }] });
+    return d;
+  }
+  function openDemo() {
+    const d = demoDoc();
+    open(d, TTClock.sim(TimedText.buildIndex(d).duration + 1500), 'Demo · Ein ganz normaler Morgen');
+    $('stage').classList.remove('on');
+    $('rate').textContent = '1×';
+  }
+
+  // ── YouTube ───────────────────────────────────────────────────────────
+  function loadYtApi(cb) {
+    if (window.YT && window.YT.Player) return cb();
+    (window._ytCbs = window._ytCbs || []).push(cb);
+    if (window._ytLoading) return; window._ytLoading = true;
+    window.onYouTubeIframeAPIReady = () => { (window._ytCbs || []).forEach(f => f()); window._ytCbs = []; };
+    const s = document.createElement('script'); s.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(s);
+  }
+  function openVideo(d, videoId, title) {
+    $('stage').classList.add('on');
+    open(d, null, title); // the text first; the clock arrives when the player is ready
+    const ready = player => { setClock(TTClock.youtube(player)); $('rate').textContent = '1×'; };
+    loadYtApi(() => {
+      if (yt) { try { yt.destroy(); } catch (e) {} yt = null; $('stage').querySelector('.rd-screen').innerHTML = '<div id="yt-player"></div>'; }
+      yt = new YT.Player('yt-player', {
+        videoId, host: 'https://www.youtube-nocookie.com',
+        playerVars: { rel: 0, modestbranding: 1, playsinline: 1, origin: location.origin },
+        events: { onReady: e => ready(e.target), onStateChange: () => follow && follow.kick() }
+      });
+    });
+  }
+
+  // ── the account (read only) ───────────────────────────────────────────
+  // Same database and sign-in as the app: sign in there, then come back here.
+  let sb = null;
+  async function connect() {
+    if (params.has('demo')) return null;
+    await new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+      s.onload = res; s.onerror = rej; document.head.appendChild(s);
+    }).catch(() => null);
+    await new Promise(res => { const s = document.createElement('script'); s.src = '../config.js'; s.onload = res; s.onerror = res; document.head.appendChild(s); });
+    if (!window.supabase || typeof VOCAB_ENVS === 'undefined') return null;
+    let env = store('vocabEnv'); if (!VOCAB_ENVS[env]) env = VOCAB_DEFAULT_ENV;
+    if (env === 'dev') { const b = document.createElement('span'); b.className = 'rd-env'; b.textContent = 'DEV'; $('pick').before(b); }
+    sb = supabase.createClient(VOCAB_ENVS[env].url, VOCAB_ENVS[env].anon, { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
+    const { data } = await sb.auth.getSession();
+    return data && data.session ? sb : null;
+  }
+  async function listTexts() {
+    const { data, error } = await sb.from('sources').select('ext_id,title,video_id,last_active_at')
+      .is('deleted_at', null).order('last_active_at', { ascending: false, nullsFirst: false }).limit(300);
+    if (error) { console.warn('[cadence] list failed', error.message); return; }
+    const pick = $('pick');
+    for (const r of data || []) {
+      if (!r.ext_id) continue;
+      const o = document.createElement('option');
+      o.value = r.ext_id; o.textContent = (r.video_id ? '▶ ' : '') + (r.title || 'Untitled');
+      pick.appendChild(o);
+    }
+  }
+  async function openText(extId) {
+    const { data, error } = await sb.from('sources').select('ext_id,title,body,segments,video_id').eq('ext_id', extId).limit(1);
+    const r = data && data[0];
+    if (error || !r) { $('page').innerHTML = '<div class="rd-empty">Could not open this text.</div>'; return; }
+    const d = TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id });
+    if (r.video_id) openVideo(d, r.video_id, r.title);
+    else { $('stage').classList.remove('on'); if (yt) { try { yt.pauseVideo(); } catch (e) {} } open(d, null, r.title); }
+  }
+
+  $('pick').onchange = () => {
+    const v = $('pick').value;
+    const u = new URL(location.href);
+    if (v === 'demo') { u.searchParams.delete('text'); openDemo(); if (yt) { try { yt.pauseVideo(); } catch (e) {} } }
+    else { u.searchParams.set('text', v); openText(v); }
+    u.searchParams.delete('demo');
+    history.replaceState(null, '', u);
+  };
+
+  // ── start ─────────────────────────────────────────────────────────────
+  (async function start() {
+    const want = params.get('text');
+    if (!want) openDemo();
+    else $('page').innerHTML = '<div class="rd-empty">Opening…</div>';
+    const client = await connect().catch(() => null);
+    if (!client) {
+      if (want) { $('page').innerHTML = '<div class="rd-empty">Sign in on the Library page first, then come back.</div>'; }
+      const o = document.createElement('option'); o.disabled = true; o.textContent = 'Sign in on the Library page to see your texts';
+      $('pick').appendChild(o);
+      return;
+    }
+    await listTexts();
+    if (want) { $('pick').value = want; await openText(want); }
+  })();
+
+  window.__cadence = { get follow() { return follow; }, get clock() { return clock; }, get index() { return index; }, get doc() { return doc; }, page };
+})();
+</script>
+</body>
+</html>
