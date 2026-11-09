@@ -1,4 +1,4 @@
-// cadence · 2026-11-09a
+// cadence · 2026-11-09b
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -140,29 +140,46 @@
       } catch (e) {}
       return false;
     }
-    // A frozen clock: the player says "playing" but its time hasn't moved for
-    // 1.5 s. YouTube reports several times a second while the video really plays,
-    // so this is an ad (seen on 9 Nov: the id and length checks alone missed it)
-    // or a stall. Either way nothing should follow.
+    // What an ad looks like, measured on Big T's computer (9 Nov, pre-roll):
+    // the state is -1 ("not started") while the time runs from 0, with this
+    // video's id and length. So: time moving while the player is not in
+    // "playing" is an ad. Two forward steps are needed, so a single jump (a seek
+    // while paused) isn't one. Also kept: "playing" but frozen for 1.5 s.
+    let mvRaw = NaN, mvSteps = 0, mvLast = 0, adUntil = 0;
     let frozenRaw = NaN, frozenSince = 0;
-    function frozen() {
-      const t = performance.now();
+    function adByMotion() {
+      const t = performance.now(), s = st();
       let raw; try { raw = player.getCurrentTime() * 1000; } catch (e) { return false; }
-      if (st() !== 1 || raw !== frozenRaw) { frozenRaw = raw; frozenSince = t; return false; }
-      return t - frozenSince > 1500;
+      if (s === 1) {
+        mvSteps = 0;
+        if (raw !== frozenRaw) { frozenRaw = raw; frozenSince = t; }
+        mvRaw = raw; mvLast = t;
+        return t - frozenSince > 1500;            // playing, but the time stands still
+      }
+      frozenRaw = raw; frozenSince = t;
+      if (raw !== mvRaw) {
+        // a step at about real speed (not a seek, which jumps further than time passed)
+        const real = isFinite(mvRaw) && raw > mvRaw && raw - mvRaw <= (t - mvLast) * 1.6 + 120;
+        mvSteps = real && t - mvLast < 1500 ? mvSteps + 1 : (real ? 1 : 0);
+        mvLast = t; mvRaw = raw;
+        if (mvSteps >= 2) adUntil = t + 1500;
+      }
+      return t < adUntil;
     }
     // checked on every read: the player answers from its own cached state, so it
     // is cheap, and a cached answer would let the ad's clock slip through
     let held = 0;
-    const checkAd = () => adNow() || frozen();
+    const checkAd = () => adNow() || adByMotion();
     const realPlaying = () => st() === 1; // 1 = playing (3 = buffering counts as paused)
     const playing = () => realPlaying() && !checkAd();
     const rate = () => { try { return player.getPlaybackRate() || 1; } catch (e) { return 1; } };
     const smooth = smoother(() => { try { return player.getCurrentTime() * 1000; } catch (e) { return NaN; } }, playing, rate);
-    const time = () => { if (checkAd()) return held; held = smooth(); return held; };
+    // during an ad, and before the video has started (-1), the player's time is
+    // not this video's: hold the last good time
+    const time = () => { if (checkAd() || st() === -1) return held; held = smooth(); return held; };
     return {
       kind: 'youtube', time, playing,
-      adPlaying: () => realPlaying() && checkAd(),
+      adPlaying: () => checkAd(),
       // for ?diag: what the player itself reports right now
       probe() {
         const r = { state: st(), frozen: false, ad: false };
@@ -170,7 +187,7 @@
         try { r.dur = Math.round((player.getDuration() || 0) * 1000); } catch (e) {}
         try { const d = player.getVideoData() || {}; r.id = d.video_id; r.title = d.title; r.author = d.author; } catch (e) {}
         try { r.url = player.getVideoUrl(); } catch (e) {}
-        r.idOrLength = adNow(); r.frozen = st() === 1 && performance.now() - frozenSince > 1500 && r.raw === Math.round(frozenRaw);
+        r.idOrLength = adNow(); r.frozen = st() === 1 && performance.now() - frozenSince > 1500;
         return r;
       },
       play() { try { player.playVideo(); } catch (e) {} },

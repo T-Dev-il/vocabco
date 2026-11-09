@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-09a · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-09b · Contractor 20. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -157,6 +157,7 @@
         $('play').innerHTML = (p ? ICON.pause : ICON.play) + (p ? ' Pause' : (clock.kind === 'sim' ? ' Play' : ' Play video'));
         panel.$('.cd-tplay').innerHTML = p ? '❚❚' : '▶';
         document.body.classList.toggle('cd-paused', !p);
+        if (p) autoPaused = false;
         if (p && tipPinned && panel.mode === 'theater') closeTip();
       }
       const adOn = !!(clock.adPlaying && clock.adPlaying());
@@ -231,26 +232,39 @@
     openTip({ text: bare(el.textContent), wid: el.dataset.w, anchor: el, pin, pause: pin });
     picked(el);
   }
-  let hoverT = 0, leaveT = 0;
+  // Caption lines last 2–3 s, so by default hovering a subtitle word pauses the
+  // video (as Language Reactor does) and moving off the subtitles plays again.
+  let hoverT = 0, leaveT = 0, autoPaused = false;
+  const hoverMode = () => { const m = opt('subHover'); return m === 'always' ? 'keep' : m; }; // 'always' was the first name
+  const overSubs = () => !!panel.subsEl.querySelector('.cd-sub-o:hover, .cd-sub-t:hover');
   const leaveSoon = () => {
     clearTimeout(leaveT);
     leaveT = setTimeout(() => {
-      if (tipEl && !tipPinned && !tipEl.matches(':hover') && !(tipAnchor && tipAnchor.matches(':hover'))) closeTip();
+      if (tipPinned || (tipEl && tipEl.matches(':hover')) || overSubs()) return;
+      if (tipEl) closeTip();
+      if (autoPaused) { autoPaused = false; if (clock && !clock.playing()) { clock.play(); follow.kick(); } }
     }, 280);
   };
   panel.subsEl.addEventListener('pointerover', e => {
     const el = e.target.closest('.cd-sw'); if (!el || e.pointerType === 'touch' || !clock) return;
+    clearTimeout(leaveT);
     if (tipPinned || e.buttons) return;                     // a clicked tooltip stays; dragging selects
-    if (opt('subHover') === 'paused' && clock.playing()) return;
-    clearTimeout(leaveT); clearTimeout(hoverT);
-    hoverT = setTimeout(() => { if (!tipPinned && el.isConnected && el.matches(':hover')) wordTip(el, false); }, clock.playing() ? 260 : 120);
+    const mode = hoverMode();
+    if (mode === 'paused' && clock.playing()) return;
+    clearTimeout(hoverT);
+    hoverT = setTimeout(() => {
+      if (tipPinned || !el.isConnected || !el.matches(':hover')) return;
+      if (mode === 'pause' && clock.playing()) { clock.pause(); autoPaused = true; follow.kick(); }
+      wordTip(el, false);
+    }, clock.playing() ? 150 : 110);
   });
-  panel.subsEl.addEventListener('pointerout', e => { if (e.target.closest('.cd-sw')) { clearTimeout(hoverT); leaveSoon(); } });
+  panel.subsEl.addEventListener('pointerout', () => { clearTimeout(hoverT); leaveSoon(); });
   panel.subsEl.addEventListener('click', e => {
     const el = e.target.closest('.cd-sw'); if (!el || !clock) return;
     e.stopPropagation();
     const sel = getSelection(); if (sel && !sel.isCollapsed && sel.toString().trim()) return; // a drag: mouseup handles it
     clearTimeout(hoverT); clearTimeout(leaveT);
+    autoPaused = false;                                     // clicked: it stays paused
     wordTip(el, true);
   });
   panel.subsEl.addEventListener('mouseup', () => setTimeout(() => {
@@ -281,7 +295,7 @@
     dbl:   { label: 'Double-click a word', def: 'select', choices: [['select', 'Selects it (and shows the tooltip)'], ['play', 'Plays from there']] },
     right: { label: 'Right-click a word',  def: 'menu',   choices: [['menu', 'Shows "Play from here"'], ['browser', 'The browser\'s own menu']] },
     tipWhilePlaying: { label: 'Tooltip while playing', def: 'keep', choices: [['keep', 'Video keeps playing'], ['pause', 'Pauses the video']] },
-    subHover: { label: 'Hover a subtitle word', def: 'always', choices: [['always', 'Shows the tooltip, also while playing'], ['paused', 'Only when paused']] }
+    subHover: { label: 'Hover a subtitle word', def: 'pause', choices: [['pause', 'Pauses until you move away'], ['keep', 'Shows the tooltip, video keeps playing'], ['paused', 'Only when already paused']] }
   };
   let keyPrefs = (() => { try { return JSON.parse(store('cadence-keys') || '{}') || {}; } catch (e) { return {}; } })();
   const key = id => keyPrefs[id] != null ? keyPrefs[id] : (ACTIONS.find(a => a.id === id) || {}).def || '';
