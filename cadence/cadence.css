@@ -1,4 +1,4 @@
-/* cadence · 2026-11-08c — Cadence, the new reader page.
+/* cadence · 2026-11-09a — Cadence, the new reader page.
    Look carried over from app.css: the .rc toolbar, themes, mode panel, and the
    video panel (.yt-theater / .yt-stage), renamed cd-… so the two never collide. */
 :root {
@@ -133,7 +133,7 @@ body.no-hl .tt-line.tt-sounding, body.no-hl .tt-w { background: transparent !imp
 .cd-sub-sp { font-size: .62em; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: #a9d28d; margin-right: .5em; }
 .cd-sw { border-radius: .2em; transition: background-color .2s, color .2s; cursor: default; }
 .cd-sw.now { color: #c9f0ad; }
-body.cd-paused .cd-sw:hover, .cd-sw.picked { background: rgba(169,210,141,.35); color: #fff; cursor: pointer; }
+body.cd-paused .cd-sw:hover, .cd-theater .cd-sw:hover, .cd-sw.picked { background: rgba(169,210,141,.35); color: #fff; cursor: pointer; }
 .cd-theater .cd-tbar { display: flex; align-items: center; gap: 10px; position: absolute; top: 0; left: 0; right: 0; padding: 14px 18px 26px; z-index: 9; background: linear-gradient(rgba(0,0,0,.6), transparent); color: #fff; opacity: 0; transition: opacity .25s; pointer-events: none; }
 .cd-theater.cd-awake .cd-tbar, body.cd-paused .cd-theater .cd-tbar { opacity: 1; pointer-events: auto; }
 .cd-tb { border: 1px solid rgba(255,255,255,.28); background: rgba(0,0,0,.35); color: #fff; border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 500; min-height: 34px; }
@@ -199,3 +199,14 @@ body.cd-in-theater { overflow: hidden; }
 .cd-modal-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .cd-modal-acts button { padding: 6px 14px; border-radius: 7px; border: .5px solid var(--border2); background: var(--bg2); font-weight: 600; font-size: 12px; color: var(--text2); }
 .cd-modal-acts .go { background: #6f9b54; border-color: #4f7a37; color: #fff; }
+
+/* the tooltip's foot: actions left, where the translation comes from right */
+.cd-tip-foot { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cd-tip-foot .cd-tip-acts { margin-top: 0; }
+.cd-tip-src { font-size: 10.5px; color: var(--text3); letter-spacing: .02em; white-space: nowrap; }
+.cd-theater .cd-tip { z-index: 30; }
+.cd-theater .cd-subs { user-select: text; -webkit-user-select: text; }
+/* ?diag */
+.cd-diag { position: fixed; left: 8px; bottom: 8px; z-index: 900; max-width: min(760px, 96vw); background: rgba(10,12,10,.88); color: #cfe8bf; border-radius: 8px; padding: 6px 8px; font: 11px/1.35 ui-monospace, monospace; }
+.cd-diag pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; }
+.cd-diag button { font: inherit; padding: 1px 6px; }

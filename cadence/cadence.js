@@ -1,4 +1,4 @@
-// cadence · 2026-11-08c
+// cadence · 2026-11-09a
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -98,26 +98,27 @@
   // every ~100–250 ms, and late). Between reports we run our own clock at the play
   // rate; on each report we nudge toward it, or snap if it jumped (a seek).
   function smoother(readRaw, isPlaying, getRate) {
-    let anchor = 0, anchorAt = 0, lastRaw = NaN, out = 0;
+    let anchor = 0, anchorAt = 0, lastRaw = NaN, out = 0, changedAt = 0;
     return function time() {
       const raw = readRaw();
       if (!isFinite(raw)) return out;
       const t = performance.now();
-      if (!isPlaying()) { anchor = raw; anchorAt = t; lastRaw = raw; out = raw; return out; }
+      if (!isPlaying()) { anchor = raw; anchorAt = t; lastRaw = raw; out = raw; changedAt = t; return out; }
       const pred = anchor + (t - anchorAt) * getRate();
       if (raw !== lastRaw) {
-        lastRaw = raw;
+        lastRaw = raw; changedAt = t;
         if (Math.abs(raw - pred) > 350) { anchor = raw; anchorAt = t; out = raw; return out; } // a jump
         anchor = pred + (raw - pred) * 0.35; anchorAt = t;
       }
-      const v = anchor + (t - anchorAt) * getRate();
+      let v = anchor + (t - anchorAt) * getRate();
+      // the player stopped reporting (an ad, a stall): don't run on past it for long
+      if (t - changedAt > 1000) v = Math.min(v, lastRaw + 1000 * getRate());
       // never step backwards by a little (that is what makes highlights flicker)
       out = (v < out && out - v < 350) ? out : v;
       return out;
     };
   }
 
-  // YouTube IFrame player (already created, onReady fired).
   // YouTube IFrame player (already created, onReady fired).
   // Ad guard: during an ad the player says "playing" and its clock is the ad's.
   // We call it an ad when the player reports a different video id, or a length
@@ -139,10 +140,21 @@
       } catch (e) {}
       return false;
     }
+    // A frozen clock: the player says "playing" but its time hasn't moved for
+    // 1.5 s. YouTube reports several times a second while the video really plays,
+    // so this is an ad (seen on 9 Nov: the id and length checks alone missed it)
+    // or a stall. Either way nothing should follow.
+    let frozenRaw = NaN, frozenSince = 0;
+    function frozen() {
+      const t = performance.now();
+      let raw; try { raw = player.getCurrentTime() * 1000; } catch (e) { return false; }
+      if (st() !== 1 || raw !== frozenRaw) { frozenRaw = raw; frozenSince = t; return false; }
+      return t - frozenSince > 1500;
+    }
     // checked on every read: the player answers from its own cached state, so it
     // is cheap, and a cached answer would let the ad's clock slip through
     let held = 0;
-    const checkAd = adNow;
+    const checkAd = () => adNow() || frozen();
     const realPlaying = () => st() === 1; // 1 = playing (3 = buffering counts as paused)
     const playing = () => realPlaying() && !checkAd();
     const rate = () => { try { return player.getPlaybackRate() || 1; } catch (e) { return 1; } };
@@ -151,6 +163,16 @@
     return {
       kind: 'youtube', time, playing,
       adPlaying: () => realPlaying() && checkAd(),
+      // for ?diag: what the player itself reports right now
+      probe() {
+        const r = { state: st(), frozen: false, ad: false };
+        try { r.raw = Math.round(player.getCurrentTime() * 1000); } catch (e) {}
+        try { r.dur = Math.round((player.getDuration() || 0) * 1000); } catch (e) {}
+        try { const d = player.getVideoData() || {}; r.id = d.video_id; r.title = d.title; r.author = d.author; } catch (e) {}
+        try { r.url = player.getVideoUrl(); } catch (e) {}
+        r.idOrLength = adNow(); r.frozen = st() === 1 && performance.now() - frozenSince > 1500 && r.raw === Math.round(frozenRaw);
+        return r;
+      },
       play() { try { player.playVideo(); } catch (e) {} },
       pause() { try { player.pauseVideo(); } catch (e) {} },
       toggle() { realPlaying() ? this.pause() : this.play(); },
