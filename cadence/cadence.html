@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-09d · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-09e · Contractor 20, Clean up by Contractor 22. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,6 +40,8 @@
   </div>
   <div class="rc-right">
     <span class="cd-note" id="note"></span>
+    <div class="rc-grp cd-view" id="view" hidden><button class="rc-btn" data-v="captions" title="The captions as YouTube made them">Captions</button><button class="rc-btn" data-v="cleaned" title="The text the AI cleaned up">Cleaned</button></div>
+    <button class="ib-label cd-clean" id="clean" hidden title="Clean up the captions with AI: sentences, speakers, misheard words">✦ Clean up</button>
     <select class="cd-pick" id="pick" aria-label="Choose a text"><option value="demo">Demo text</option></select>
     <button class="ib-label" id="keys" title="Keyboard shortcuts and options">⌨ Keys</button>
     <button class="ib-label" id="full" title="Watch full screen with subtitles (F)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Full screen</button>
@@ -53,6 +55,8 @@
 <script src="cadence-shape.js"></script>
 <script src="cadence.js"></script>
 <script src="cadence-theater.js"></script>
+<script src="cadence-clean.js"></script>
+<script src="cadence-cleanup.js"></script>
 <script>
 (function () {
   'use strict';
@@ -528,7 +532,7 @@
     }
     function draw() {
       if (tipEl !== wrap) return;
-      wrap.innerHTML = drawBar() + drawPanel();
+      wrap.innerHTML = drawBar() + aiNoteHtml(ids.length ? ids : (wid ? [wid] : [])) + drawPanel();
       position();
     }
     // above the selection when there's room (the bar nearest the words), else below
@@ -631,6 +635,189 @@
     place(ctxEl, { left: e.clientX, right: e.clientX, width: 0, top: e.clientY + ctxEl.offsetHeight / 2 + 10, bottom: e.clientY });
     ctxEl.querySelector('button').onclick = () => { closeCtx(); closeTip(); playFromWord(id); };
   });
+  // ── Clean up: captions → AI → the same words with their times (this browser only) ──
+  // cadence-cleanup.js does the work; here are the button, the Captions / Cleaned
+  // switch, the AI marks on the page and the AI note in the tooltip.
+  const CU = window.CadenceCleanup;
+  let capDoc = null, capTitle = '', cleanRec = null, cleanBuilt = null, cleanJob = null;
+  const isCaptions = d => !!(d && d.origin && d.origin.route === 'youtube_captions');
+  const viewPref = id => store('cadence-view:' + id) || 'cleaned';
+  const showingCleaned = () => !!(doc && doc.origin && doc.origin.route === 'youtube_ai_cleanup');
+
+  // the document to show for a text just opened: cleaned, if this browser has some
+  function docFor(d, title) {
+    capDoc = isCaptions(d) ? d : null; capTitle = title || '';
+    cleanRec = capDoc && CU ? CU.load(capDoc.id) : null;
+    cleanBuilt = cleanRec ? CU.build(capDoc, cleanRec) : null;
+    if (cleanBuilt && cleanBuilt.done && viewPref(capDoc.id) === 'cleaned') return cleanBuilt.doc;
+    return d;
+  }
+  // put another document in place, keeping the clock, the place and follow
+  function swapDoc(d) {
+    if (!follow) return;
+    const top = $('scroll').scrollTop;
+    closeTip(); closeCtx();
+    doc = d; page.render(d); index = TimedText.buildIndex(d);
+    follow.setIndex(index); subs.setDoc(d);
+    markAi();
+    $('scroll').scrollTop = top;
+    follow.kick();
+    cleanUi();
+  }
+  function setView(v) {
+    if (!capDoc) return;
+    store('cadence-view:' + capDoc.id, v);
+    if (v === 'cleaned' && cleanBuilt && cleanBuilt.done) swapDoc(cleanBuilt.doc);
+    else if (v === 'captions') swapDoc(capDoc);
+    cleanUi();
+  }
+  $('view').onclick = e => { const b = e.target.closest('[data-v]'); if (b) setView(b.dataset.v); };
+
+  function cleanUi() {
+    const btn = $('clean'), view = $('view');
+    btn.hidden = !capDoc || !CU;
+    if (btn.hidden) { view.hidden = true; return; }
+    const done = cleanBuilt ? cleanBuilt.done : 0, total = cleanBuilt ? cleanBuilt.total : 0;
+    view.hidden = !done;
+    view.querySelectorAll('[data-v]').forEach(b => b.classList.toggle('on', b.dataset.v === (showingCleaned() ? 'cleaned' : 'captions')));
+    btn.classList.toggle('running', !!cleanJob);
+    btn.textContent = cleanJob ? `Cleaning ${done + 1} of ${total} · Stop`
+      : !cleanRec ? '✦ Clean up'
+      : done < total ? `✦ Clean up the rest (${done} of ${total} done)` : '✦ Cleaned';
+  }
+
+  // AI marks on the page: faint, and every one says it's an AI note
+  const AI_CLASS = { caption_fix: 'ai-fix', name_fix: 'ai-name', meant: 'ai-meant', unclear: 'ai-unclear',
+    changed: 'ai-changed', added: 'ai-changed', dropped: 'ai-dropped', speaker_unclear: 'ai-spq' };
+  const AI_LABEL = n => n.kind === 'caption_fix' ? `Misheard by the captions · they had “${n.was || ''}”`
+    : n.kind === 'name_fix' ? `Name corrected · the captions had “${n.was || ''}”`
+    : n.kind === 'meant' ? `Said this way · meant: “${n.text || ''}”`
+    : n.kind === 'unclear' ? 'Hard to make out'
+    : n.kind === 'speaker_unclear' ? 'Not sure who says this'
+    : n.kind === 'changed' ? `Changed with no note · the captions had “${n.was || ''}”`
+    : n.kind === 'added' ? 'Added by the AI, not in the captions'
+    : n.kind === 'dropped' ? `Left out after this word: “${n.was || ''}”`
+    : n.kind;
+  function markAi() {
+    if (!showingCleaned()) return;
+    const names = doc.speakers || {};
+    // speaker at the start of each turn
+    let firstRaw = null;
+    for (const b of doc.blocks) {
+      const first = b.lines && b.lines[0], el = first && page.line(first);
+      const p = el && el.closest('p'); if (!p) continue;
+      if (b.raw) { if (!firstRaw) firstRaw = p; continue; }
+      const sp = doc.lines[first].speaker;
+      if (sp) p.insertAdjacentHTML('afterbegin', `<span class="tt-sp-in" title="${esc(sp)}">${esc(names[sp] || sp)}</span>`);
+    }
+    if (firstRaw && cleanBuilt && cleanBuilt.done < cleanBuilt.total)
+      firstRaw.insertAdjacentHTML('beforebegin', `<div class="cd-raw-mark">${cleanJob ? 'Being cleaned up · captions as they came until then' : 'Not cleaned yet from here · captions as they came'}</div>`);
+    for (const n of doc.notes || []) {
+      const cls = AI_CLASS[n.kind]; if (!cls) continue;
+      const ids = n.words && n.words.length ? n.words : (n.lines || []).flatMap(l => (doc.lines[l] ? doc.lines[l].words.map(w => w.id) : []));
+      ids.forEach(id => { const el = page.word(id); if (el) { el.classList.add('ai-n', cls); el.title = 'AI note: ' + AI_LABEL(n); } });
+    }
+  }
+  function aiNoteHtml(ids) {
+    if (!showingCleaned() || !CU) return '';
+    const seen = new Set(), out = [];
+    for (const id of ids.slice(0, 12)) for (const n of CU.notesFor(doc, id)) { if (!seen.has(n.id)) { seen.add(n.id); out.push(n); } }
+    if (!out.length) return '';
+    return `<div class="cd-ai">${out.map(n => `<div class="cd-ai-row"><span class="cd-ai-lbl">AI note</span>${esc(AI_LABEL(n))}${n.why ? `<span class="cd-ai-why">${esc(n.why)}</span>` : ''}</div>`).join('')}</div>`;
+  }
+  // one click on an AI-marked word shows its note
+  $('page').addEventListener('click', e => {
+    const el = e.target.closest('.ai-n'); if (!el) return;
+    const sel = getSelection(); if (sel && !sel.isCollapsed) return;
+    openTip({ text: el.textContent.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '') || el.textContent, wid: el.dataset.w, anchor: el, pin: true });
+  });
+
+  // the Clean up dialog
+  function openCleanup() {
+    if (cleanJob) { cleanJob.abort(); return; }
+    if (!capDoc) return;
+    closeTip(); closeCtx();
+    const rec = cleanRec;
+    const model = (rec && rec.model) || store('cadence-clean-model') || CU.MODELS[0][0];
+    const speakers = (rec && rec.speakers) || store('cadence-speakers:' + capDoc.id) || '';
+    const k = CU.key();
+    const done = cleanBuilt ? cleanBuilt.done : 0, total = cleanBuilt ? cleanBuilt.total : CU.plan(capDoc).length;
+    const est = CU.estimate(capDoc, model);
+    const bg = document.createElement('div'); bg.className = 'cd-modal-bg';
+    bg.innerHTML = `<div class="cd-modal cd-cl" role="dialog" aria-label="Clean up">
+      <h3>Clean up the captions</h3>
+      <p class="cd-cl-p">An AI turns the captions into sentences, says who speaks, fixes words the captions misheard, and marks what it changed or wasn't sure of. The words keep their times, so the highlight still follows the video. It works through the text in ${total} parts; you can read while it works.</p>
+      ${rec ? `<p class="cd-cl-p"><b>${done} of ${total} parts are cleaned</b> in this browser${rec.model ? `, with ${esc(rec.model)}` : ''}.</p>` : ''}
+      <div class="cd-modal-sub">Model</div>
+      <select id="cl-model" class="cd-cl-in" ${rec && done ? 'disabled title="Forget this cleanup to change the model"' : ''}>${CU.MODELS.map(m => `<option value="${m[0]}"${m[0] === model ? ' selected' : ''}>${m[1]} · ${m[2]}</option>`).join('')}</select>
+      <div class="cd-cl-est" id="cl-est"></div>
+      <div class="cd-modal-sub">Who speaks <span class="cd-cl-opt">optional, helps a lot</span></div>
+      <input id="cl-spk" class="cd-cl-in" type="text" value="${esc(speakers)}" placeholder="S1 = the host, asks the questions; S2 = the guest">
+      <div class="cd-modal-sub">Start</div>
+      <div class="cd-cl-radio"><label><input type="radio" name="cl-from" value="start" checked> From the beginning</label>
+        <label><input type="radio" name="cl-from" value="here"${clock && clock.time() > 5000 ? '' : ' disabled'}> From where the video is now</label></div>
+      <div class="cd-modal-sub">Gemini key</div>
+      ${k ? `<div class="cd-cl-p">Uses the key saved in the Reader Lab (…${esc(k.slice(-4))}). <button class="cd-cl-link" id="cl-chg">Use another</button></div>` : ''}
+      <input id="cl-key" class="cd-cl-in" type="password" placeholder="Paste a Gemini API key (starts with AIza)" ${k ? 'hidden' : ''}>
+      <div class="cd-modal-note">The calls go from this browser straight to Google with this key. The cleaned text is kept in this browser only, not in your library.</div>
+      <div class="cd-cl-err" id="cl-err" hidden></div>
+      <div class="cd-modal-acts">${rec ? '<button id="cl-forget">Forget this cleanup</button>' : ''}<button id="cl-cancel">Cancel</button><button class="go" id="cl-go">${rec && done ? (done < total ? 'Clean up the rest' : 'Done') : 'Clean up'}</button></div>
+    </div>`;
+    document.body.appendChild(bg);
+    const q = s => bg.querySelector(s);
+    const showEst = () => { const e = CU.estimate(capDoc, q('#cl-model').value); q('#cl-est').textContent = `About ${Math.round(e.minutes)} min of video, ${e.words.toLocaleString()} words. On Google's free tier it costs nothing; paid, about ${e.cents < 1 ? 'under 1' : Math.round(e.cents)}¢.`; };
+    showEst(); q('#cl-model').onchange = showEst;
+    const close = () => bg.remove();
+    q('#cl-cancel').onclick = close;
+    bg.addEventListener('mousedown', e => { if (e.target === bg) close(); });
+    if (q('#cl-chg')) q('#cl-chg').onclick = () => { q('#cl-key').hidden = false; q('#cl-key').focus(); };
+    if (q('#cl-forget')) {
+      let sure = false;
+      q('#cl-forget').onclick = () => {
+        if (!sure) { sure = true; q('#cl-forget').textContent = 'Forget it? Press again'; return; }
+        CU.forget(capDoc.id); cleanRec = null; cleanBuilt = null; close();
+        if (showingCleaned()) swapDoc(capDoc); else cleanUi();
+      };
+    }
+    q('#cl-go').onclick = () => {
+      if (rec && done >= total) { close(); return; }
+      const nk = q('#cl-key').hidden ? '' : q('#cl-key').value.trim();
+      if (!k && !nk) { q('#cl-err').hidden = false; q('#cl-err').textContent = 'Paste a Gemini key first. You can make one in Google AI Studio.'; return; }
+      if (nk) CU.setKey(nk);
+      const m = q('#cl-model').value, sp = q('#cl-spk').value.trim();
+      store('cadence-clean-model', m); store('cadence-speakers:' + capDoc.id, sp);
+      if (!cleanRec) cleanRec = CU.newRecord(capDoc, { model: m, speakers: sp, title: capTitle });
+      else cleanRec.speakers = sp;
+      let startPart = 0;
+      if (q('input[name="cl-from"]:checked').value === 'here' && clock) {
+        const t = clock.time(), L = CU.lineList(capDoc);
+        const i = cleanRec.parts.findIndex(p => { const l = L[p.to - 1].line; return typeof l.end === 'number' && l.end >= t; });
+        startPart = Math.max(0, i);
+      }
+      close();
+      startCleanup(startPart);
+    };
+  }
+  $('clean').onclick = openCleanup;
+
+  async function startCleanup(startPart) {
+    const id = capDoc.id, rec = cleanRec, ctl = new AbortController();
+    cleanJob = ctl;
+    const rebuild = () => {
+      if (!capDoc || capDoc.id !== id) return;               // another text was opened meanwhile
+      cleanBuilt = CU.build(capDoc, rec);
+      if (cleanBuilt.done && (showingCleaned() || viewPref(id) === 'cleaned')) swapDoc(cleanBuilt.doc); else cleanUi();
+    };
+    CU.save(id, rec); rebuild();
+    $('note').textContent = '';
+    await CU.run(capDoc, rec, { key: CU.key(), signal: ctl.signal, startPart,
+      onPart: () => { if (!CU.save(id, rec)) $('note').textContent = 'This browser is full: the cleaned text won’t all be kept'; rebuild(); },
+      onError: (i, e) => { CU.save(id, rec); $('note').textContent = 'Clean up stopped at part ' + (i + 1) + ': ' + e.message; }
+    });
+    if (cleanJob === ctl) cleanJob = null;
+    rebuild();
+  }
+
   // ── the demo: timed by hand-written pace, with an overlap and an untimed addition
   function demoDoc() {
     const L = [
@@ -688,6 +875,8 @@
     return d;
   }
   function openDemo() {
+    if (cleanJob) cleanJob.abort();
+    capDoc = null; cleanRec = null; cleanBuilt = null; cleanUi();
     const d = demoDoc();
     stopYt();
     open(d, TTClock.sim(TimedText.buildIndex(d).duration + 1500), 'Demo · Ein ganz normaler Morgen');
@@ -756,9 +945,12 @@
     const r = data && data[0];
     if (error || !r) { $('page').innerHTML = '<div class="cd-empty">Could not open this text.</div>'; return; }
     lastRow = r;
-    const d = TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id });
+    if (cleanJob) cleanJob.abort();
+    const d0 = TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id });
+    const d = docFor(d0, r.title);
     if (r.video_id) openVideo(d, r.video_id, r.title);
     else { stopYt(); panel.show(false); open(d, null, r.title); }
+    markAi(); cleanUi();
   }
 
   $('pick').onchange = () => {
@@ -786,7 +978,8 @@
     if (want) { $('pick').value = want; await openText(want); }
   })();
 
-  window.__cadence = { get follow() { return follow; }, get clock() { return clock; }, get index() { return index; }, get doc() { return doc; }, get subs() { return subs; }, page, panel, translate };
+  window.__cadence = { openRow(r) { lastRow = r; const d = docFor(TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id }), r.title); stopYt(); panel.show(false); open(d, null, r.title); markAi(); cleanUi(); },
+    get follow() { return follow; }, get clock() { return clock; }, get index() { return index; }, get doc() { return doc; }, get subs() { return subs; }, page, panel, translate };
 })();
 </script>
 </body>

@@ -1,4 +1,4 @@
-// cadence-shape · 2026-11-08
+// cadence-shape · 2026-11-09a (note kinds: name_fix, changed, added, dropped for the AI cleanup)
 //
 // One shape for every text that plays along with sound (claude/timed-text-brief.md rev 3, §2).
 // This file has no DOM and no network: it builds, checks and searches documents.
@@ -20,7 +20,7 @@
   // Starting lists from brief rev 3 §2. Unknown values are reported, never refused.
   const ROUTES = ['own_transcript', 'aligner', 'youtube_captions', 'youtube_ai_cleanup', 'learner_upload', 'tts', 'ebook_audiobook'];
   const ORIGIN_BY = ['creator', 'teacher', 'learner'];
-  const NOTE_KINDS = ['caption_fix', 'unclear', 'speaker_unclear', 'meant'];
+  const NOTE_KINDS = ['caption_fix', 'unclear', 'speaker_unclear', 'meant', 'name_fix', 'changed', 'added', 'dropped'];
   const NOTE_STATUS = ['open', 'accepted', 'rejected'];
 
   // origin for a new document. route and by come from the caller; time is now.

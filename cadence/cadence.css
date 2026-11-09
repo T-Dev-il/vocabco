@@ -1,4 +1,4 @@
-/* cadence · 2026-11-09c — Cadence, the new reader page.
+/* cadence · 2026-11-09d — Cadence, the new reader page.
    Look carried over from app.css: the .rc toolbar, themes, mode panel, and the
    video panel (.yt-theater / .yt-stage), renamed cd-… so the two never collide. */
 :root {
@@ -258,3 +258,31 @@ body.cd-in-theater { overflow: hidden; }
 body.th-dark .cd-m-hl-yellow { background: rgba(255,235,120,.30); } body.th-dark .cd-m-hl-pink { background: rgba(255,150,200,.30); } body.th-dark .cd-m-hl-blue { background: rgba(120,190,255,.30); }
 .cd-sw.cd-m-hl-yellow, .cd-sw.cd-m-hl-pink, .cd-sw.cd-m-hl-blue { color: #1a1c19; }
 .cd-sw.cd-m-add { text-decoration-color: #a9d28d; }
+
+/* ── Clean up (cadence-cleanup.js) · Contractor 22 ─────────────────────── */
+.cd-view .rc-btn.on { background: var(--g-soft, #eaf3e3); color: var(--g-text, #3f6e2b); font-weight: 600; }
+.cd-clean.running { border-color: var(--g-line, #8fb877); color: var(--g-text, #3f6e2b); }
+.tt-sp-in { display: inline-block; margin-right: .5em; font: 600 .62em/1 var(--sans); letter-spacing: .05em; text-transform: uppercase; color: var(--text3); vertical-align: .15em; }
+.cd-raw-mark { margin: 1.4em 0 .8em; padding-top: .6em; border-top: 1px dashed var(--border2); font: 500 11px/1.4 var(--sans); letter-spacing: .04em; text-transform: uppercase; color: var(--text3); }
+/* AI marks: faint until you look for them, every one titled "AI note" */
+.ai-n { cursor: pointer; text-decoration-thickness: 1.5px; text-underline-offset: .22em; }
+.ai-fix, .ai-name { text-decoration: underline dotted rgba(201,138,26,.75); }
+.ai-meant { text-decoration: underline dashed rgba(47,98,168,.65); }
+.ai-unclear { text-decoration: underline wavy rgba(138,91,176,.6); }
+.ai-changed { text-decoration: underline dotted rgba(179,65,46,.75); }
+.ai-dropped::after { content: '…'; color: rgba(179,65,46,.8); margin-left: .1em; }
+.ai-spq { text-decoration: none; }
+body.no-ai .ai-n { text-decoration: none; }
+body.no-ai .ai-dropped::after { content: none; }
+.cd-view[hidden], .cd-clean[hidden] { display: none !important; }
+.cd-ai { width: min(300px, calc(100vw - 16px)); box-sizing: border-box; background: var(--white); border: .5px solid var(--border2); border-radius: 9px; box-shadow: 0 4px 18px rgba(0,0,0,.14); padding: 8px 11px 9px; display: grid; gap: 6px; font: 12.5px/1.45 var(--sans); color: var(--text); }
+.cd-ai-row { display: grid; gap: 1px; }
+.cd-ai-lbl { font-size: 9.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text3); }
+.cd-ai-why { color: var(--text3); font-size: 11px; }
+.cd-cl-p { margin: 0 0 8px; color: var(--text2); }
+.cd-cl-in { width: 100%; box-sizing: border-box; padding: 7px 9px; border-radius: 7px; border: .5px solid var(--border2); background: var(--bg2); color: var(--text); font: 13px var(--sans); }
+.cd-cl-est { margin-top: 5px; font-size: 11.5px; color: var(--text3); }
+.cd-cl-opt { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.cd-cl-radio { display: grid; gap: 4px; color: var(--text2); }
+.cd-cl-link { border: 0; background: none; padding: 0; color: var(--g-text, #3f6e2b); text-decoration: underline; font: inherit; cursor: pointer; }
+.cd-cl-err { margin-top: 8px; color: #b3412e; font-size: 12px; }
