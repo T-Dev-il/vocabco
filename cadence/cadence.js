@@ -1,4 +1,4 @@
-// cadence · 2026-11-09b
+// cadence · 2026-11-09c
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -297,13 +297,35 @@
     }
 
     // ── gestures that mean "I'm scrolling myself" ─────────────────────────
+    // Robustness (9 Nov): a trackpad keeps sending wheel events for a while after
+    // the fingers stop (momentum), and a light brush sends a few pixels. Neither
+    // should break follow. So:
+    // - the wheel must add up to a real scroll (24 px within 0.3 s);
+    // - when follow resumes while a wheel stream is still running, the rest of
+    //   that stream is momentum and is ignored, until a 0.2 s gap ends it (or 2.5 s).
+    // A new scroll after a gap counts straight away.
+    let wheelSum = 0, wheelAt = -1e9, momentum = false, momentumFrom = 0;
     function userScrolled() {
       if (!followWanted || followPaused) return;
       cancelTween();
       followPaused = true;
       emit();
     }
-    const onWheel = () => userScrolled();
+    function markResumed() {
+      const now = performance.now();
+      momentum = now - wheelAt < 250; momentumFrom = now; wheelSum = 0;
+    }
+    const onWheel = e => {
+      const now = performance.now(), gap = now - wheelAt;
+      wheelAt = now;
+      if (momentum) {
+        if (gap < 200 && now - momentumFrom < 2500) return; // still the old stream
+        momentum = false;
+      }
+      if (gap > 300) wheelSum = 0;
+      wheelSum += Math.abs(e.deltaY || 0) * (e.deltaMode ? 16 : 1);
+      if (wheelSum >= 24) userScrolled();
+    };
     let touchY = null;
     const onTouchStart = e => { touchY = e.touches[0] ? e.touches[0].clientY : null; };
     const onTouchMove = e => { if (touchY != null && e.touches[0] && Math.abs(e.touches[0].clientY - touchY) > 8) userScrolled(); };
@@ -321,9 +343,22 @@
     document.addEventListener('keydown', onKey);
 
     // ── the loop ──────────────────────────────────────────────────────────
+    // When the sound starts again after a real stop (a pause, an ad, the end of a
+    // seek), follow picks up again: scrolling away while nothing plays shouldn't
+    // leave follow broken once it plays. A hiccup under 0.7 s doesn't count.
+    let wasPlaying = false, stoppedAt = 0;
+    function watchPlay() {
+      const p = !!(clock && clock.playing()), now = performance.now();
+      if (p && !wasPlaying && followPaused && followWanted && now - stoppedAt > 700) {
+        followPaused = false; markResumed(); recenter(); emit();
+      }
+      if (!p && wasPlaying) stoppedAt = now;
+      wasPlaying = p;
+    }
     function tick() {
       raf = 0; timer = 0;
       if (!alive) return;
+      watchPlay();
       update(false);
       // a frame at a time while playing; four times a second while paused, to catch
       // a seek made in the player's own controls
@@ -379,8 +414,8 @@
         update(false);
         emit();
       },
-      setFollow(v) { followWanted = !!v; followPaused = false; if (v) recenter(); emit(); },
-      resume() { followPaused = false; held = false; recenter(); emit(); },
+      setFollow(v) { followWanted = !!v; followPaused = false; if (v) { markResumed(); recenter(); } emit(); },
+      resume() { followPaused = false; held = false; markResumed(); recenter(); emit(); },
       // hold(true) while the reader is busy with a selection; hold(false) catches up
       hold(v) { v = !!v; if (v === held) return; held = v; if (!v) { lastRowTop = null; update(true); } },
       recenter,

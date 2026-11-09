@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-09b · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-09c · Contractor 20. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,6 +49,7 @@
 <main class="cd-scroll" id="scroll"><article class="cd-page" id="page"></article></main>
 <button class="cd-back" id="back">Follow again</button>
 
+<script src="../icons.js"></script>
 <script src="cadence-shape.js"></script>
 <script src="cadence.js"></script>
 <script src="cadence-theater.js"></script>
@@ -112,7 +113,7 @@
       follow = TTFollow({ page, index, clock: c, scroller: $('scroll'), topInset: panel.topInset,
         highlight: store('cadence-hl') !== '0', follow: store('cadence-fo') !== '0' });
       follow.on(showState);
-      subs = CadenceSubs(panel.subsEl, { doc: d, follow, translate, mode: store('cadence-subs') || 'both',
+      subs = CadenceSubs(panel.subsEl, { doc: d, follow, translate, decorate: el => decorate(el), mode: store('cadence-subs') || 'both',
         order: store('cadence-order') || 'orig', blur: store('cadence-blur') || 'none' });
     } else { follow.setIndex(index); subs.setDoc(d); }
     setClock(c);
@@ -129,14 +130,22 @@
   // ── reader controls ───────────────────────────────────────────────────
   function showState(s) {
     $('hl').classList.toggle('on', s.highlight);
-    $('fo').classList.toggle('on', s.follow);
+    $('fo').classList.toggle('on', s.follow && !s.paused);
+    $('fo').classList.toggle('held', s.follow && s.paused);
+    $('fo').title = s.follow && s.paused ? 'Follow is paused because you scrolled. Click (or G) to follow again' : s.follow ? 'Follow is on (G)' : 'Follow is off (G)';
     document.body.classList.toggle('no-hl', !s.highlight);
     const back = $('back');
     back.classList.toggle('show', s.follow && s.paused && !!(clock && index && index.timedCount) && panel.mode !== 'theater');
     back.textContent = s.where === 'above' ? 'Back to the text ↑' : s.where === 'below' ? 'Back to the text ↓' : 'Follow again';
   }
   $('hl').onclick = () => { const v = !follow.state().highlight; store('cadence-hl', v ? '1' : '0'); follow.setHighlight(v); };
-  $('fo').onclick = () => { const v = !follow.state().follow; store('cadence-fo', v ? '1' : '0'); follow.setFollow(v); };
+  // The Follow button (and G): if follow is on but paused by a scroll, it means
+  // "follow now", not "turn off". Before, the first press turned it off (9 Nov).
+  $('fo').onclick = () => {
+    const s = follow.state();
+    if (s.follow && s.paused) { follow.resume(); return; }
+    const v = !s.follow; store('cadence-fo', v ? '1' : '0'); follow.setFollow(v);
+  };
   $('back').onclick = () => follow.resume();
   const toggle = () => { if (clock) { clock.toggle(); follow.kick(); } };
   $('play').onclick = toggle;
@@ -229,7 +238,7 @@
   function picked(el) { if (pickedEl) pickedEl.classList.remove('picked'); pickedEl = el; if (el) el.classList.add('picked'); }
   const bare = raw => raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '') || raw;
   function wordTip(el, pin) {
-    openTip({ text: bare(el.textContent), wid: el.dataset.w, anchor: el, pin, pause: pin });
+    openTip({ text: bare(el.textContent), wid: el.dataset.w, anchor: el, pin, pause: pin, translate: true });
     picked(el);
   }
   // Caption lines last 2–3 s, so by default hovering a subtitle word pauses the
@@ -271,7 +280,7 @@
     const sel = getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim() && panel.subsEl.contains(sel.anchorNode)) openTipFromSelection(false);
   }, 10));
-  panel.el.addEventListener('click', e => { if (panel.mode === 'theater' && !e.target.closest('.cd-sw, .cd-tip, .cd-tbar, .cd-menu')) closeTip(); });
+  panel.el.addEventListener('click', e => { if (panel.mode === 'theater' && !e.target.closest('.cd-sw, .cd-tt, .cd-tbar, .cd-menu')) closeTip(); });
 
   // ── shortcuts: editable, as app.js's Keyboard shortcuts panel ──────
   // Defaults follow app.js where the action exists there. Esc is fixed.
@@ -425,43 +434,139 @@
     el.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
     el.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
   }
-  // One tooltip for the page and the subtitles. For now: Google Translate for
-  // the word or phrase, dictionary alternatives, the line's translation, and
-  // Play from here. Keep / Add (the AI card) comes next and goes in .cd-tip-acts.
-  // o: { text, wid, rect | anchor (an element), pin, pause }
+
+  // ── marks: Add and highlight, for this session only ───────────────────
+  // Cadence can't write to the library yet (that needs the items + encounters
+  // tables). Until then Add and the highlighter mark the words on the page and
+  // in the subtitles for as long as the page is open, as the Tooltip Lab does.
+  const HL_COLORS = ['yellow', 'pink', 'blue'];
+  let hlColor = HL_COLORS.includes(store('cadence-hl-color')) ? store('cadence-hl-color') : 'yellow';
+  const wordMarks = new Map(); // word id → { add: true, hl: 'yellow' | … }
+  function decorate(el) {
+    const m = wordMarks.get(el.dataset.w) || {};
+    el.classList.toggle('cd-m-add', !!m.add);
+    HL_COLORS.forEach(c => el.classList.toggle('cd-m-hl-' + c, m.hl === c));
+  }
+  function redecorate(ids) {
+    for (const id of ids) {
+      const a = page.word(id); if (a) decorate(a);
+      const b = subs && subs.wordEl(id); if (b) decorate(b);
+    }
+  }
+  const allHave = (ids, f) => ids.length > 0 && ids.every(id => f(wordMarks.get(id) || {}));
+  function setMark(ids, key, val) {
+    for (const id of ids) {
+      const m = Object.assign({}, wordMarks.get(id) || {});
+      if (val) m[key] = val; else delete m[key];
+      if (Object.keys(m).length) wordMarks.set(id, m); else wordMarks.delete(id);
+    }
+    redecorate(ids);
+  }
+  // the word ids a range covers, on the page or in the subtitles
+  function idsInRange(r) {
+    const root = panel.subsEl.contains(r.commonAncestorContainer) ? panel.subsEl : $('page');
+    const out = [];
+    root.querySelectorAll('[data-w]').forEach(el => { if (r.intersectsNode(el) && el.textContent.trim()) out.push(el.dataset.w); });
+    return out;
+  }
+
+  // ── the tooltip: the reader's own (app.js .sel-tt) ────────────────────
+  // Add · Translate · the highlighter, faded until you hover it. It stays open
+  // after an action; pressed buttons undo. Translate opens the translation
+  // panel under (or over) it: Google Translate for the word or phrase, the
+  // line's translation, and Play from here. In the subtitles it opens with the
+  // translation already showing.
+  // o: { text, ids, wid, rect | anchor, pin, pause, translate, fromSel }
   function openTip(o) {
-    const { text, wid } = o;
+    const { text } = o;
+    const ids = o.ids && o.ids.length ? o.ids : (o.wid ? [o.wid] : []);
+    const wid = o.wid || ids[0] || null;
     const lid = wid && index ? index.lineOf(wid) : null;
     closeTip(); closeCtx();
     tipFor = text; tipAnchor = o.anchor || null; tipPinned = !!o.pin; tipFromSel = !!o.fromSel;
     if (follow) follow.hold(true);
     if (o.pause && clock && clock.playing()) { clock.pause(); follow.kick(); }
-    tipEl = document.createElement('div'); tipEl.className = 'cd-tip';
-    const lineT = lid ? ((doc.lines[lid].translation || {})[translate.target] ?? translate.cached(TimedText.lineText(doc, lid))) : null;
+    const wrap = document.createElement('div'); wrap.className = 'cd-tt';
+    tipEl = wrap;
+    const lineT = () => lid ? ((doc.lines[lid].translation || {})[translate.target] ?? translate.cached(TimedText.lineText(doc, lid))) : null;
     const canPlay = !!(wid && clock && index && index.timedCount);
     const rectOf = () => (tipAnchor && tipAnchor.isConnected ? tipAnchor.getBoundingClientRect() : o.rect);
-    const draw = r2 => {
-      if (!tipEl) return;
-      tipEl.innerHTML = `<div class="cd-tip-w">${esc(text)}</div>` +
-        (r2 ? `<div class="cd-tip-t">${esc(r2.text || '—')}</div>` + (r2.alts || []).slice(0, 2).map(a => `<div class="cd-tip-alt"><b>${esc(a.pos)}</b>${esc(a.words.join(', '))}</div>`).join('')
-            : `<div class="cd-tip-t" style="color:var(--text3)">…</div>`) +
-        (lineT && text.split(' ').length < 6 ? `<div class="cd-tip-line">${esc(lineT)}</div>` : '') +
-        `<div class="cd-tip-foot">` +
-          (canPlay ? `<span class="cd-tip-acts"><button data-act="play">${ICON.play} Play from here</button></span>` : '<span></span>') +
-          `<span class="cd-tip-src">Google Translate</span></div>`;
-      place(tipEl, rectOf());
-    };
-    panel.host().appendChild(tipEl);
-    draw(null);
-    tipEl.addEventListener('mousedown', e => e.preventDefault()); // keep the selection
-    tipEl.addEventListener('click', e => { e.stopPropagation(); if (e.target.closest('[data-act="play"]')) { closeTip(); playFromWord(wid); getSelection().removeAllRanges(); } });
-    tipEl.addEventListener('pointerleave', () => { if (!tipPinned) leaveSoon(); });
-    tipEl.addEventListener('pointerenter', () => clearTimeout(leaveT));
-    const mine = tipFor;
-    const words = text.split(' ').length;
-    (words <= 3 ? translate.word(doc.language || 'auto', text)
-                : translate.lines(doc.language || 'auto', [{ key: 'sel', text }]).then(o2 => o2.sel != null ? { text: o2.sel, alts: [] } : null))
-      .then(res => { if (tipEl && tipFor === mine) draw(res || { text: 'Translation not available', alts: [] }); });
+    let xlOpen = false, xlRes = undefined; // undefined: not asked yet; null: asked, waiting
+
+    function drawBar() {
+      const added = allHave(ids, m => m.add), hl = allHave(ids, m => !!m.hl);
+      return `<div class="sel-tt">
+        <button class="tt-add${added ? ' on' : ''}" data-act="add" title="${added ? 'Added (this session only) · click to undo' : 'Add (marks it for this session; saving to your library comes next)'}" ${ids.length ? '' : 'disabled'}>${icon('plus')} Add</button>
+        <button class="tt-tr${xlOpen ? ' on' : ''}" data-act="tr" title="Translate (T)">${icon('translate')}</button>
+        <div class="tt-hl-wrap" title="Highlight · scroll to change colour">
+          <button class="tt-hl${hl ? ' on' : ''}" data-act="hl" title="${hl ? 'Highlighted · click to remove' : 'Highlight'}" ${ids.length ? '' : 'disabled'}><span class="hl-pen hl-pen-${hlColor}">${icon('highlight')}</span></button>
+          <div class="tt-colors">${HL_COLORS.map(c => `<button class="hl-line hl-ln-${c}${c === hlColor ? ' on' : ''}" data-color="${c}" title="${c}"></button>`).join('')}</div>
+        </div>
+      </div>`;
+    }
+    function drawPanel() {
+      if (!xlOpen) return '';
+      const r2 = xlRes, lt = lineT();
+      return `<div class="cd-xl">
+        <div class="cd-xl-term">${esc(text)}</div>
+        <div class="cd-xl-body">${r2 === undefined || r2 === null ? '<span class="cd-xl-wait">Translating…</span>'
+          : `<div class="cd-xl-main">${esc(r2.text || '—')}</div>` + (r2.alts || []).slice(0, 3).map(a => `<div class="cd-xl-alt"><span class="cd-xl-pos">${esc(a.pos)}</span>${esc(a.words.join(', '))}</div>`).join('')}</div>
+        ${lt && text.split(' ').length < 6 ? `<div class="cd-xl-line"><div class="cd-xl-lbl">Line</div>${esc(lt)}</div>` : ''}
+        <div class="cd-xl-foot">${canPlay ? `<button class="cd-xl-btn" data-act="play">${ICON.play} Play from here</button>` : '<span></span>'}<span class="cd-xl-src">Google Translate</span></div>
+      </div>`;
+    }
+    function draw() {
+      if (tipEl !== wrap) return;
+      wrap.innerHTML = drawBar() + drawPanel();
+      position();
+    }
+    // above the selection when there's room (the bar nearest the words), else below
+    function position() {
+      const r = rectOf(); if (!r) return;
+      const host = panel.host(), H = innerHeight, W = innerWidth;
+      wrap.style.top = wrap.style.bottom = '';
+      const h = wrap.offsetHeight, w = wrap.offsetWidth;
+      const above = r.top - h - 8 >= 8 || r.top > H - r.bottom;
+      wrap.classList.toggle('up', above);
+      if (above) wrap.style.bottom = Math.max(8, H - r.top + 8) + 'px';
+      else wrap.style.top = Math.max(8, r.bottom + 8) + 'px';
+      wrap.style.left = Math.max(8, Math.min(r.left, W - w - 8)) + 'px';
+    }
+    function openXl() {
+      xlOpen = true;
+      if (xlRes === undefined) {
+        xlRes = null;
+        const mine = tipFor, words = text.split(' ').length;
+        (words <= 3 ? translate.word(doc.language || 'auto', text)
+                    : translate.lines(doc.language || 'auto', [{ key: 'sel', text }]).then(o2 => o2.sel != null ? { text: o2.sel, alts: [] } : null))
+          .then(res => { if (tipEl === wrap && tipFor === mine) { xlRes = res || { text: 'Translation not available', alts: [] }; draw(); } });
+      }
+      draw();
+    }
+    panel.host().appendChild(wrap);
+    if (o.translate) openXl(); else draw();
+
+    wrap.addEventListener('mousedown', e => e.preventDefault()); // keep the selection
+    wrap.addEventListener('click', e => {
+      e.stopPropagation();
+      const b = e.target.closest('[data-act], [data-color]'); if (!b || b.disabled) return;
+      if (b.dataset.color) { hlColor = b.dataset.color; store('cadence-hl-color', hlColor); setMark(ids, 'hl', hlColor); draw(); return; }
+      const act = b.dataset.act;
+      if (act === 'add') { setMark(ids, 'add', allHave(ids, m => m.add) ? null : true); draw(); }
+      else if (act === 'hl') { setMark(ids, 'hl', allHave(ids, m => !!m.hl) ? null : hlColor); draw(); }
+      else if (act === 'tr') { if (xlOpen) { xlOpen = false; draw(); } else openXl(); }
+      else if (act === 'play') { closeTip(); playFromWord(wid); getSelection().removeAllRanges(); }
+    });
+    // scroll over the highlighter: next colour (as app.js)
+    wrap.addEventListener('wheel', e => {
+      if (!e.target.closest('.tt-hl-wrap')) return;
+      e.preventDefault(); e.stopPropagation();
+      const i = (HL_COLORS.indexOf(hlColor) + (e.deltaY > 0 ? 1 : -1) + HL_COLORS.length) % HL_COLORS.length;
+      hlColor = HL_COLORS[i]; store('cadence-hl-color', hlColor); draw();
+    }, { passive: false });
+    wrap.addEventListener('pointerleave', () => { if (!tipPinned) leaveSoon(); });
+    wrap.addEventListener('pointerenter', () => clearTimeout(leaveT));
+    wrap._openXl = openXl;
     return true;
   }
   function openTipFromSelection(force) {
@@ -473,8 +578,9 @@
     const text = sel.toString().replace(/\s+/g, ' ').trim();
     if (!text || text.length > 400) return false;
     if (!force && text === tipFor && tipEl) return true;
-    return openTip({ text, wid: selectedWordId(), rect: r.getBoundingClientRect(), pin: true, fromSel: true,
-      pause: inSubs || opt('tipWhilePlaying') === 'pause' });
+    if (force && text === tipFor && tipEl && tipEl._openXl) { tipEl._openXl(); return true; } // T on an open tooltip
+    return openTip({ text, ids: idsInRange(r), wid: selectedWordId(), rect: r.getBoundingClientRect(), pin: true, fromSel: true,
+      translate: force || inSubs, pause: inSubs || opt('tipWhilePlaying') === 'pause' });
   }
   // mouse: after the button comes up; touch: after the selection settles
   $('page').addEventListener('mouseup', () => setTimeout(() => {

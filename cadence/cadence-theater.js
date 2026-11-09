@@ -1,4 +1,4 @@
-// cadence-theater · 2026-11-08b
+// cadence-theater · 2026-11-09a
 //
 // The two ways to watch a video in Cadence, around one YouTube player that is
 // never moved or rebuilt (moving an iframe reloads it):
@@ -137,7 +137,7 @@
       shown = ids.slice();
       el.innerHTML = ids.map(lineHtml).join('');
       lineSpans.clear();
-      el.querySelectorAll('.cd-sw').forEach(s => lineSpans.set(s.dataset.w, s));
+      el.querySelectorAll('.cd-sw').forEach(s => { lineSpans.set(s.dataset.w, s); if (o.decorate) o.decorate(s); });
       const old = curWord; curWord = null; mark(old);
       if (mode === 'both') fillTranslations(ids);
     }

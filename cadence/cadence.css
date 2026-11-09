@@ -1,4 +1,4 @@
-/* cadence · 2026-11-09a — Cadence, the new reader page.
+/* cadence · 2026-11-09c — Cadence, the new reader page.
    Look carried over from app.css: the .rc toolbar, themes, mode panel, and the
    video panel (.yt-theater / .yt-stage), renamed cd-… so the two never collide. */
 :root {
@@ -210,3 +210,51 @@ body.cd-in-theater { overflow: hidden; }
 .cd-diag { position: fixed; left: 8px; bottom: 8px; z-index: 900; max-width: min(760px, 96vw); background: rgba(10,12,10,.88); color: #cfe8bf; border-radius: 8px; padding: 6px 8px; font: 11px/1.35 ui-monospace, monospace; }
 .cd-diag pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; }
 .cd-diag button { font: inherit; padding: 1px 6px; }
+/* Follow on but paused by a scroll: outlined, not filled — one click (or G) follows again */
+.mode-follow.held { background: transparent; color: var(--g-text); border-color: var(--g-line); border-style: dashed; }
+
+/* ── the tooltip: the reader's own, from app.css .sel-tt (9 Nov) ───────── */
+.cd-tt { position: fixed; z-index: 600; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.cd-tt.up { flex-direction: column-reverse; }          /* above the words: the bar sits nearest them */
+.cd-video .cd-tt { position: absolute; z-index: 30; }
+.cd-tt .sel-tt { display: inline-flex; background: var(--white); border: 1px solid #c4ccbb; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.20); padding: 3px; gap: 1px; opacity: .62; transition: opacity .14s; }
+.cd-tt .sel-tt:hover, .cd-tt:has(.cd-xl) .sel-tt, .cd-theater .cd-tt .sel-tt { opacity: 1; }
+.cd-tt .sel-tt button { font: 500 11px var(--sans); padding: 6px 10px; border-radius: 5px; border: none; background: none; color: var(--text2); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.cd-tt .sel-tt button:hover { background: var(--bg2); }
+.cd-tt .sel-tt button:disabled { opacity: .45; cursor: default; }
+.cd-tt .sel-tt button svg { width: 13px; height: 13px; }
+.cd-tt .sel-tt button.tt-add { color: var(--g-text); }
+.cd-tt .sel-tt button.tt-add:hover { background: var(--g-soft); }
+.cd-tt .sel-tt button.on { background: var(--g-soft); color: var(--g-text); box-shadow: inset 0 0 0 1px var(--g-line); }
+.cd-tt .tt-hl-wrap { position: relative; display: flex; align-items: center; }
+.cd-tt .tt-hl { padding: 6px 9px !important; }
+.cd-tt .hl-pen { display: inline-flex; border-bottom: 3px solid transparent; padding-bottom: 1px; }
+.cd-tt .hl-pen-yellow { border-color: #ffe14d; } .cd-tt .hl-pen-pink { border-color: #ff9ccb; } .cd-tt .hl-pen-blue { border-color: #6cc0ff; }
+.cd-tt .tt-colors { display: none; position: absolute; left: 100%; top: 50%; transform: translateY(-50%); flex-direction: column; gap: 7px; padding: 9px 10px; margin-left: 4px; background: var(--white); border: .5px solid var(--border2); border-radius: 8px; box-shadow: 0 3px 14px rgba(0,0,0,.12); z-index: 2; }
+.cd-tt .tt-hl-wrap:hover .tt-colors { display: flex; }
+.cd-tt .tt-colors .hl-line { width: 26px; height: 7px; border-radius: 3px; padding: 0 !important; }
+.cd-tt .tt-colors .hl-ln-yellow { background: #ffe14d !important; } .cd-tt .tt-colors .hl-ln-pink { background: #ff9ccb !important; } .cd-tt .tt-colors .hl-ln-blue { background: #6cc0ff !important; }
+.cd-tt .tt-colors .hl-line.on { box-shadow: 0 0 0 1.5px #fff, 0 0 0 3px var(--g-line); }
+
+/* the translation panel, from app.css .xlate-panel */
+.cd-xl { width: min(300px, calc(100vw - 16px)); background: var(--white); color: var(--text); border: .5px solid var(--border2); border-radius: 11px; box-shadow: 0 6px 26px rgba(0,0,0,.16); padding: 13px 15px; font: 14px/1.45 var(--sans); }
+.cd-theater .cd-xl { box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+.cd-xl-term { font: 600 15px/1.3 var(--serif); margin-bottom: 4px; }
+.cd-xl-main { font-weight: 600; color: var(--g-text); }
+.cd-xl-alt { font-size: 12.5px; color: var(--text2); margin-top: 4px; line-height: 1.4; }
+.cd-xl-pos { display: inline-block; font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin-right: 6px; }
+.cd-xl-wait { color: var(--text3); }
+.cd-xl-line { border-top: .5px solid var(--border); margin-top: 9px; padding-top: 7px; font-size: 12.5px; color: var(--text2); }
+.cd-xl-lbl { font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); margin-bottom: 2px; }
+.cd-xl-foot { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cd-xl-btn { display: inline-flex; align-items: center; gap: 5px; border: .5px solid var(--border2); background: var(--bg2); color: var(--text2); border-radius: 7px; padding: 5px 10px; font: 600 11.5px var(--sans); min-height: 30px; cursor: pointer; }
+.cd-xl-btn:hover { background: var(--g-soft); color: var(--g-text); border-color: var(--g-line); }
+.cd-xl-btn svg { width: 11px; height: 11px; }
+.cd-xl-src { font-size: 10.5px; color: var(--text3); white-space: nowrap; }
+
+/* session marks: Add underlines in green (as the Tooltip Lab), highlights as app.css */
+.cd-m-add { text-decoration: underline 2px var(--g-line, #7fb069); text-underline-offset: 4px; }
+.cd-m-hl-yellow { background: #fff3a8; } .cd-m-hl-pink { background: #ffc4e0; } .cd-m-hl-blue { background: #b8e0ff; }
+body.th-dark .cd-m-hl-yellow { background: rgba(255,235,120,.30); } body.th-dark .cd-m-hl-pink { background: rgba(255,150,200,.30); } body.th-dark .cd-m-hl-blue { background: rgba(120,190,255,.30); }
+.cd-sw.cd-m-hl-yellow, .cd-sw.cd-m-hl-pink, .cd-sw.cd-m-hl-blue { color: #1a1c19; }
+.cd-sw.cd-m-add { text-decoration-color: #a9d28d; }
