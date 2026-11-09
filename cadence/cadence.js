@@ -1,4 +1,4 @@
-// cadence · 2026-11-09c
+// cadence · 2026-11-09d
 //
 // Cadence, the plain reader: a page of text that a highlight follows while the sound plays.
 // Reads documents in the timed-text shape (cadence-shape.js). Three parts, each on its
@@ -290,7 +290,7 @@
     // Keep the sounding word inside the comfort band; place it a third of the way
     // down when it leaves. Checked when the word changes row, not every frame.
     function keepInView(el, jumped) {
-      if (!el || !followWanted || followPaused || held) return;
+      if (!el || !followWanted || followPaused || held || userScrolling()) return;
       const r = rel(el);
       if (r.top >= r.h * band[0] && r.bottom <= r.h * band[1]) return;
       scrollTo(scroller.scrollTop + r.top - r.h * 0.33, jumped ? 260 : 520);
@@ -305,15 +305,36 @@
     //   that stream is momentum and is ignored, until a 0.2 s gap ends it (or 2.5 s).
     // A new scroll after a gap counts straight away.
     let wheelSum = 0, wheelAt = -1e9, momentum = false, momentumFrom = 0;
+    // Scrolling yourself doesn't break follow while the sounding word is still on
+    // screen (Big T, 9 Nov): you can look a little up or down. Follow breaks once
+    // the word has left the visible text completely. While you're scrolling,
+    // follow doesn't pull the page back (it would fight your hand).
+    let userAt = -1e9;
+    const userScrolling = () => performance.now() - userAt < 900;
+    function wordForView() {
+      if (curWord) return page.word(curWord);
+      if (!index || !clock) return null;
+      const r = index.at(clock.time()), id = r.word || r.next;
+      return id ? page.word(id) : null;
+    }
+    function checkOut() {
+      if (!followWanted || followPaused) return;
+      const el = wordForView();
+      if (!el) return;
+      const r = rel(el);
+      if (r.bottom < 0 || r.top > r.h) { followPaused = true; emit(); }
+    }
     function userScrolled() {
       if (!followWanted || followPaused) return;
       cancelTween();
-      followPaused = true;
-      emit();
+      userAt = performance.now();
+      checkOut();
     }
+    scroller.addEventListener('scroll', () => { if (userScrolling()) checkOut(); }, { passive: true });
     function markResumed() {
       const now = performance.now();
       momentum = now - wheelAt < 250; momentumFrom = now; wheelSum = 0;
+      userAt = -1e9; // our own scroll back to the word must not count as yours
     }
     const onWheel = e => {
       const now = performance.now(), gap = now - wheelAt;

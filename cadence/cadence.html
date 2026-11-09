@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Cadence</title>
-<!-- cadence.html · 2026-11-09c · Contractor 20. Cadence, the new reader on timed text.
+<!-- cadence.html · 2026-11-09d · Contractor 20. Cadence, the new reader on timed text.
      Two ways to watch: the reader (video docked or floating over the text) and
      full screen with subtitles. app.js is untouched. Reads only; writes nothing. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -71,7 +71,7 @@
 
   // ── the page, the clock, the follower, the video, the subtitles ───────
   const page = TTPage($('page'));
-  let follow = null, clock = null, index = null, doc = null, yt = null, subs = null;
+  let follow = null, clock = null, index = null, doc = null, yt = null, subs = null, lastRow = null;
   const translate = CadenceTranslate({ target: store('cadence-target') || 'en' });
   const panel = CadencePanel({ scroller: $('scroll'), page: $('page'), onLayout: () => follow && follow.relayout() });
   panel.show(false);
@@ -182,10 +182,21 @@
   // For when an ad still slips through: play until one comes, then Copy.
   if (params.has('diag')) {
     const box = document.createElement('div'); box.className = 'cd-diag';
-    box.innerHTML = '<div><b>diag</b> <button>Copy</button> <button>Clear</button></div><pre></pre>';
+    box.innerHTML = '<div><b>diag</b> <button>Copy</button> <button>Clear</button> <button title="Download this text (its captions and times) as a file">Export text</button></div><pre></pre>';
     document.body.appendChild(box);
     const pre = box.querySelector('pre'), log = [];
-    const [copyB, clearB] = box.querySelectorAll('button');
+    const [copyB, clearB, expB] = box.querySelectorAll('button');
+    // Export: the text as stored (body + caption segments) and as Cadence reads it,
+    // so a chat can work on it (e.g. the cleanup bench) without the account.
+    expB.onclick = () => {
+      if (!doc) return;
+      const data = { exported: new Date().toISOString(), row: lastRow, doc };
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' }));
+      a.download = 'cadence-' + ((lastRow && lastRow.ext_id) || doc.id || 'text') + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+      expB.textContent = 'Exported'; setTimeout(() => expB.textContent = 'Export text', 1500);
+    };
     copyB.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(log.join('\n')); copyB.textContent = 'Copied'; setTimeout(() => copyB.textContent = 'Copy', 1200); };
     clearB.onclick = () => { log.length = 0; pre.textContent = ''; };
     setInterval(() => {
@@ -744,6 +755,7 @@
     const { data, error } = await sb.from('sources').select('ext_id,title,body,segments,video_id').eq('ext_id', extId).limit(1);
     const r = data && data[0];
     if (error || !r) { $('page').innerHTML = '<div class="cd-empty">Could not open this text.</div>'; return; }
+    lastRow = r;
     const d = TimedText.fromCaptions({ id: r.ext_id, body: r.body, segments: r.segments, videoId: r.video_id });
     if (r.video_id) openVideo(d, r.video_id, r.title);
     else { stopYt(); panel.show(false); open(d, null, r.title); }
